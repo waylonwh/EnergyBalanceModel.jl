@@ -2,3 +2,9 @@ name = "EnergyBalanceModel"
 uuid = "68dbb056-390c-4f33-8773-0304cbd749ae"
 authors = ["Navid C. Constantinou <navidcy@users.noreply.github.com>"]
 version = "0.1.0"
+
+[deps]
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+
+[compat]
+SparseArrays = "1.11.0"
