@@ -7,8 +7,10 @@ version = "0.1.0"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 NonlinearSolve = "8913a72c-1f9b-4ce2-8d82-65094dcecaec"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+StyledStrings = "f489334b-da3d-4c2e-b8f0-e476e12c162b"
 
 [compat]
 BenchmarkTools = "1.6.0"
 NonlinearSolve = "4.11.0"
 SparseArrays = "1.11.0"
+StyledStrings = "1.11.0"

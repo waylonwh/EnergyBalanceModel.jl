@@ -1,6 +1,9 @@
-a = 9
-println(a)
-addone!(a)
-println(a)
+let x = nothing
+    global func(a) = a+1
+    global function func(a, b)
+        return a+b
+    end
+end
 
-addone!(n) = n+=1
+@show func(3)
+@show func(3, 4)
