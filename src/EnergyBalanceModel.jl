@@ -7,7 +7,7 @@ import SparseArrays, Statistics
 
 export Parameters, SymbSet, VarVec, Variables, SpaceTime, Solutions, Forcing
 export default_params, miz_paramset, classic_paramset
-export get_defaultpar, get_diffop!, diffusion, D∇², annual_mean
+export get_defaultpar, diffusion, D∇², annual_mean
 
 const SymbSet = Set{Symbol}
 const VarVec = Vector{Float64}
@@ -22,12 +22,12 @@ macro asstruct(def::Expr)
         quote
             struct $name
                 dict::$dicttype
-
                 $name(args...) = new($dicttype(args...))
             end # struct $name
 
-            Base.getproperty(obj::$name, key::Symbol)::$type = getindex(obj.dict, key)
-            Base.setproperty!(obj::$name, key::Symbol, val::$type)::$type = setindex!(obj.dict, val, key)
+            Base.getproperty(obj::$name, key::Symbol)::$type = getindex(getfield(obj, :dict), key)
+            Base.setproperty!(obj::$name, key::Symbol, val::$type)::$dicttype = setindex!(getfield(obj, :dict), val, key)
+            Base.keys(obj::$name)::AbstractSet{Symbol} = keys(getfield(obj, :dict))
         end # quote
     ) # esc(
 end # macro asstruct
@@ -71,15 +71,11 @@ struct Forcing
 
     # constant forcing
     Forcing(base::Float64) =
-        new(true, base, base, base, (Inf, 0), (0.0, 0.0), (0, Inf, Inf, Inf, Inf, Inf))
+        new(true, base, base, base, (0, 0), (0.0, 0.0), (0, 0, 0, 0, 0, 0))
     # warming/cooling forcing
     function Forcing(
-        base::Float64,
-        peak::Float64,
-        cool::Float64,
-        holdyrs::Tuple{Int,Int},
-        rates::Tuple{Float64,Float64}
-    ) # Forcing(
+        base::Float64, peak::Float64, cool::Float64, holdyrs::Tuple{Int,Int}, rates::Tuple{Float64,Float64}
+    )
         domainvec = zeros(Int, 6)
         # hold at base
         @. domainvec[2:6] += holdyrs[1]
@@ -140,13 +136,9 @@ struct Solutions
     end # function emptysol
 
     function Solutions(
-        st::SpaceTime,
-        forcing::Forcing,
-        par::Parameters,
-        init::Variables,
-        vars::SymbSet,
+        st::SpaceTime, forcing::Forcing, par::Parameters, init::Variables, vars::SymbSet,
         lastonly::Bool=true;
-        debug::Expr=:nothing
+        debug::Expr=Expr(:block)
     ) # Solutions(
         if lastonly
             dur_store = 1
@@ -155,9 +147,9 @@ struct Solutions
             dur_store = st.dur
             ts = st.dt/2.0 : st.dt : st.dur - st.dt/2.0
         end # if lastonly, else
-        if debug !== :nothing
+        if debug != Expr(:block)
             push!(vars, :debug)
-        end
+        end # if debug != Expr(:block)
         # construct raw solution storage
         solraw = emptysol(vars, length(ts))
         # construct seasonal solution storage template
@@ -172,9 +164,9 @@ struct Solutions
             debug,
             solraw, # raw
             (
-                avg=deepcopy(seasonaltemp),
+                winter=deepcopy(seasonaltemp),
                 summer=deepcopy(seasonaltemp),
-                winter=deepcopy(seasonaltemp)
+                avg=deepcopy(seasonaltemp)
             ) # ( # seasonal
         ) # new(
     end # function Solutions
@@ -223,22 +215,29 @@ const classic_paramset = SymbSet(
 # Create a parameter dictionary from default values for a given Set
 function get_defaultpar(paramset::SymbSet)::Parameters
     setvec = collect(paramset)
-    return Parameters(setvec .=> getindex.(Ref(default_params), setvec))
+    return Parameters(setvec .=> getproperty.(Ref(default_params), setvec))
 end # function get_defaultpar
 
 # calculate diffusion operator matrix
-function get_diffop!(par::Parameters, st::SpaceTime)::Nothing
-    xb = st.dx : st.dx : 1.0 - st.dx
-    lambda = @. par.D/st.dx^2 * (1 - xb^2)
-    l1 = pushfirst!(-copy(lambda), 0.0)
-    l2 = push!(-copy(lambda), 0.0)
-    l3 = -l1 - l2
-    par.diffop = SparseArrays.spdiagm(-1 => -l1[2:st.nx], 0 => -l3, 1 => -l2[1:st.nx-1]) # !
-    return nothing
-end # function get_diffop!
+let opid = UInt64(0), diffop = SparseArrays.spzeros(Float64, 1, 1)
+    function get_diffop(st::SpaceTime, par::Parameters)::AbstractMatrix{Float64}
+        xb = st.dx : st.dx : 1.0 - st.dx
+        lambda = @. par.D/st.dx^2 * (1 - xb^2)
+        l1 = pushfirst!(-copy(lambda), 0.0)
+        l2 = push!(-copy(lambda), 0.0)
+        l3 = -l1 - l2
+        return SparseArrays.spdiagm(-1 => -l1[2:st.nx], 0 => -l3, 1 => -l2[1:st.nx-1])
+    end # function get_diffop!
 
-diffusion(f::VarVec, diffop::AbstractMatrix{Float64})::VarVec = diffop * f
-const D∇² = diffusion
+    global function diffusion(f::VT, st::SpaceTime, par::Parameters)::VT where {VT<:AbstractVector{<:Number}}
+        if opid != hash((st, par)) # new operator needed
+            diffop = get_diffop(st, par)
+            opid = hash((st, par))
+        end # if opid != hash((st, par))
+        return diffop * f
+    end # function diffusion
+    global const D∇² = diffusion
+end
 
 # calculate annual mean
 function annual_mean(annusol::Solutions)::Variables
@@ -246,10 +245,9 @@ function annual_mean(annusol::Solutions)::Variables
     means = Variables()
     foreach((var::Symbol -> setproperty!(means, var, Statistics.mean.(zip(annusol.raw.var...)))), keys(annusol.raw))
     return means
-end
+end # function annual_mean
 
 annual_mean(forcing::Forcing, st::SpaceTime, year::Int)::Float64 = Statistics.mean(forcing.(year-1 .+ st.t))
-
 
 end # module Infrastructure
 
@@ -279,10 +277,8 @@ mutable struct Progress
 
     function Progress(
         total::Int,
-        title::String="Progress",
-        freq::Float64=1.0,
-        infofeed::Function=(done::Bool->"");
-        width::Int=25
+        title::String="Progress", freq::Float64=1.0, infofeed::Function=(done::Bool->"");
+        width::Int=80
     )
         barwidth = width - (ndigits(total)*2 + 1) - 2 - 5 - 3 # current/total [=> ] xx.x%
         return new(
@@ -304,21 +300,27 @@ mutable struct Progress
 end # struct Progress
 
 function display_time(time::Float64)::String
-    timeint = round(Int, time)
-    min = fld(timeint, 60)
-    sec = timeint % 60
-    return string(min, ':', string(sec, pad=2))
+    if isfinite(time) # remaining time unknown
+        timeint = round(Int, time)
+        min = fld(timeint, 60)
+        sec = timeint % 60
+        str = string(min, ':', string(sec, pad=2))
+    else # !isfinite(time)
+        str = "-:--"
+    end # if isfinite(time), else
+    return str
 end # function display_time
 
 function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple{Vararg{Any}}=())::Nothing
     # internal update
     prog.current = current
     # initialise if not started
-    if prog.started === NaN
+    if isnan(prog.started)
         prog.started = time()
         prog.updated = time() - prog.freq # force immediate external update
-    end
+    end # if isnan(prog.started)
     # external update
+    isdone = false
     if (prog.current >= prog.total) || (time()-prog.updated >= prog.freq)
         now = time()
         # clear previous lines
@@ -328,73 +330,65 @@ function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple{Va
         end # while prog.lines > 0
         if prog.current > prog.total
             return nothing # avoid over-updating
-        end
+        end # if prog.current > prog.total
         # title
-        println(StyledStrings.styled"{bold,region,warning:$prog.title}")
+        println(StyledStrings.styled"{bold,region,warning:$(prog.title)}")
         prog.lines += 1
         # get bar and info strings
         elapsed = display_time(now - prog.started)
-        prog.last = prog.current
-        prog.updated = now
-        prog.updates += 1
         if prog.current == prog.total # done
             isdone = true
             # progress
             barstr = StyledStrings.annotatedstring(
                 # current/total
-                lpad(StyledStrings.styled"{success:$prog.current}", ndigits(prog.total)+1),
-                '/',
-                prog.total,
+                lpad(StyledStrings.styled"{success:$(prog.current)}", ndigits(prog.total)+1), '/', prog.total,
                 # bar
-                " [",
-                StyledStrings.styled"{success:$('='^prog.barwidth)}",
-                "] ",
+                " [", StyledStrings.styled"""{success:$(repeat("=", prog.barwidth))}""", "] ",
                 # percentage
-                lpad(
-                    StyledStrings.styled"{success:$(round(Int, prog.current/prog.total*100))%}",
-                    5
-                )
+                lpad(StyledStrings.styled"{success:$(round(Int, prog.current/prog.total*100))%}", 5)
             ) # StyledStrings.annotatedstring(
             # time and speed
             speed = prog.current / elapsed
             togo = display_time((prog.total - prog.current) / speed)
             prompt = StyledStrings.styled"{success:{bold:Done} ✓}"
         else # in progress
-            isdone = false
             # progress
             done = floor(Int, prog.current/prog.total * prog.barwidth) # number of chars to fill =
             barstr = StyledStrings.annotatedstring(
                 # current/total
-                lpad(StyledStrings.styled"{info:$prog.current}", ndigits(prog.total)+1),
-                '/',
-                prog.total,
+                lpad(StyledStrings.styled"{info:$(prog.current)}", ndigits(prog.total)+1), '/', prog.total,
                 # bar
                 " [",
-                StyledStrings.styled"{info:$('='^done)>}",
-                " "^(prog.barwidth-done-1),
+                StyledStrings.styled"""{info:$(repeat("=", done))>}""",
+                repeat(" ", max(prog.barwidth-done-1, 0)),
                 "] ",
                 # percentage
-                lpad(
-                    StyledStrings.styled"{info:$(round(prog.current/prog.total*100, digits=1))%}",
-                    5
-                )
+                lpad(StyledStrings.styled"{info:$(round(prog.current/prog.total*100, digits=1))%}", 5)
             ) # StyledStrings.annotatedstring(
             # time and speed
             speed = (prog.current-prog.last) / (now-prog.updated)
             togo = display_time((prog.total-prog.current) / speed)
-            prompt = StyledStrings.styled"{info:{bold:In progress} $prog.runners[mod1(prog.updates, 4)]}"
+            prompt = StyledStrings.styled"{info:{bold:In progress} $(prog.runners[mod1(prog.updates, 4)])}"
         end # if prog.current == prog.total, else
+        prog.last = prog.current
+        prog.updated = now
+        prog.updates += 1
+        if isnan(speed) # no speed info
+            spdstr = "-/sec"
+        elseif speed >= 1.0 # speed > 1.0
+            spdstr = string(round(speed, digits=2), "/sec")
+        else # speed < 1.0
+            spdstr = string(round(1.0/speed, digits=2), "sec/1")
+        end # if speed > 1.0, elseif, else
         timespeed = StyledStrings.annotatedstring(
             ' ',
             StyledStrings.styled"{$(isdone ? :success : :info):$elapsed}",
             "/",
             StyledStrings.styled"{note:-$togo}",
             ' ',
-            speed > 1.0 ?
-                string(round(speed, digits=2), "/sec") :
-                string(round(1.0 / speed, digits=2), "sec/1")
+            spdstr
         ) # StyledStrings.annotatedstring(
-        infopaddings = " "^(prog.width - length(timespeed) - length(prompt))
+        infopaddings = repeat(" ", max(prog.width - length(timespeed) - length(prompt), 1))
         # output bar and info
         println(barstr)
         prog.lines += 1
@@ -404,14 +398,14 @@ function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple{Va
     # update user custom info
     userstr = prog.infofeed(isdone, feedargs...)
     userstrvec = split(userstr)
-    annotatedvec = map((s::AbstractString -> StyledStrings.styled" {note:$s}"), userstrvec)
-    foreach(s::AbstractString -> println(s), annotatedvec)
+    annotatedvec = map((s -> StyledStrings.styled" {note:$s}"), userstrvec)
+    foreach(s -> println(s), annotatedvec)
     prog.lines += length(annotatedvec)
     return nothing
 end # function update!
 
 # conditional copy in place
-function condcopy!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number}
+function condcopy!(to::Vector{T}, from::F, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number, F<:Number}
     @. to[cond(ref)] = from
     return to
 end # function condcopy!
@@ -430,7 +424,6 @@ end # module Utilities
 
 
 module MIZEBM # EnergyBalanceModel.
-
 
 module Components # EnergyBalanceModel.MIZEBM.
 
@@ -453,36 +446,26 @@ coalbedo(x::VarVec, ice::Bool, par::Parameters)::VarVec = ice ? fill(par.ai, len
 water_temp(Ew::VarVec, phi::VarVec, par::Parameters)::VarVec = @. par.Tm + Ew / ((1-phi) * par.cw)
 
 let T0 = fill(0.0, 1) # let T0 be a persistent variable
-    ice_temp(T0::AbstractVector, par::Parameters)::VarVec = min.(T0, par.Tm)
+    (ice_temp(T0::VT, par::Parameters)::VT) where {VT<:AbstractVector{<:Number}} = min.(T0, par.Tm)
 
-    T0eq(
-        T0::AbstractVector,
-        args::@NamedTuple{
-            x::VarVec,
-            t::Float64,
-            h::VarVec,
-            Tw::VarVec,
-            phi::VarVec,
-            f::Float64,
-            par::Parameters
-        } # @NamedTuple{
-    )::AbstractVector =
+    (
+        T0eq(
+            T0::VT,
+            args::@NamedTuple{
+                x::VarVec, t::Float64, h::VarVec, Tw::VarVec, phi::VarVec, f::Float64, st::SpaceTime, par::Parameters
+            }
+        )::VT
+    ) where {VT<:AbstractVector{<:Number}} = # T0eq(
         @. begin # T0eq(
             args.par.k * (args.par.Tm - T0) / args.h + # vertical conduction in ice
-            coalbedo(args.x, true, args.par) * solar(args.x, args.t, args.par) + # solar
+            $coalbedo(args.x, true, args.par) * $solar(args.x, args.t, args.par) + # solar
             (-args.par.A) - args.par.B * (T0 - args.par.Tm) + # OLR
-            diffusion(Tbar(ice_temp(T0, args.par), args.Tw, args.phi), args.par.diffop) + # diffusion
+            $(diffusion(Tbar(ice_temp(T0, args.par), args.Tw, args.phi), args.st, args.par)) + # diffusion
             args.f; # forcing
-        end # @. begin
+        end # @. begin # T0eq() =
 
     global function ice_temp(
-        x::VarVec,
-        t::Float64,
-        h::VarVec,
-        Tw::VarVec,
-        phi::VarVec,
-        f::Float64,
-        par::Parameters
+        x::VarVec, t::Float64, h::VarVec, Tw::VarVec, phi::VarVec, f::Float64, st::SpaceTime, par::Parameters
     )::VarVec # ice_temp(
         iced = (h .> 0.0)
         h_pos = copy(h)
@@ -490,9 +473,9 @@ let T0 = fill(0.0, 1) # let T0 be a persistent variable
         zeronan!(Tw) # avoid NaNs in Tbar
         if length(T0) != length(x)
             T0 = fill(0.0, length(x))
-        end
+        end # if length(T0) != length(x)
         T0sol = NonlinearSolve.solve(
-            NonlinearSolve.NonlinearProblem(T0eq, T0, (; x, t, h=h_pos, Tw, phi, f, par))
+            NonlinearSolve.NonlinearProblem(T0eq, T0, (; x, t, h=h_pos, Tw, phi, f, st, par))
         )
         # TODO test for solving failure
         T0 = T0sol.u
@@ -502,7 +485,7 @@ let T0 = fill(0.0, 1) # let T0 be a persistent variable
     end # function ice_temp
 end # let T0
 
-function Tbar(Ti::VarVec, Tw::VarVec, phi::VarVec)::VarVec
+function Tbar(Ti::VT, Tw::VarVec, phi::VarVec)::VT where {VT<:AbstractVector{<:Number}}
     zeronan!(Ti)
     zeronan!(Tw)
     return @. phi * Ti + (1 - phi) * Tw
@@ -535,28 +518,21 @@ end # function num
 # lead region area
 function area_lead(D::VarVec, phi::VarVec, n::VarVec, par::Parameters)::VarVec
     ring = @. par.alpha * n * ((D + 2*par.rl)^2 - D^2)
-    return min.(ring, 1.0-phi)
+    return min.(ring, 1.0.-phi)
 end # function area_lead
 
 # fluxes
 function vert_flux(
-    x::VarVec,
-    t::Float64,
-    ice::Bool,
-    Ti::VarVec,
-    Tw::VarVec,
-    phi::VarVec,
-    f::Float64,
-    par::Parameters
+    x::VarVec, t::Float64, ice::Bool, Ti::VarVec, Tw::VarVec, phi::VarVec, f::Float64, st::SpaceTime, par::Parameters
 )::VarVec # vert_flux(
     zeronan!(Ti)
     zeronan!(Tw)
-    L = @. par.A + par.B * (Tbar(Ti, Tw, phi) - par.Tm) # OLR
-    return @. coalbedo(x, ice, par) * solar(x, t, par) - L + diffusion(Tbar(Ti, Tw, phi), par.diffop) + par.Fb + f
+    L = @. par.A + par.B * ($Tbar(Ti, Tw, phi) - par.Tm) # OLR
+    return @. $coalbedo(x, ice, par) * $solar(x, t, par) - L + $(diffusion(Tbar(Ti, Tw, phi), st, par)) + par.Fb + f
 end # function vert_flux
 
 function lat_flux(h::VarVec, D::VarVec, Tw::VarVec, phi::VarVec, par::Parameters)::VarVec
-    Flat = @. phi * h * par.Lf * wlat(Tw, par) * pi / (par.alpha * D)
+    Flat = @. phi * h * par.Lf * $wlat(Tw, par) * pi / (par.alpha * D)
     zeroref!(Flat, D)
     zeronan!(Flat, Tw)
     return Flat
@@ -616,16 +592,16 @@ forward_euler(var::VarVec, grad::VarVec, dt::Float64)::VarVec = @. var + grad * 
 
 function step!(
     t::Float64, f::Float64, vars::Variables, st::SpaceTime, par::Parameters;
-    debug::Expr=:nothing
+    debug::Expr=Expr(:block)
 )::Variables
     # update temperature
     vars.Tw = water_temp(vars.Ew, vars.phi, par)
-    vars.Ti = ice_temp(st.x, t, vars.h, vars.Tw, vars.phi, f, par)
+    vars.Ti = ice_temp(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par)
     # update floe number
     vars.n = num(vars.D, vars.phi, par)
     # calculate fluxes
-    Fvi = vert_flux(st.x, t, true, vars.Ti, vars.Tw, vars.phi, f, par)
-    Fvw = vert_flux(st.x, t, false, vars.Ti, vars.Tw, vars.phi, f, par)
+    Fvi = vert_flux(st.x, t, true, vars.Ti, vars.Tw, vars.phi, f, st, par)
+    Fvw = vert_flux(st.x, t, false, vars.Ti, vars.Tw, vars.phi, f, st, par)
     Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
@@ -642,39 +618,51 @@ function step!(
     # clamp!.(vars.D, par.Dmin, par.Dmax) # TODO test if needed
     # zeroref!(vars.D, vars.Ei) # TODO test if needed
     rh = forward_euler(vars.h, h_t(Fvi, par), st.dt)
-    clamp!.(rh, 0.0, Inf) # avoid overshooting to negative thickness
+    clamp!(rh, 0.0, Inf) # avoid overshooting to negative thickness
     vars.h = average(rh, par.hmin, vars.n, dn) # new pancakes
     # update concentration
     vars.phi = concentration(vars.Ei, vars.h, par)
     vars.E = @. vars.phi * vars.Ei + (1 - vars.phi) * vars.Ew
     vars.T = Tbar(vars.Ti, vars.Tw, vars.phi)
     # debug
-    if debug !== :nothing
+    if debug != Expr(:block)
         vars.debug = eval(debug)
-    end
+    end # if debug != Expr(:block)
     return vars
 end # function step
 
 function savesol!(sols::Solutions, annusol::Solutions, vars::Variables, ti::Int)::Solutions
-    varscopy = deepcopy(vars) # avoid reference issues
+    varscp = deepcopy(vars) # avoid reference issues
     # save raw data to annual
-    foreach((var::Symbol -> setindex!(annusol.raw, varscopy.var, mod1(ti, sols.spacetime.nt))), keys(annusol.raw))
+    foreach(
+        (
+            var::Symbol ->
+                setindex!(getproperty(annusol.raw, var), getproperty(varscp, var), mod1(ti, sols.spacetime.nt))
+        ),
+        keys(annusol.raw)
+    ) # foreach(
     # save raw data
     if !sols.lastonly # save all raw data
-        foreach((var::Symbol -> setindex!(sols.raw, varscopy.var, ti)), keys(sols.raw))
+        foreach(
+            (var::Symbol -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti)),
+            keys(sols.raw)
+        )
     elseif ti > length(sols.spacetime.T) - sols.spacetime.nt # save the raw data of the last year
         inx = ti - (length(sols.spacetime.T) - sols.spacetime.nt)
-        foreach((var::Symbol -> setindex!(sols.raw, varscopy.var, inx)), keys(sols.raw))
+        foreach(
+            (var::Symbol -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), inx)),
+            keys(sols.raw)
+        )
     end # if !sols.lastonly, elseif
     # save seasonal data
     if ti % sols.spacetime.nt == sols.spacetime.winter.inx
         foreach(
-            (var::Symbol -> setindex!(sols.seasonal.winter, varscopy.var, ceil(Int, ti))),
+            (var::Symbol -> setindex!(getproperty(sols.seasonal.winter, var), getproperty(varscp, var), ceil(Int, ti))),
             keys(sols.seasonal.winter)
         )
     elseif ti % sols.spacetime.nt == sols.spacetime.summer.inx
         foreach(
-            (var::Symbol -> setindex!(sols.seasonal.summer, varscopy.var, ceil(Int, ti))),
+            (var::Symbol -> setindex!(getproperty(sols.seasonal.summer, var), getproperty(varscp, var), ceil(Int, ti))),
             keys(sols.seasonal.summer)
         )
     elseif ti % sols.spacetime.nt == 0 # calculate annual average
@@ -682,8 +670,12 @@ function savesol!(sols::Solutions, annusol::Solutions, vars::Variables, ti::Int)
         foreach(
             (
                 var::Symbol ->
-                    setindex!(sols.seasonal.avg, means.var, ceil(Int, sols.spacetime.T[ti]))
-            ),
+                    setindex!(
+                        getproperty(sols.seasonal.avg, var),
+                        getproperty(means, var),
+                        ceil(Int, sols.spacetime.T[ti])
+                    ) # setindex!( # var ->
+            ), # (
             keys(sols.seasonal.avg)
         ) # foreach(
     end # if ti % sols.spacetime.nt == sols.spacetime.winter.inx, elseif*2
@@ -692,7 +684,7 @@ end # function savesol!
 
 function integrate(
     st::SpaceTime, forcing::Forcing, par::Parameters, init::Variables;
-    lastonly::Bool=true, debug::Expr=:nothing
+    lastonly::Bool=true, debug::Expr=Expr(:block)
 )::Solutions
     # initialise
     vars = deepcopy(init)
@@ -712,6 +704,9 @@ end # function integrate
 
 end # module Integration
 
+import .Integration: integrate
+
+export integrate
 
 end # module MIZEBM
 
