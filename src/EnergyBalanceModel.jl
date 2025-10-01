@@ -3,27 +3,13 @@ module EnergyBalanceModel # .
 
 module Infrastructure # EnergyBalanceModel.
 
-import SparseArrays
+import SparseArrays, Statistics
 
-export Parameters, ParamSet, VarVec, Variables, SpaceTime, Solutions, Forcing
+export Parameters, SymbSet, VarVec, Variables, SpaceTime, Solutions, Forcing
 export default_params, miz_paramset, classic_paramset
-export get_defaultpar, get_diffop!, diffusion, D∇²
+export get_defaultpar, get_diffop!, diffusion, D∇², annual_mean
 
 macro asstruct(def::Expr)
-    # check definition is of correct form
-    !(
-        def.head === :const && # .
-        def.args[1].head === :(=) && # const.
-        def.args[1].args[2].head === :curly && # const.=.
-        def.args[1].args[2].args[1] === :Dict && # const.=.curly
-        def.args[1].args[2].args[2] === :Symbol # const.=.curly
-    ) ? # !(
-        throw(
-            ArgumentError(
-                "@asstruct must be used on a definition of the form `const Name = Dict{Symbol,V}`"
-            )
-        ) : # throw(
-        nothing # ? :
     # parse definition
     name = def.args[1].args[1] # const.=
     type = def.args[1].args[2].args[3] # const.=.curly
@@ -37,7 +23,7 @@ macro asstruct(def::Expr)
     ) # esc(
 end # macro asstruct
 
-const ParamSet = Set{Symbol}
+const SymbSet = Set{Symbol}
 const VarVec = Vector{Float64}
 @asstruct const Parameters = Dict{Symbol,Float64}
 @asstruct const Variables = Dict{Symbol,VarVec}
@@ -52,14 +38,18 @@ struct SpaceTime
     dt::Float64 # timestep
     t::VarVec # time vector in a year
     T::AbstractRange{Float64} # time vector for entire simulation
+    winter::@NamedTuple{t::Float64,inx::Int}
+    summer::@NamedTuple{t::Float64,inx::Int}
 
-    function SpaceTime(nx::Int, nt::Int, dur::Int)
+    function SpaceTime(nx::Int, nt::Int, dur::Int, winter::Float64=0.26125, summer::Float64=0.77375)
         dx = 1.0 / nx
         x = collect(range(dx/2.0, 1.0 - dx/2.0, nx))
         dt = 1.0 / nt
         t = collect(range(dt/2.0, 1.0 - dt/2.0, nt))
         T = dt/2.0 : dt : dur - dt/2.0
-        return new(nx, dx, x, dur, nt, dt, t, T)
+        winterinx = round(Int, nt*winter)
+        summerinx = round(Int, nt*summer)
+        return new(nx, dx, x, dur, nt, dt, t, T, (t=winter, inx=winterinx), (t=summer, inx=summerinx))
     end # function SpaceTime
 end # struct SpaceTime
 
@@ -133,12 +123,12 @@ struct Solutions
     lastonly::Bool # store only last year of solution
     debug::Expr # store debug variables
     raw::Sol # solution storage
-    seasonal::@NamedTuple{avg::Sol, summer::Sol, winter::Sol} # average and seasonal solutions
+    seasonal::@NamedTuple{winter::Sol, summer::Sol, avg::Sol} # average and seasonal solutions
 
     # create empty solution storage with given variables and size
-    function emptysol(vars::ParamSet, size::Int)::Sol
+    function emptysol(vars::SymbSet, size::Int)::Sol
         soltemp = Sol()
-        foreach(var -> setproperty!(soltemp, var, Vector{VarVec}(undef, size)), vars)
+        foreach((var::Symbol -> setproperty!(soltemp, var, Vector{VarVec}(undef, size))), vars)
         return soltemp
     end # function emptysol
 
@@ -147,31 +137,38 @@ struct Solutions
         forcing::Forcing,
         par::Parameters,
         init::Variables,
-        vars::ParamSet,
+        vars::SymbSet,
         lastonly::Bool=true;
         debug::Expr=:nothing
     ) # Solutions(
-        dur_store = lastonly ? 1 : st.dur # duration of stored solution
-        ts = st.dt/2.0 : st.dt : dur_store - st.dt/2.0
-        debug !== :nothing ? push!(vars, :debug) : nothing
+        if lastonly
+            dur_store = 1
+            ts = st.dur-1.0 + st.dt/2.0 : st.dt : st.dur - st.dt/2.0
+        else # !lastonly
+            dur_store = st.dur
+            ts = st.dt/2.0 : st.dt : st.dur - st.dt/2.0
+        end # if lastonly, else
+        if debug !== :nothing
+            push!(vars, :debug)
+        end
         # construct raw solution storage
         solraw = emptysol(vars, length(ts))
         # construct seasonal solution storage template
         seasonaltemp = emptysol(vars, dur_store)
         return new(
-            st,
+            st, # spacetime
             ts,
             forcing,
-            par,
-            init,
+            par, # parameters
+            init, # initconds
             lastonly,
             debug,
-            solraw,
+            solraw, # raw
             (
                 avg=deepcopy(seasonaltemp),
                 summer=deepcopy(seasonaltemp),
                 winter=deepcopy(seasonaltemp)
-            ) # (
+            ) # ( # seasonal
         ) # new(
     end # function Solutions
 end # struct Solutions
@@ -206,18 +203,18 @@ const default_params = Parameters(
 ) # Parameters(
 
 # Parameters used in each model
-const miz_paramset = ParamSet(
+const miz_paramset = SymbSet(
     [
         :D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :Tm, :m1, :m2, :alpha,
         :rl, :Dmin, :Dmax, :hmin, :kappa
     ]
 )
-const classic_paramset = ParamSet(
+const classic_paramset = SymbSet(
     [:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :F, :cg, :tau]
 )
 
 # Create a parameter dictionary from default values for a given Set
-function get_defaultpar(paramset::ParamSet)::Parameters
+function get_defaultpar(paramset::SymbSet)::Parameters
     setvec = collect(paramset)
     return Parameters(setvec .=> getindex.(Ref(default_params), setvec))
 end # function get_defaultpar
@@ -236,6 +233,17 @@ end # function get_diffop!
 diffusion(f::VarVec, diffop::AbstractMatrix{Float64})::VarVec = diffop * f
 const D∇² = diffusion
 
+# calculate annual mean
+function annual_mean(annusol::Solutions)::Variables
+    # calculate annual mean for each variable except temperatures
+    means = Variables()
+    foreach((var::Symbol -> setproperty!(means, var, Statistics.mean.(zip(annusol.raw.var...)))), keys(annusol.raw))
+    return means
+end
+
+annual_mean(forcing::Forcing, st::SpaceTime, year::Int)::Float64 = Statistics.mean(forcing.(year-1 .+ st.t))
+
+
 end # module Infrastructure
 
 
@@ -243,6 +251,7 @@ module Utilities # EnergyBalanceModel.
 
 import StyledStrings
 
+export Progress, update!
 export condcopy!, zeronan!, zeroref!
 
 # progress bar
@@ -254,24 +263,47 @@ mutable struct Progress
     started::Float64 # start time
     updated::Float64 # last external update time
     freq::Float64 # external update frequency
-    infofeed::Tuple{Function,Tuple{Vararg{Any}}} # (function->String, (args...))
+    infofeed::Function # Function(done::Bool, args...)::AbstractString
     width::Int # number of characters wide, including progress texts
     barwidth::Int # width of the progress bar
     lines::Int # lines printed
+    runners::Tuple{Vararg{Char,4}} # characters to use as runners
+    updates::Int # number of external updates
 
     function Progress(
         total::Int,
         title::String="Progress",
         freq::Float64=1.0,
-        infofeed::Function=((_->""), ());
+        infofeed::Function=(done::Bool->"");
         width::Int=25
     )
-        barwidth = width - 1 - (ndigits(total)*2 + 1) - 6 # current/total [=> ] 100.0%
-        return new(title, total, -1, 0, NaN, NaN, freq, infofeed, width, barwidth, 0)
+        barwidth = width - (ndigits(total)*2 + 1) - 2 - 5 - 3 # current/total [=> ] xx.x%
+        return new(
+            title,
+            total,
+            -1, # current
+            0, # last
+            NaN, # started
+            NaN, # updated
+            freq,
+            infofeed,
+            width,
+            barwidth,
+            0, # lines
+            ('◓', '◑', '◒', '◐'), # runners
+            0 # updates
+        ) # new(
     end # function Progress
-end
+end # struct Progress
 
-function update!(prog::Progress, current::Int=prog.current+1)::Nothing
+function display_time(time::Float64)::String
+    timeint = round(Int, time)
+    min = fld(timeint, 60)
+    sec = timeint % 60
+    return string(min, ':', string(sec, pad=2))
+end # function display_time
+
+function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple{Vararg{Any}}=())::Nothing
     # internal update
     prog.current = current
     # initialise if not started
@@ -280,24 +312,94 @@ function update!(prog::Progress, current::Int=prog.current+1)::Nothing
         prog.updated = time() - prog.freq # force immediate external update
     end
     # external update
-    if time()-prog.updated >= prog.freq || prog.current == prog.total
-        colour = prog.current == prog.total ? "info" : "success"
+    if (prog.current >= prog.total) || (time()-prog.updated >= prog.freq)
+        now = time()
         # clear previous lines
         while prog.lines > 0
             print("\033[A\033[2K") # move up one line and clear the line
             prog.lines -= 1
         end # while prog.lines > 0
+        if prog.current > prog.total
+            return nothing # avoid over-updating
+        end
         # title
         println(StyledStrings.styled"{bold,region,warning:$prog.title}")
-        # progress
-        done = floor(Int, prog.current/prog.total * prog.barwidth) # number of chars to fill =
-        print(" "^(ndigits(prog.total)-ndigits(prog.current)+1)) # padding
-        print(StyledStrings.styled"{$colour:$prog.current}", '/', prog.total) # current/total
-        print(" [", StyledStrings.styled"{$colour:$('='^done)>}", " "^(prog.barwidth-done-1), "] ") # bar
-        println(StyledStrings.styled"{$colour:$(round(prog.current/prog.total*100, digits=1))}%") # percentage
-        # time and speed
-
-    end
+        prog.lines += 1
+        # get bar and info strings
+        elapsed = display_time(now - prog.started)
+        prog.last = prog.current
+        prog.updated = now
+        prog.updates += 1
+        if prog.current == prog.total # done
+            isdone = true
+            # progress
+            barstr = StyledStrings.annotatedstring(
+                # current/total
+                lpad(StyledStrings.styled"{success:$prog.current}", ndigits(prog.total)+1),
+                '/',
+                prog.total,
+                # bar
+                " [",
+                StyledStrings.styled"{success:$('='^prog.barwidth)}",
+                "] ",
+                # percentage
+                lpad(
+                    StyledStrings.styled"{success:$(round(Int, prog.current/prog.total*100))%}",
+                    5
+                )
+            ) # StyledStrings.annotatedstring(
+            # time and speed
+            speed = prog.current / elapsed
+            togo = display_time((prog.total - prog.current) / speed)
+            prompt = StyledStrings.styled"{success:{bold:Done} ✓}"
+        else # in progress
+            isdone = false
+            # progress
+            done = floor(Int, prog.current/prog.total * prog.barwidth) # number of chars to fill =
+            barstr = StyledStrings.annotatedstring(
+                # current/total
+                lpad(StyledStrings.styled"{info:$prog.current}", ndigits(prog.total)+1),
+                '/',
+                prog.total,
+                # bar
+                " [",
+                StyledStrings.styled"{info:$('='^done)>}",
+                " "^(prog.barwidth-done-1),
+                "] ",
+                # percentage
+                lpad(
+                    StyledStrings.styled"{info:$(round(prog.current/prog.total*100, digits=1))%}",
+                    5
+                )
+            ) # StyledStrings.annotatedstring(
+            # time and speed
+            speed = (prog.current-prog.last) / (now-prog.updated)
+            togo = display_time((prog.total-prog.current) / speed)
+            prompt = StyledStrings.styled"{info:{bold:In progress} $prog.runners[mod1(prog.updates, 4)]}"
+        end # if prog.current == prog.total, else
+        timespeed = StyledStrings.annotatedstring(
+            ' ',
+            StyledStrings.styled"{$(isdone ? :success : :info):$elapsed}",
+            "/",
+            StyledStrings.styled"{note:-$togo}",
+            ' ',
+            speed > 1.0 ?
+                string(round(speed, digits=2), "/sec") :
+                string(round(1.0 / speed, digits=2), "sec/1")
+        ) # StyledStrings.annotatedstring(
+        infopaddings = " "^(prog.width - length(timespeed) - length(prompt))
+        # output bar and info
+        println(barstr)
+        prog.lines += 1
+        println(timespeed, infopaddings, prompt)
+        prog.lines += 1
+    end # if (prog.current == prog.total) || (now-prog.updated >= prog.freq)
+    # update user custom info
+    userstr = prog.infofeed(isdone, feedargs...)
+    userstrvec = split(userstr)
+    annotatedvec = map((s::AbstractString -> StyledStrings.styled" {note:$s}"), userstrvec)
+    foreach(s::AbstractString -> println(s), annotatedvec)
+    prog.lines += length(annotatedvec)
     return nothing
 end # function update!
 
@@ -331,7 +433,8 @@ import NonlinearSolve
 
 export solar, coalbedo
 export water_temp, ice_temp, Tbar, T̄
-export wlat, vert_flux, lat_flux, split_psiEw, psinplus, area_lead
+export wlat, vert_flux, lat_flux, redistributeE
+export split_psiEw, psinplus, area_lead, average
 export concentration, num
 export Ei_t, Ew_t, h_t, D_t
 
@@ -378,7 +481,9 @@ let T0 = fill(0.0, 1) # let T0 be a persistent variable
         h_pos = copy(h)
         @. h_pos[!iced] = 1.0 # avoid division by zero
         zeronan!(Tw) # avoid NaNs in Tbar
-        (length(T0) != length(x)) ? (T0 = fill(0.0, length(x))) : nothing # initialise T0
+        if length(T0) != length(x)
+            T0 = fill(0.0, length(x))
+        end
         T0sol = NonlinearSolve.solve(
             NonlinearSolve.NonlinearProblem(T0eq, T0, (; x, t, h=h_pos, Tw, phi, f, par))
         )
@@ -409,7 +514,7 @@ function concentration(Ei::VarVec, h::VarVec, par::Parameters)::VarVec
     phi = @. -Ei / (par.Lf * h)
     zeroref!(phi, h)
     condcopy!(phi, 1.0, >(1.0)) # correct concentration
-    # phi = map(e -> Float64(e<0.0), Ei) # reproducing WE15
+    # phi = map((e -> Float64(e<0.0)), Ei) # reproducing WE15
     return phi
 end # function concentration
 
@@ -450,6 +555,18 @@ function lat_flux(h::VarVec, D::VarVec, Tw::VarVec, phi::VarVec, par::Parameters
     return Flat
 end # function lat_flux
 
+function redistributeE(
+    rEi::VarVec, rEw::VarVec
+)::@NamedTuple{Ei::VarVec, Ew::VarVec, psiEidt::VarVec, psiEwdt::VarVec}
+    cEi = clamp.(rEi, -Inf, 0.0)
+    cEw = clamp.(rEw, 0.0, Inf)
+    psiEidt = rEi .- cEi # +
+    psiEwdt = rEw .- cEw # -
+    Ei = cEi .+ psiEwdt # -
+    Ew = cEw .+ psiEidt # +
+    return (; Ei, Ew, psiEidt, psiEwdt)
+end # function redistributeE
+
 # redistribution functions
 function split_psiEw(psiEw::VarVec, phi::VarVec, Al::VarVec)::@NamedTuple{Ql::VarVec, Qp::VarVec}
     Ql = @. Al / (1-phi) * psiEw
@@ -459,6 +576,13 @@ function split_psiEw(psiEw::VarVec, phi::VarVec, Al::VarVec)::@NamedTuple{Ql::Va
 end # function split_psiEw
 
 psinplus(Qp::VarVec, par::Parameters)::VarVec = -Qp / (par.Lf * par.alpha * par.Dmin^2 * par.hmin)
+
+function average(f::VarVec, fn::Float64, n::VarVec, dn::VarVec)::VarVec
+    total = n .+ dn
+    avgd = @. (n*f + dn*fn) / total
+    zeroref!(avgd, total)
+    return avgd
+end # function average
 
 # differential equations
 Ei_t(phi::VarVec, Fvi::VarVec, Flat::VarVec)::VarVec = @. phi * Fvi + Flat
@@ -475,35 +599,108 @@ end # function D_t
 end # module Components
 
 
-module Integration # EnergyBalanceModel.MIZEBM. # TODO function signatures
+module Integration # EnergyBalanceModel.MIZEBM.
 
 using ...Infrastructure, ...Utilities, ..Components
 
 export integrate
 
-function initialise(
-    st::SpaceTime, forcing::Forcing, par::Parameters, init::Variables;
-    lastonly::Bool=true, progress::Bool=true, debug::Expr=:nothing
-)
-    sol = Solutions(st, forcing, par, init, miz_paramset, lastonly, debug=debug)
-    vals = deepcopy(init)
-    return nothing
-end # function initialise
+forward_euler(var::VarVec, grad::VarVec, dt::Float64)::VarVec = @. var + grad * dt
 
-function step()
+function step!(
+    t::Float64, f::Float64, vars::Variables, st::SpaceTime, par::Parameters;
+    debug::Expr=:nothing
+)::Variables
     # update temperature
-    Tw = water_temp(Ew, phi, par)
-    Ti = ice_temp(st.x, )
-    return nothing
+    vars.Tw = water_temp(vars.Ew, vars.phi, par)
+    vars.Ti = ice_temp(st.x, t, vars.h, vars.Tw, vars.phi, f, par)
+    # update floe number
+    vars.n = num(vars.D, vars.phi, par)
+    # calculate fluxes
+    Fvi = vert_flux(st.x, t, true, vars.Ti, vars.Tw, vars.phi, f, par)
+    Fvw = vert_flux(st.x, t, false, vars.Ti, vars.Tw, vars.phi, f, par)
+    Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
+    # update enthalpy
+    rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
+    rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)
+    Epsidt = redistributeE(rEi, rEw)
+    vars.Ei = Epsidt.Ei
+    vars.Ew = Epsidt.Ew
+    # update floe size and thickness
+    Al = area_lead(vars.D, vars.phi, vars.n, par)
+    Qlp = split_psiEw(Epsidt.psiEwdt/st.dt, vars.phi, Al)
+    dn = st.dt * psinplus(Qlp.Qp, par) # number of new pancakes
+    rD = forward_euler(vars.D, D_t(vars.h, vars.D, vars.Tw, vars.phi, Qlp.Ql, par), st.dt)
+    vars.D = average(rD, par.Dmin, vars.n, dn) # new pancakes
+    # clamp!.(vars.D, par.Dmin, par.Dmax) # TODO test if needed
+    # zeroref!(vars.D, vars.Ei) # TODO test if needed
+    rh = forward_euler(vars.h, h_t(Fvi, par), st.dt)
+    clamp!.(rh, 0.0, Inf) # avoid overshooting to negative thickness
+    vars.h = average(rh, par.hmin, vars.n, dn) # new pancakes
+    # update concentration
+    vars.phi = concentration(vars.Ei, vars.h, par)
+    vars.E = @. vars.phi * vars.Ei + (1 - vars.phi) * vars.Ew
+    vars.T = Tbar(vars.Ti, vars.Tw, vars.phi)
+    # debug
+    if debug !== :nothing
+        vars.debug = eval(debug)
+    end
+    return vars
 end # function step
+
+function savesol!(sols::Solutions, annusol::Solutions, vars::Variables, ti::Int)::Solutions
+    varscopy = deepcopy(vars) # avoid reference issues
+    # save raw data to annual
+    foreach((var::Symbol -> setindex!(annusol.raw, varscopy.var, mod1(ti, sols.spacetime.nt))), keys(annusol.raw))
+    # save raw data
+    if !sols.lastonly # save all raw data
+        foreach((var::Symbol -> setindex!(sols.raw, varscopy.var, ti)), keys(sols.raw))
+    elseif ti > length(sols.spacetime.T) - sols.spacetime.nt # save the raw data of the last year
+        inx = ti - (length(sols.spacetime.T) - sols.spacetime.nt)
+        foreach((var::Symbol -> setindex!(sols.raw, varscopy.var, inx)), keys(sols.raw))
+    end # if !sols.lastonly, elseif
+    # save seasonal data
+    if ti % sols.spacetime.nt == sols.spacetime.winter.inx
+        foreach(
+            (var::Symbol -> setindex!(sols.seasonal.winter, varscopy.var, ceil(Int, ti))),
+            keys(sols.seasonal.winter)
+        )
+    elseif ti % sols.spacetime.nt == sols.spacetime.summer.inx
+        foreach(
+            (var::Symbol -> setindex!(sols.seasonal.summer, varscopy.var, ceil(Int, ti))),
+            keys(sols.seasonal.summer)
+        )
+    elseif ti % sols.spacetime.nt == 0 # calculate annual average
+        means = annual_mean(annusol)
+        foreach(
+            (
+                var::Symbol ->
+                    setindex!(sols.seasonal.avg, means.var, ceil(Int, sols.spacetime.T[ti]))
+            ),
+            keys(sols.seasonal.avg)
+        ) # foreach(
+    end # if ti % sols.spacetime.nt == sols.spacetime.winter.inx, elseif*2
+    return sols
+end # function savesol!
 
 function integrate(
     st::SpaceTime, forcing::Forcing, par::Parameters, init::Variables;
-    lastonly::Bool=true, progress::Bool=true, debug::Expr   = :nothing
-)
+    lastonly::Bool=true, debug::Expr=:nothing
+)::Solutions
     # initialise
-
-    return nothing
+    vars = deepcopy(init)
+    solvars = SymbSet([:Ei, :Ew, :E, :Ti, :Tw, :T, :h, :D, :phi, :n])
+    sols = Solutions(st, forcing, par, init, solvars, lastonly, debug=debug)
+    annusol = Solutions(st, forcing, par, init, solvars, true, debug=debug) # for calculating annual means
+    progress = Progress(length(st.T), "Integrating")
+    update!(progress)
+    # loop over time
+    for ti in eachindex(st.T)
+        step!(st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par, debug=debug)
+        savesol!(sols, annusol, vars, ti)
+        update!(progress)
+    end # for ti in eachindex(st.T)
+    return sols
 end # function integrate
 
 end # module Integration
