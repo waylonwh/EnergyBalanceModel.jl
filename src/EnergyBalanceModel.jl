@@ -9,25 +9,32 @@ export Parameters, SymbSet, VarVec, Variables, SpaceTime, Solutions, Forcing
 export default_params, miz_paramset, classic_paramset
 export get_defaultpar, get_diffop!, diffusion, D∇², annual_mean
 
+const SymbSet = Set{Symbol}
+const VarVec = Vector{Float64}
+
 macro asstruct(def::Expr)
     # parse definition
-    name = def.args[1].args[1] # const.=
-    type = def.args[1].args[2].args[3] # const.=.curly
+    name = def.args[1] # =
+    dicttype = def.args[2] # =
+    type = def.args[2].args[3] # =.curly
     # generate code
     return esc(
         quote
-            $def
-            Base.getproperty(obj::$name, key::Symbol)::$type = getindex(obj, key)
-            Base.setproperty!(obj::$name, key::Symbol, val::$type)::$type = setindex!(obj, val, key)
+            struct $name
+                dict::$dicttype
+
+                $name(args...) = new($dicttype(args...))
+            end # struct $name
+
+            Base.getproperty(obj::$name, key::Symbol)::$type = getindex(obj.dict, key)
+            Base.setproperty!(obj::$name, key::Symbol, val::$type)::$type = setindex!(obj.dict, val, key)
         end # quote
     ) # esc(
 end # macro asstruct
 
-const SymbSet = Set{Symbol}
-const VarVec = Vector{Float64}
-@asstruct const Parameters = Dict{Symbol,Float64}
-@asstruct const Variables = Dict{Symbol,VarVec}
-@asstruct const Sol = Dict{Symbol,Vector{VarVec}} # solution storage unit
+@asstruct Parameters = Dict{Symbol,Float64}
+@asstruct Variables = Dict{Symbol,VarVec}
+@asstruct Sol = Dict{Symbol,Vector{VarVec}} # solution storage unit
 
 struct SpaceTime
     nx::Int # number of evenly spaced latitudinal gridboxes (equator to pole)
