@@ -230,7 +230,7 @@ diffusion =
             return SparseArrays.spdiagm(-1 => -l1[2:st.nx], 0 => -l3, 1 => -l2[1:st.nx-1])
         end # function get_diffop!
 
-        function diffusion(f::VT, st::SpaceTime, par::Parameters)::VT where {VT<:AbstractVector{<:Number}}
+        function diffusion(f::VT, st::SpaceTime, par::Parameters)::VT where {VT<:Vector{<:Number}}
             if opid != hash((st, par)) # new operator needed
                 diffop = get_diffop(st, par)
                 opid = hash((st, par))
@@ -401,15 +401,15 @@ function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple{Va
     userstr = prog.infofeed(isdone, feedargs...)
     userstrvec = split(userstr)
     annotatedvec = map((s -> StyledStrings.styled" {note:$s}"), userstrvec)
-    foreach(s -> println(s), annotatedvec)
+    foreach(s -> println(s), annotatedvec)ß
     prog.lines += length(annotatedvec)
     return nothing
 end # function update!
 
 # conditional copy in place
-function condcopy!(to::Vector{T}, from::F, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number, F<:Number}
+function condcopy!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number}
     @. to[cond(ref)] = from
-    return to
+    return toß
 end # function condcopy!
 
 function condcopy!(to::Vector{T}, from::Vector{T}, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number}
@@ -418,9 +418,9 @@ function condcopy!(to::Vector{T}, from::Vector{T}, cond::Function, ref::Vector{T
 end # function condcopy!
 
 # replace NaNs with zeros in place
-(zeronan!(v::Vector{T}, ref::Vector{T}=v)::Vector{T}) where {T<:Number} = condcopy!(v, 0.0, isnan, ref)
+(zeronan!(v::Vector{T}, ref::Vector{T}=v)::Vector{T}) where {T<:Number} = condcopy!(v, zero(T), isnan, ref)
 # replace entries with zeros in ref with zeros in place in v
-(zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where {T<:Number} = condcopy!(v, 0.0, iszero, ref)
+(zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where {T<:Number} = condcopy!(v, zero(T), iszero, ref)
 
 end # module Utilities
 
@@ -445,7 +445,7 @@ solar(x::VarVec, t::Float64, par::Parameters)::VarVec = @. par.S0 - par.S1 * x *
 coalbedo(x::VarVec, ice::Bool, par::Parameters)::VarVec = ice ? fill(par.ai, length(x)) : @. par.a0 - par.a2 * x^2
 
 # temperatures
-function Tbar(Ti::VT, Tw::VarVec, phi::VarVec)::VT where {VT<:AbstractVector{<:Number}}
+function Tbar(Ti::VT, Tw::VarVec, phi::VarVec)::VT where {VT<:Vector{<:Number}}
     zeronan!(Ti)
     zeronan!(Tw)
     return @. phi * Ti + (1 - phi) * Tw
@@ -456,14 +456,14 @@ water_temp(Ew::VarVec, phi::VarVec, par::Parameters)::VarVec = @. par.Tm + Ew / 
 
 ice_temp =
     let T0 = fill(0.0, 1) # let T0 be a persistent variable
-        (ice_temp(T0::VT, par::Parameters)::VT) where {VT<:AbstractVector{<:Number}} = min.(T0, par.Tm)
+        (ice_temp(T0::VT, par::Parameters)::VT) where {VT<:Vector{<:Number}} = min.(T0, par.Tm)
 
         function T0eq(
             T0::VT,
             args::@NamedTuple{
                 x::VarVec, t::Float64, h::VarVec, Tw::VarVec, phi::VarVec, f::Float64, st::SpaceTime, par::Parameters
             }
-        )::VT where {VT<:AbstractVector{<:Number}} # T0eq(
+        )::VT where {VT<:Vector{<:Number}} # T0eq(
             conduction = @. args.par.k * (args.par.Tm - T0) / args.h
             solarin = coalbedo(args.x, true, args.par) .* solar(args.x, args.t, args.par)
             olr = @. -args.par.A - args.par.B * (T0 - args.par.Tm)
