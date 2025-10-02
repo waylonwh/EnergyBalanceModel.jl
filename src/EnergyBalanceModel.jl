@@ -465,9 +465,9 @@ ice_temp =
             }
         )::VT where {VT<:AbstractVector{<:Number}} # T0eq(
             conduction = @. args.par.k * (args.par.Tm - T0) / args.h
-            solarin = M.coalbedo(args.x, true, args.par) .* M.solar(args.x, args.t, args.par)
+            solarin = coalbedo(args.x, true, args.par) .* solar(args.x, args.t, args.par)
             olr = @. -args.par.A - args.par.B * (T0 - args.par.Tm)
-            dlap = I.diffusion(M.Tbar(ice_temp(T0, args.par), args.Tw, args.phi), args.st, args.par)
+            dlap = diffusion(Tbar(ice_temp(T0, args.par), args.Tw, args.phi), args.st, args.par)
             forcing = args.f
             # if !(T0 isa Vector{Float64}); Main.infiltrate(@__MODULE__, Base.@locals, @__FILE__, @__LINE__); end # TODO remove
             return @. conduction + solarin + olr + dlap + forcing
