@@ -401,7 +401,7 @@ function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple{Va
     userstr = prog.infofeed(isdone, feedargs...)
     userstrvec = split(userstr)
     annotatedvec = map((s -> StyledStrings.styled" {note:$s}"), userstrvec)
-    foreach(s -> println(s), annotatedvec)ß
+    foreach(s -> println(s), annotatedvec)
     prog.lines += length(annotatedvec)
     return nothing
 end # function update!

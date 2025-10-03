@@ -2,7 +2,7 @@ using EnergyBalanceModel.Infrastructure, EnergyBalanceModel.MIZEBM
 using Infiltrator
 
 # st = SpaceTime(100, 2000, 30)
-st = SpaceTime(100, 50, 1)
+st = SpaceTime(100, 10, 1)
 forcing = Forcing(0.0)
 params = get_defaultpar(miz_paramset)
 init = Variables(
@@ -55,4 +55,3 @@ bar =
     end
 
 bar(3)
-@__MODULE__
