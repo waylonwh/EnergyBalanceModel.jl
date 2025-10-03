@@ -47,6 +47,16 @@ struct SpaceTime
     T::AbstractRange{Float64} # time vector for entire simulation
     winter::@NamedTuple{t::Float64,inx::Int}
     summer::@NamedTuple{t::Float64,inx::Int}
+    diffop::SparseArrays.SparseMatrixCSC{Float64,Int64} # difference operator matrix
+
+    function get_diffop(nx::Int, dx::Float64)::SparseArrays.SparseMatrixCSC{Float64,Int64}
+        xb = dx : dx: 1.0-dx
+        lambda = @. (1 - xb^2) / dx^2
+        l1 = pushfirst!(-copy(lambda), 0.0)
+        l2 = push!(-copy(lambda), 0.0)
+        l3 = -l1 - l2
+        return SparseArrays.spdiagm(-1 => -l1[2:nx], 0 => -l3, 1 => -l2[1:nx-1])
+    end # function get_diffop
 
     function SpaceTime(nx::Int, nt::Int, dur::Int, winter::Float64=0.26125, summer::Float64=0.77375)
         dx = 1.0 / nx
@@ -56,7 +66,8 @@ struct SpaceTime
         T = dt/2.0 : dt : dur - dt/2.0
         winterinx = round(Int, nt*winter)
         summerinx = round(Int, nt*summer)
-        return new(nx, dx, x, dur, nt, dt, t, T, (t=winter, inx=winterinx), (t=summer, inx=summerinx))
+        diffop = get_diffop(nx, dx)
+        return new(nx, dx, x, dur, nt, dt, t, T, (t=winter, inx=winterinx), (t=summer, inx=summerinx), diffop)
     end # function SpaceTime
 end # struct SpaceTime
 
@@ -219,33 +230,17 @@ function get_defaultpar(paramset::SymbSet)::Parameters
 end # function get_defaultpar
 
 # calculate diffusion operator matrix
-diffusion =
-    let opid = UInt64(0), diffop = SparseArrays.spzeros(Float64, 1, 1)
-        function get_diffop(st::SpaceTime, par::Parameters)::AbstractMatrix{Float64}
-            xb = st.dx : st.dx : 1.0 - st.dx
-            lambda = @. par.D/st.dx^2 * (1 - xb^2)
-            l1 = pushfirst!(-copy(lambda), 0.0)
-            l2 = push!(-copy(lambda), 0.0)
-            l3 = -l1 - l2
-            return SparseArrays.spdiagm(-1 => -l1[2:st.nx], 0 => -l3, 1 => -l2[1:st.nx-1])
-        end # function get_diffop!
-
-        function diffusion(f::VT, st::SpaceTime, par::Parameters)::VT where {VT<:Vector{<:Number}}
-            if opid != hash((st, par)) # new operator needed
-                diffop = get_diffop(st, par)
-                opid = hash((st, par))
-            end # if opid != hash((st, par))
-            return diffop * f
-        end # function diffusion
-    end # let opid, diffop # diffusion =
-
+@inline (diffusion(f::VT, st::SpaceTime, par::Parameters)::VT) where {VT<:Vector{<:Number}} = par.D * st.diffop * f
 const D∇² = diffusion
 
 # calculate annual mean
 function annual_mean(annusol::Solutions)::Variables
     # calculate annual mean for each variable except temperatures
     means = Variables()
-    foreach((var::Symbol -> setproperty!(means, var, Statistics.mean.(zip(getproperty(annusol.raw, var)...)))), keys(annusol.raw))
+    foreach(
+        (var::Symbol -> setproperty!(means, var, Statistics.mean.(zip(getproperty(annusol.raw, var)...)))),
+        keys(annusol.raw)
+    )
     return means
 end # function annual_mean
 
@@ -401,26 +396,26 @@ function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple{Va
     userstr = prog.infofeed(isdone, feedargs...)
     userstrvec = split(userstr)
     annotatedvec = map((s -> StyledStrings.styled" {note:$s}"), userstrvec)
-    foreach(s -> println(s), annotatedvec)
+    foreach(s::AbstractString -> println(s), annotatedvec)
     prog.lines += length(annotatedvec)
     return nothing
 end # function update!
 
 # conditional copy in place
-function condcopy!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number}
+@inline function condcopy!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number}
     @. to[cond(ref)] = from
     return to
 end # function condcopy!
 
-function condcopy!(to::Vector{T}, from::Vector{T}, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number}
+@inline function condcopy!(to::Vector{T}, from::Vector{T}, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number}
     @. to[cond(ref)] = from[cond(ref)]
     return to
 end # function condcopy!
 
 # replace NaNs with zeros in place
-(zeronan!(v::Vector{T}, ref::Vector{T}=v)::Vector{T}) where {T<:Number} = condcopy!(v, zero(T), isnan, ref)
+@inline (zeronan!(v::Vector{T}, ref::Vector{T}=v)::Vector{T}) where {T<:Number} = condcopy!(v, zero(T), isnan, ref)
 # replace entries with zeros in ref with zeros in place in v
-(zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where {T<:Number} = condcopy!(v, zero(T), iszero, ref)
+@inline (zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where {T<:Number} = condcopy!(v, zero(T), iszero, ref)
 
 end # module Utilities
 
@@ -433,19 +428,19 @@ using ...Infrastructure, ...Utilities
 
 import NonlinearSolve
 
-export solar, coalbedo
-export water_temp, ice_temp, Tbar, T̄
+export insolation, coalbedo
+export water_temp, solveTi, Tbar, T̄
 export wlat, vert_flux, lat_flux, redistributeE
 export split_psiEw, psinplus, area_lead, average
 export concentration, num
 export Ei_t, Ew_t, h_t, D_t
 
 # Functions of space and time
-solar(x::VarVec, t::Float64, par::Parameters)::VarVec = @. par.S0 - par.S1 * x * cos(2 * pi * t) - par.S2 * x^2
-coalbedo(x::VarVec, ice::Bool, par::Parameters)::VarVec = ice ? fill(par.ai, length(x)) : @. par.a0 - par.a2 * x^2
+@inline insolation(x::VarVec, t::Float64, par::Parameters)::VarVec = @. par.S0 - par.S1 * x * cos(2 * pi * t) - par.S2 * x^2
+@inline coalbedo(x::VarVec, ice::Bool, par::Parameters)::VarVec = ice ? fill(par.ai, length(x)) : @. par.a0 - par.a2 * x^2
 
 # temperatures
-function Tbar(Ti::VT, Tw::VarVec, phi::VarVec)::VT where {VT<:Vector{<:Number}}
+@inline function Tbar(Ti::VT, Tw::VarVec, phi::VarVec)::VT where {VT<:Vector{<:Number}}
     zeronan!(Ti)
     zeronan!(Tw)
     return @. phi * Ti + (1 - phi) * Tw
@@ -453,35 +448,34 @@ end # function Tbar
 const T̄ = Tbar
 
 water_temp(Ew::VarVec, phi::VarVec, par::Parameters)::VarVec = @. par.Tm + Ew / ((1-phi) * par.cw)
+@inline (ice_temp(T0::VT, par::Parameters)::VT) where {VT<:Vector{<:Number}} = min.(T0, par.Tm)
 
-ice_temp =
-    let T0 = fill(0.0, 1) # let T0 be a persistent variable
-        (ice_temp(T0::VT, par::Parameters)::VT) where {VT<:Vector{<:Number}} = min.(T0, par.Tm)
+function T0eq(
+    T0::VT,
+    args::@NamedTuple{
+        x::VarVec, t::Float64, h::VarVec, Tw::VarVec, phi::VarVec, f::Float64, st::SpaceTime, par::Parameters
+    }
+)::VT where {VT<:Vector{<:Number}} # T0eq(
+    # if !(T0 isa Vector{Float64}); Main.infiltrate(@__MODULE__, Base.@locals, @__FILE__, @__LINE__); end # TODO remove
+    conduction = @. args.par.k * (args.par.Tm - T0) / args.h
+    solar = coalbedo(args.x, true, args.par) .* insolation(args.x, args.t, args.par)
+    olr = @. -args.par.A - args.par.B * (T0 - args.par.Tm)
+    dlap = diffusion(Tbar(ice_temp(T0, args.par), args.Tw, args.phi), args.st, args.par)
+    forcing = args.f
+    return @. conduction + solar + olr + dlap + forcing
+end # function T0eq
 
-        function T0eq(
-            T0::VT,
-            args::@NamedTuple{
-                x::VarVec, t::Float64, h::VarVec, Tw::VarVec, phi::VarVec, f::Float64, st::SpaceTime, par::Parameters
-            }
-        )::VT where {VT<:Vector{<:Number}} # T0eq(
-            conduction = @. args.par.k * (args.par.Tm - T0) / args.h
-            solarin = coalbedo(args.x, true, args.par) .* solar(args.x, args.t, args.par)
-            olr = @. -args.par.A - args.par.B * (T0 - args.par.Tm)
-            dlap = diffusion(Tbar(ice_temp(T0, args.par), args.Tw, args.phi), args.st, args.par)
-            forcing = args.f
-            # if !(T0 isa Vector{Float64}); Main.infiltrate(@__MODULE__, Base.@locals, @__FILE__, @__LINE__); end # TODO remove
-            return @. conduction + solarin + olr + dlap + forcing
-        end # function T0eq
-
-        function ice_temp(
+solveTi =
+    let T0::VarVec = zeros(Float64, 100) # let T0 be a persistent variable
+        function solveTi(
             x::VarVec, t::Float64, h::VarVec, Tw::VarVec, phi::VarVec, f::Float64, st::SpaceTime, par::Parameters
-        )::VarVec # ice_temp(
+        )::VarVec # solveTi(
             iced = (h .> 0.0)
             h_pos = copy(h)
             @. h_pos[!iced] = 1.0 # avoid division by zero
             zeronan!(Tw) # avoid NaNs in Tbar
             if length(T0) != length(x)
-                T0 = fill(0.0, length(x))
+                T0 = zeros(length(x)) # initialise T0
             end # if length(T0) != length(x)
             T0sol = NonlinearSolve.solve(
                 NonlinearSolve.NonlinearProblem(T0eq, T0, (; x, t, h=h_pos, Tw, phi, f, st, par))
@@ -491,7 +485,7 @@ ice_temp =
             Ti = ice_temp(T0, par)
             @. Ti[!iced] = NaN # reset to NaN where no ice
             return Ti
-        end # function ice_temp
+        end # function solveTi
     end # let T0
 
 # lateral melt rate
@@ -530,7 +524,7 @@ function vert_flux(
     zeronan!(Ti)
     zeronan!(Tw)
     L = @. par.A + par.B * ($Tbar(Ti, Tw, phi) - par.Tm) # OLR
-    return @. $coalbedo(x, ice, par) * $solar(x, t, par) - L + $(diffusion(Tbar(Ti, Tw, phi), st, par)) + par.Fb + f
+    return @. $coalbedo(x, ice, par) * $insolation(x, t, par) - L + $(diffusion(Tbar(Ti, Tw, phi), st, par)) + par.Fb + f
 end # function vert_flux
 
 function lat_flux(h::VarVec, D::VarVec, Tw::VarVec, phi::VarVec, par::Parameters)::VarVec
@@ -598,7 +592,7 @@ function step!(
 )::Variables
     # update temperature
     vars.Tw = water_temp(vars.Ew, vars.phi, par)
-    vars.Ti = ice_temp(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par)
+    vars.Ti = solveTi(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par)
     # update floe number
     vars.n = num(vars.D, vars.phi, par)
     # calculate fluxes
@@ -636,13 +630,9 @@ end # function step
 function savesol!(sols::Solutions, annusol::Solutions, vars::Variables, ti::Int)::Solutions
     varscp = deepcopy(vars) # avoid reference issues
     # save raw data to annual
-    foreach(
-        (
-            var::Symbol ->
-                setindex!(getproperty(annusol.raw, var), getproperty(varscp, var), mod1(ti, sols.spacetime.nt))
-        ),
-        keys(annusol.raw)
-    ) # foreach(
+    foreach(keys(annusol.raw)) do var::Symbol
+        getproperty(annusol.raw, var)[mod1(ti, sols.spacetime.nt)] = getproperty(varscp, var)
+    end # foreach() do
     # save raw data
     if !sols.lastonly # save all raw data
         foreach(
@@ -658,42 +648,18 @@ function savesol!(sols::Solutions, annusol::Solutions, vars::Variables, ti::Int)
     end # if !sols.lastonly, elseif
     # save seasonal data
     if ti % sols.spacetime.nt == sols.spacetime.winter.inx
-        foreach(
-            (
-                var::Symbol ->
-                    setindex!(
-                        getproperty(sols.seasonal.winter, var),
-                        getproperty(varscp, var),
-                        ceil(Int, sols.spacetime.T[ti])
-                    ) # setindex!( # var ->
-            ), # (
-            keys(sols.seasonal.winter)
-        ) # foreach(
+        foreach(keys(sols.seasonal.winter)) do var::Symbol
+            getproperty(sols.seasonal.winter, var)[ceil(Int, sols.spacetime.T[ti])] = getproperty(varscp, var)
+        end # foreach() do
     elseif ti % sols.spacetime.nt == sols.spacetime.summer.inx
-        foreach(
-            (
-                var::Symbol ->
-                    setindex!(
-                        getproperty(sols.seasonal.summer, var),
-                        getproperty(varscp, var),
-                        ceil(Int, sols.spacetime.T[ti])
-                    ) # setindex!( # var ->
-            ), # (
-            keys(sols.seasonal.summer)
-        ) # foreach(
+        foreach(keys(sols.seasonal.summer)) do var::Symbol
+            getproperty(sols.seasonal.summer, var)[ceil(Int, sols.spacetime.T[ti])] = getproperty(varscp, var)
+        end # foreach() do
     elseif ti % sols.spacetime.nt == 0 # calculate annual average
         means = annual_mean(annusol)
-        foreach(
-            (
-                var::Symbol ->
-                    setindex!(
-                        getproperty(sols.seasonal.avg, var),
-                        getproperty(means, var),
-                        ceil(Int, sols.spacetime.T[ti])
-                    ) # setindex!( # var ->
-            ), # (
-            keys(sols.seasonal.avg)
-        ) # foreach(
+        foreach(keys(sols.seasonal.avg)) do var::Symbol
+            getproperty(sols.seasonal.avg, var)[ceil(Int, sols.spacetime.T[ti])] = getproperty(means, var)
+        end # foreach() do
     end # if ti % sols.spacetime.nt == sols.spacetime.winter.inx, elseif*2
     return sols
 end # function savesol!
