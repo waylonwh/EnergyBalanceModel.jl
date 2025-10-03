@@ -409,7 +409,7 @@ end # function update!
 # conditional copy in place
 function condcopy!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number}
     @. to[cond(ref)] = from
-    return toß
+    return to
 end # function condcopy!
 
 function condcopy!(to::Vector{T}, from::Vector{T}, cond::Function, ref::Vector{T}=to)::Vector{T} where {T<:Number}
