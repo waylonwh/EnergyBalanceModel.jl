@@ -60,96 +60,102 @@ function display_time(time::Float64)::String
     return str
 end # function display_time
 
-function update!(prog::Progress, current::Int=prog.current + 1, feedargs::Tuple{Vararg{Any}}=())::Nothing
-    # internal update
-    prog.current = current
-    # initialise if not started
-    if isnan(prog.started)
-        prog.started = time()
-        prog.updated = time() - prog.freq # force immediate external update
-    end # if isnan
-    # external update
+function output!(prog::Progress, feedargs::Tuple{Vararg{Any}}=())::Nothing
+    now = time()
     isdone = false
-    if (prog.current >= prog.total) || (time() - prog.updated >= prog.freq)
-        now = time()
-        # clear previous lines
-        while prog.lines > 0
-            print("\033[A\033[2K") # move up one line and clear the line
-            prog.lines -= 1
-        end # while >
-        if prog.current > prog.total
-            return nothing # avoid over-updating
-        end # if >
-        # title
-        println(StyledStrings.styled"{bold,region,warning:$(prog.title)}")
-        prog.lines += 1
-        # get bar and info strings
-        elapsed = display_time(now - prog.started)
-        if prog.current == prog.total # done
-            isdone = true
-            # progress
-            barstr = StyledStrings.annotatedstring(
-                # current/total
-                lpad(StyledStrings.styled"{success:$(prog.current)}", ndigits(prog.total) + 1), '/', prog.total,
-                # bar
-                " [", StyledStrings.styled"""{success:$(repeat("=", prog.barwidth))}""", "] ",
-                # percentage
-                lpad(StyledStrings.styled"{success:$(round(Int, prog.current/prog.total*100))%}", 5)
-            ) # StyledStrings.annotatedstring
-            # time and speed
-            speed = prog.current / (now - prog.started)
-            togo = display_time((prog.total - prog.current) / speed)
-            prompt = StyledStrings.styled"{success:{bold:Done} ✓}"
-        else # in progress
-            # progress
-            done = floor(Int, prog.current / prog.total * prog.barwidth) # number of chars to fill =
-            barstr = StyledStrings.annotatedstring(
-                # current/total
-                lpad(StyledStrings.styled"{info:$(prog.current)}", ndigits(prog.total) + 1), '/', prog.total,
-                # bar
-                " [",
-                StyledStrings.styled"""{info:$(repeat("=", done))>}""",
-                repeat(" ", max(prog.barwidth - done - 1, 0)),
-                "] ",
-                # percentage
-                lpad(StyledStrings.styled"{info:$(round(prog.current/prog.total*100, digits=1))%}", 5)
-            ) # StyledStrings.annotatedstring
-            # time and speed
-            speed = (prog.current - prog.last) / (now - prog.updated)
-            togo = display_time((prog.total - prog.current) / speed)
-            prompt = StyledStrings.styled"{info:{bold:In progress} $(prog.runners[mod1(prog.updates, 4)])}"
-        end # if ==, else
-        prog.last = prog.current
-        prog.updated = now
-        prog.updates += 1
-        if !isfinite(speed) # no speed info
-            spdstr = "-/sec"
-        elseif (speed >= 1.0) || (iszero(speed)) # speed > 1.0
-            spdstr = string(round(speed, digits=2), "/sec")
-        else # speed < 1.0
-            spdstr = string(round(1.0 / speed, digits=2), "sec/1")
-        end # if >, elseif, else
-        timespeed = StyledStrings.annotatedstring(
-            ' ',
-            StyledStrings.styled"{$(isdone ? :success : :info):$elapsed}",
-            "/",
-            StyledStrings.styled"{note:-$togo}",
-            ' ',
-            spdstr
+    # avoid over-updating
+    if prog.current > prog.total
+        return nothing
+    end # if >
+    # clear previous lines
+    while prog.lines > 0
+        print("\033[A\033[2K") # move up one line and clear the line
+        prog.lines -= 1 # !
+    end # while >
+    # title
+    println(StyledStrings.styled"{bold,region,warning:$(prog.title)}")
+    prog.lines += 1 # !
+    # get bar and info strings
+    elapsed = display_time(now - prog.started)
+    if prog.current >= prog.total # done
+        isdone = true
+        # progress
+        barstr = StyledStrings.annotatedstring(
+            # current/total
+            lpad(StyledStrings.styled"{success:$(prog.current)}", ndigits(prog.total) + 1), '/', prog.total,
+            # bar
+            " [", StyledStrings.styled"""{success:$(repeat("=", prog.barwidth))}""", "] ",
+            # percentage
+            lpad(StyledStrings.styled"{success:$(round(Int, prog.current/prog.total*100))%}", 5)
         ) # StyledStrings.annotatedstring
-        infopaddings = repeat(" ", max(prog.width - length(timespeed) - length(prompt), 1))
-        # output bar and info
-        println(barstr)
-        prog.lines += 1
-        println(timespeed, infopaddings, prompt)
-        prog.lines += 1
-    end # if ||
+        # time and speed
+        speed = prog.current / (now - prog.started)
+        togo = display_time((prog.total - prog.current) / speed)
+        prompt = StyledStrings.styled"{success:{bold:Done} ✓}"
+    else # in progress
+        # progress
+        done = floor(Int, prog.current / prog.total * prog.barwidth) # number of chars to fill =
+        barstr = StyledStrings.annotatedstring(
+            # current/total
+            lpad(StyledStrings.styled"{info:$(prog.current)}", ndigits(prog.total) + 1), '/', prog.total,
+            # bar
+            " [",
+            StyledStrings.styled"""{info:$(repeat("=", done))>}""",
+            repeat(" ", max(prog.barwidth - done - 1, 0)),
+            "] ",
+            # percentage
+            lpad(StyledStrings.styled"{info:$(round(prog.current/prog.total*100, digits=1))%}", 5)
+        ) # StyledStrings.annotatedstring
+        # time and speed
+        speed = (prog.current - prog.last) / (now - prog.updated)
+        togo = display_time((prog.total - prog.current) / speed)
+        prompt = StyledStrings.styled"{info:{bold:In progress} $(prog.runners[mod1(prog.updates, 4)])}"
+    end # if >=, else
+    prog.last = prog.current # !
+    prog.updated = now # !
+    prog.updates += 1 # !
+    if !isfinite(speed) # no speed info
+        spdstr = "-/sec"
+    elseif (speed >= 1.0) || (iszero(speed)) # speed > 1.0
+        spdstr = string(round(speed, digits=2), "/sec")
+    else # speed < 1.0
+        spdstr = string(round(1.0 / speed, digits=2), "sec/1")
+    end # if >, elseif, else
+    timespeed = StyledStrings.annotatedstring(
+        ' ',
+        StyledStrings.styled"{$(isdone ? :success : :info):$elapsed}",
+        "/",
+        StyledStrings.styled"{note:-$togo}",
+        ' ',
+        spdstr
+    ) # StyledStrings.annotatedstring
+    infopaddings = repeat(" ", max(prog.width - length(timespeed) - length(prompt), 1))
+    # output bar and info
+    println(barstr)
+    prog.lines += 1 # !
+    println(timespeed, infopaddings, prompt)
+    prog.lines += 1 # !
     # update user custom info
     userstr = prog.infofeed(isdone, feedargs...)
     userstrvec = split(userstr)
     annotatedvec = map((s -> StyledStrings.styled" {note:$s}"), userstrvec)
     foreach(s::AbstractString -> println(s), annotatedvec)
-    prog.lines += length(annotatedvec)
+    prog.lines += length(annotatedvec) # !
+    return nothing
+end # function output
+
+function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple{Vararg{Any}}=())::Nothing
+    # internal update
+    prog.current = current # !
+    # initialise if not started
+    if isnan(prog.started)
+        prog.started = time() # !
+        prog.updated = time() - prog.freq # force immediate external update # !
+    end # if isnan
+    # external update
+    if (prog.current >= prog.total) || (time() - prog.updated >= prog.freq)
+        output!(prog, feedargs)
+    end # if ||
     return nothing
 end # function update!
 
@@ -162,7 +168,7 @@ end # function inxmean
 
 # conditional copy in place
 @inline function condcopy!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where T
-    @. to[cond(ref)] = from
+    @. to[cond(ref)] = from # !
     return to
 end # function condcopy!
 
@@ -439,8 +445,8 @@ export Ei_t, Ew_t, h_t, D_t
 
 # temperatures
 @inline function Tbar!(Ti::VT, Tw::Vec, phi::Vec)::VT where VT<:Vector{<:Number}
-    Ti .*= phi
-    @. Ti += (1 - phi) * Tw
+    Ti .*= phi # !
+    @. Ti += (1 - phi) * Tw # !
     return Ti
 end
 @inline Tbar(Ti::Vec, Tw::Vec, phi::Vec)::Vec = Tbar!(copy(Ti), Tw, phi)
@@ -594,8 +600,6 @@ function step!(
     Epsidt = redistributeE(rEi, rEw)
     vars.Ei = Epsidt.Ei # !
     vars.Ew = Epsidt.Ew # !
-    # condcopy!(vars.Ei, 0.0, >(-1e-3)) # TODO test if needed
-    # condcopy!(vars.Ew, 0.0, <(1e-3)) # correct round off errors
     # update floe size and thickness
     Al = area_lead(vars.D, vars.phi, vars.n, par)
     Qlp = split_psiEw(Epsidt.psiEwdt/st.dt, vars.phi, Al)
@@ -631,7 +635,7 @@ function savesol!(
     ti = mod1(tinx, sols.spacetime.nt) # index of time in the year
     # save raw data to annual
     foreach(keys(annusol.raw)) do var::Symbol
-        getproperty(annusol.raw, var)[ti] = getproperty(varscp, var)
+        getproperty(annusol.raw, var)[ti] = getproperty(varscp, var) # !
     end # foreach do
     # save raw data
     if !sols.lastonly # save all raw data

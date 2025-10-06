@@ -4,7 +4,7 @@ using EnergyBalanceModel.Infrastructure, EnergyBalanceModel.MIZEBM
 
 # st = SpaceTime(100, 2000, 1)
 st = SpaceTime(100, 2000, 30)
-st = SpaceTime(100, 2000, 200)
+# st = SpaceTime(100, 2000, 200)
 forcing = Forcing(0.0)
 params = get_defaultpar(miz_paramset)
 init = Collection{Vec}(
@@ -17,7 +17,7 @@ init = Collection{Vec}(
 
 sols = integrate(st, forcing, params, init);
 
-# @profview sols = integrate(st, forcing, params, init)
+@profview sols = integrate(st, forcing, params, init)
 
 # using BenchmarkTools
 # @benchmark sols = integrate(st, forcing, params, init)
