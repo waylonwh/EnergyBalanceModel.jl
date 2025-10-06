@@ -6,7 +6,7 @@ module Utilities # EnergyBalanceModel.
 import StyledStrings, Statistics
 
 export Progress, update!
-export inxmean, condcopy!, zeronan!, zeroref!
+export inxmean, condcopy!, condcopy, zeroref!
 
 # progress bar
 mutable struct Progress
@@ -44,7 +44,7 @@ mutable struct Progress
             0, # lines
             ('◓', '◑', '◒', '◐'), # runners
             0 # updates
-        ) # new(
+        ) # new
     end # function Progress
 end # struct Progress
 
@@ -56,7 +56,7 @@ function display_time(time::Float64)::String
         str = string(min, ':', string(sec, pad=2))
     else # !isfinite(time)
         str = "-:--"
-    end # if isfinite(time), else
+    end # if isfinite, else
     return str
 end # function display_time
 
@@ -67,7 +67,7 @@ function update!(prog::Progress, current::Int=prog.current + 1, feedargs::Tuple{
     if isnan(prog.started)
         prog.started = time()
         prog.updated = time() - prog.freq # force immediate external update
-    end # if isnan(prog.started)
+    end # if isnan
     # external update
     isdone = false
     if (prog.current >= prog.total) || (time() - prog.updated >= prog.freq)
@@ -76,10 +76,10 @@ function update!(prog::Progress, current::Int=prog.current + 1, feedargs::Tuple{
         while prog.lines > 0
             print("\033[A\033[2K") # move up one line and clear the line
             prog.lines -= 1
-        end # while prog.lines > 0
+        end # while >
         if prog.current > prog.total
             return nothing # avoid over-updating
-        end # if prog.current > prog.total
+        end # if >
         # title
         println(StyledStrings.styled"{bold,region,warning:$(prog.title)}")
         prog.lines += 1
@@ -95,7 +95,7 @@ function update!(prog::Progress, current::Int=prog.current + 1, feedargs::Tuple{
                 " [", StyledStrings.styled"""{success:$(repeat("=", prog.barwidth))}""", "] ",
                 # percentage
                 lpad(StyledStrings.styled"{success:$(round(Int, prog.current/prog.total*100))%}", 5)
-            ) # StyledStrings.annotatedstring(
+            ) # StyledStrings.annotatedstring
             # time and speed
             speed = prog.current / (now - prog.started)
             togo = display_time((prog.total - prog.current) / speed)
@@ -113,12 +113,12 @@ function update!(prog::Progress, current::Int=prog.current + 1, feedargs::Tuple{
                 "] ",
                 # percentage
                 lpad(StyledStrings.styled"{info:$(round(prog.current/prog.total*100, digits=1))%}", 5)
-            ) # StyledStrings.annotatedstring(
+            ) # StyledStrings.annotatedstring
             # time and speed
             speed = (prog.current - prog.last) / (now - prog.updated)
             togo = display_time((prog.total - prog.current) / speed)
             prompt = StyledStrings.styled"{info:{bold:In progress} $(prog.runners[mod1(prog.updates, 4)])}"
-        end # if prog.current == prog.total, else
+        end # if ==, else
         prog.last = prog.current
         prog.updated = now
         prog.updates += 1
@@ -128,7 +128,7 @@ function update!(prog::Progress, current::Int=prog.current + 1, feedargs::Tuple{
             spdstr = string(round(speed, digits=2), "/sec")
         else # speed < 1.0
             spdstr = string(round(1.0 / speed, digits=2), "sec/1")
-        end # if speed > 1.0, elseif, else
+        end # if >, elseif, else
         timespeed = StyledStrings.annotatedstring(
             ' ',
             StyledStrings.styled"{$(isdone ? :success : :info):$elapsed}",
@@ -136,14 +136,14 @@ function update!(prog::Progress, current::Int=prog.current + 1, feedargs::Tuple{
             StyledStrings.styled"{note:-$togo}",
             ' ',
             spdstr
-        ) # StyledStrings.annotatedstring(
+        ) # StyledStrings.annotatedstring
         infopaddings = repeat(" ", max(prog.width - length(timespeed) - length(prompt), 1))
         # output bar and info
         println(barstr)
         prog.lines += 1
         println(timespeed, infopaddings, prompt)
         prog.lines += 1
-    end # if (prog.current == prog.total) || (now-prog.updated >= prog.freq)
+    end # if ||
     # update user custom info
     userstr = prog.infofeed(isdone, feedargs...)
     userstrvec = split(userstr)
@@ -156,7 +156,7 @@ end # function update!
 @inline function inxmean(vecvec::Vector{Vector{T}})::Vector{T} where T<:Number
     @boundscheck if !all(length.(vecvec) .== length(vecvec[1]))
         throw(BoundsError("All vectors must be the same length."))
-    end # if !all(length.(vecvec) .== length(vecvec[1]))
+    end # if !
     return  map((xi::Int -> Statistics.mean([vecvec[ti][xi] for ti in eachindex(vecvec)])), eachindex(vecvec[1]))
 end # function inxmean
 
@@ -166,13 +166,9 @@ end # function inxmean
     return to
 end # function condcopy!
 
-@inline function condcopy!(to::Vector{T}, from::Vector{T}, cond::Function, ref::Vector{T}=to)::Vector{T} where T
-    @. to[cond(ref)] = from[cond(ref)]
-    return to
-end # function condcopy!
+@inline (condcopy(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T}) where T =
+    condcopy!(copy(to), from, cond, ref)
 
-# replace NaNs with zeros in place
-@inline (zeronan!(v::Vector{T}, ref::Vector{T}=v)::Vector{T}) where T<:Number = condcopy!(v, zero(T), isnan, ref)
 # replace entries with zeros in ref with zeros in place in v
 @inline (zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where T<:Number = condcopy!(v, zero(T), iszero, ref)
 
@@ -185,38 +181,22 @@ using ..Utilities
 
 import SparseArrays
 
-export Floats, SymbSet, Vec, Vecs, SpaceTime, Solutions, Forcing
+export Vec, Collection, SpaceTime, Solutions, Forcing
 export default_params, miz_paramset, classic_paramset
-export get_defaultpar, diffusion, D∇², annual_mean
+export get_defaultpar, diffusion!, D∇²!, diffusion, D∇², annual_mean
 
-const SymbSet = Set{Symbol}
-const Vec = Vector{Float64}
+const Vec = Vector{Float64} # abbreviation for vector type used in model
 
-macro asstruct(def::Expr)
-    # parse definition
-    name = def.args[1] # =
-    dicttype = def.args[2] # =
-    valtype = def.args[2].args[3] # =.curly
-    # generate code
-    return esc(
-        quote
-            struct $name
-                dict::$dicttype
-                $name(args...) = new($dicttype(args...))
-            end # struct $name
+struct Collection{V}
+    dict::Dict{Symbol,V}
 
-            Base.getproperty(obj::$name, key::Symbol)::$valtype = getindex(getfield(obj, :dict), key)
-            Base.setproperty!(obj::$name, key::Symbol, val::$valtype)::$dicttype = setindex!(
-                getfield(obj, :dict), val, key
-            )
-            Base.keys(obj::$name)::AbstractSet{Symbol} = keys(getfield(obj, :dict))
-        end # quote
-    ) # esc(
-end # macro asstruct
+    Collection{V}(args...) where V = new(Dict{Symbol,V}(args...))
+end # struct Collection
 
-@asstruct Floats = Dict{Symbol,Float64}
-@asstruct Vecs = Dict{Symbol,Vec}
-@asstruct NestedVecs = Dict{Symbol,Vector{Vec}} # solution storage unit
+(Base.getproperty(coll::Collection{V}, key::Symbol)::V) where V = getindex(getfield(coll, :dict), key)
+(Base.setproperty!(coll::Collection{V}, key::Symbol, val::V)::Dict{Symbol,V}) where V =
+    setindex!(getfield(coll, :dict), val, key)
+(Base.keys(coll::Collection{V})::AbstractSet{Symbol}) where V = keys(getfield(coll, :dict))
 
 struct SpaceTime
     nx::Int # number of evenly spaced latitudinal gridboxes (equator to pole)
@@ -306,7 +286,7 @@ function (forcing::Forcing)(T::Float64)::Float64
             f = forcing.peak - forcing.rates[2] * (T-forcing.domain[4])
         else # hold at cool
             f = forcing.cool
-        end # if T < forcing.domain[2], elseif*3, else
+        end # if <, elseif*3, else
     end # if forcing.flat, else
     return f
 end # function (forcing::Forcing)
@@ -315,18 +295,20 @@ struct Solutions
     spacetime::SpaceTime # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing # climate forcing
-    parameters::Floats # model parameters
-    initconds::Vecs # initial conditions
+    parameters::Collection{Float64} # model parameters
+    initconds::Collection{Vec} # initial conditions
     lastonly::Bool # store only last year of solution
     debug::Expr # store debug variables
-    raw::NestedVecs # solution storage
-    seasonal::@NamedTuple{winter::NestedVecs, summer::NestedVecs, avg::NestedVecs} # seasonal peak and annual avg
+    raw::Collection{Vector{Vec}} # solution storage
+    seasonal::@NamedTuple{
+        winter::Collection{Vector{Vec}}, summer::Collection{Vector{Vec}}, avg::Collection{Vector{Vec}}
+    } # seasonal peak and annual avg
 
     function Solutions(
-        st::SpaceTime, forcing::Forcing, par::Floats, init::Vecs, vars::SymbSet,
+        st::SpaceTime, forcing::Forcing, par::Collection{Float64}, init::Collection{Vec}, vars::Set{Symbol},
         lastonly::Bool=true;
         debug::Expr=Expr(:block)
-    ) # Solutions(
+    ) # Solutions
         if lastonly
             dur_store = 1
             ts = st.dur-1.0 + st.dt/2.0 : st.dt : st.dur - st.dt/2.0
@@ -336,12 +318,12 @@ struct Solutions
         end # if lastonly, else
         if debug != Expr(:block)
             push!(vars, :debug)
-        end # if debug != Expr(:block)
+        end # if !=
         # construct raw solution storage
-        solraw = NestedVecs()
+        solraw = Collection{Vector{Vec}}()
         foreach((var::Symbol -> setproperty!(solraw, var, Vector{Vec}(undef, length(ts)))), vars)
         # construct seasonal solution storage template
-        seasonaltemp = NestedVecs()
+        seasonaltemp = Collection{Vector{Vec}}()
         foreach((var::Symbol -> setproperty!(seasonaltemp, var, Vector{Vec}(undef, st.dur))), vars)
         return new(
             st, # spacetime
@@ -357,12 +339,12 @@ struct Solutions
                 summer=deepcopy(seasonaltemp),
                 avg=deepcopy(seasonaltemp)
             ) # ( # seasonal
-        ) # new(
+        ) # new
     end # function Solutions
 end # struct Solutions
 
 # default parameter values
-const default_params = Floats(
+const default_params = Collection{Float64}(
     :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
     :A => 193.0, # OLR when T = T_m (W m^-2)
     :B => 2.1, # OLR temperature dependence (W m^-2 K^-1)
@@ -388,33 +370,37 @@ const default_params = Floats(
     :Dmax => 156, # largest floe length (m)
     :hmin => 0.1, # new pancake thickness (m)
     :kappa => 0.01  * 31536000 # floe welding parameter
-) # Floats(
+) # Collection{Float64}
 
-# Floats used in each model
-const miz_paramset = SymbSet(
+# parameters used in each model
+const miz_paramset = Set{Symbol}(
     [
         :D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :Tm, :m1, :m2, :alpha,
         :rl, :Dmin, :Dmax, :hmin, :kappa
     ]
 )
-const classic_paramset = SymbSet(
+const classic_paramset = Set{Symbol}(
     [:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :F, :cg, :tau]
 )
 
 # Create a parameter dictionary from default values for a given Set
-function get_defaultpar(paramset::SymbSet)::Floats
+function get_defaultpar(paramset::Set{Symbol})::Collection{Float64}
     setvec = collect(paramset)
-    return Floats(setvec .=> getproperty.(Ref(default_params), setvec))
+    return Collection{Float64}(setvec .=> getproperty.(Ref(default_params), setvec))
 end # function get_defaultpar
 
 # calculate diffusion operator matrix
-@inline (diffusion(f::VT, st::SpaceTime, par::Floats)::VT) where VT<:Vector{<:Number} = par.D * st.diffop * f
+@inline (diffusion!(base::VT, f::VT, st::SpaceTime, par::Collection{Float64})::VT) where VT<:Vector{<:Number} =
+    base .+= par.D * st.diffop * f
+@inline diffusion(f::Vec, st::SpaceTime, par::Collection{Float64})::Vec =
+    diffusion!(zeros(Float64, length(f)), f, st, par)
 const D∇² = diffusion
+const D∇²! = diffusion!
 
 # calculate annual mean
-function annual_mean(annusol::Solutions)::Vecs
+function annual_mean(annusol::Solutions)::Collection{Vec}
     # calculate annual mean for each variable except temperatures
-    means = Vecs()
+    means = Collection{Vec}()
     foreach(
         (var::Symbol -> setproperty!(means, var, inxmean(getproperty(annusol.raw, var)))),
         keys(annusol.raw)
@@ -435,73 +421,75 @@ using ...Infrastructure, ...Utilities
 
 import NonlinearSolve
 
-export insolation, coalbedo
-export water_temp, solveTi, Tbar, T̄
-export wlat, vert_flux, lat_flux, redistributeE
+export water_temp, solveTi, Tbar
+export vert_flux, lat_flux, redistributeE
 export split_psiEw, psinplus, area_lead, average
 export concentration, num
 export Ei_t, Ew_t, h_t, D_t
 
-# Functions of space and time
-@inline insolation(x::Vec, t::Float64, par::Floats)::Vec = @. par.S0 - par.S1 * x * cos(2 * pi * t) - par.S2 * x^2
-@inline coalbedo(x::Vec, ice::Bool, par::Floats)::Vec = ice ? fill(par.ai, length(x)) : @. par.a0 - par.a2 * x^2
+# solar radiation absorbed on ice and water
+@inline (solar!(base::VT, x::Vec, t::Float64, ::Val{true}, par::Collection{Float64})::VT) where VT<:Vector{<:Number} =
+    @. (base += par.ai * (par.S0 - par.S1 * x * cos(2 * pi * t) - par.S2 * x^2))
+@inline (solar!(base::VT, x::Vec, t::Float64, ::Val{false}, par::Collection{Float64})::VT) where VT<:Vector{<:Number} =
+    @. (base += (par.a0 - par.a2 * x^2) * (par.S0 - par.S1 * x * cos(2 * pi * t) - par.S2 * x^2))
+
+@inline solar(x::Vec, t::Float64, ice::Bool, par::Collection{Float64})::Vec = solar!(
+    zeros(Float64, length(x)), x, t, Val(ice), par
+)
 
 # temperatures
-@inline function Tbar(Ti::VT, Tw::Vec, phi::Vec)::VT where VT<:Vector{<:Number}
-    zeronan!(Ti)
-    zeronan!(Tw)
-    return @. phi * Ti + (1 - phi) * Tw
-end # function Tbar
+@inline function Tbar!(Ti::VT, Tw::Vec, phi::Vec)::VT where VT<:Vector{<:Number}
+    Ti .*= phi
+    @. Ti += (1 - phi) * Tw
+    return Ti
+end
+@inline Tbar(Ti::Vec, Tw::Vec, phi::Vec)::Vec = Tbar!(copy(Ti), Tw, phi)
 const T̄ = Tbar
+const T̄! = Tbar!
 
-water_temp(Ew::Vec, phi::Vec, par::Floats)::Vec = @. par.Tm + Ew / ((1-phi) * par.cw)
-@inline (ice_temp(T0::VT, par::Floats)::VT) where VT<:Vector{<:Number} = min.(T0, par.Tm)
+@inline water_temp(Ew::Vec, phi::Vec, par::Collection{Float64})::Vec = @. par.Tm + Ew / ((1-phi) * par.cw)
+@inline (ice_temp(T0::VT, par::Collection{Float64})::VT) where VT<:Vector{<:Number} = min.(T0, par.Tm)
 
 function T0eq(
     T0::VT,
     args::@NamedTuple{
-        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Floats
+        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection{Float64}
     }
-)::VT where VT<:Vector{<:Number} # T0eq(
-    conduction = @. args.par.k * (args.par.Tm - T0) / args.h
-    solar = coalbedo(args.x, true, args.par) .* insolation(args.x, args.t, args.par)
-    olr = @. -args.par.A - args.par.B * (T0 - args.par.Tm)
-    dlap = diffusion(Tbar(ice_temp(T0, args.par), args.Tw, args.phi), args.st, args.par)
-    forcing = args.f
-    return @. conduction + solar + olr + dlap + forcing
+)::VT where VT<:Vector{<:Number} # T0eq
+    vec = @. args.par.k * (args.par.Tm - T0) / args.h # SCM
+    solar!(vec, args.x, args.t, Val(true), args.par) # solar on ice
+    @. vec += (-args.par.A) - args.par.B * (T0 - args.par.Tm) # OLR
+    diffusion!(vec, Tbar!(ice_temp(T0, args.par), args.Tw, args.phi), args.st, args.par) # diffusion
+    vec .+= args.f # forcing
+    return vec
 end # function T0eq
 
 solveTi =
     let T0::Vec = zeros(Float64, 100) # let T0 be a persistent variable
-        function solveTi(x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Floats)::Vec
-            iced = (h .> 0.0)
-            h_pos = copy(h)
-            @. h_pos[!iced] = 1.0 # avoid division by zero
-            zeronan!(Tw) # avoid NaNs in Tbar
+        function solveTi(
+            x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection{Float64}
+        )::Vec
+            h1 = condcopy(h, 1.0, iszero) # avoid division by zero when solving T0
             if length(T0) != length(x)
-                T0 = zeros(length(x)) # initialise T0
-            end # if length(T0) != length(x)
+                T0 = zeros(Float64, length(x)) # initialise T0
+            end # if !=
             T0sol = NonlinearSolve.solve(
-                NonlinearSolve.NonlinearProblem(T0eq, T0, (; x, t, h=h_pos, Tw, phi, f, st, par)),
+                NonlinearSolve.NonlinearProblem(T0eq, T0, (; x, t, h=h1, Tw, phi, f, st, par)),
                 NonlinearSolve.TrustRegion()
             )
             # TODO test for solving failure
             T0 = T0sol.u
             Ti = ice_temp(T0, par)
-            @. Ti[!iced] = NaN # reset to NaN where no ice
+            zeroref!(Ti, h) # set Ti to 0 where no ice
             return Ti
         end # function solveTi
-    end # let T0
+    end # let T0 # solveTi
 
 # lateral melt rate
-function wlat(Tw::Vec, par::Floats)::Vec
-    w = @. par.m1 * (Tw - par.Tm^par.m2)
-    zeronan!(w, Tw)
-    return w
-end # function wlat
+wlat(Tw::Vec, par::Collection{Float64})::Vec = @. par.m1 * (Tw - par.Tm^par.m2)
 
 # concentration
-function concentration(Ei::Vec, h::Vec, par::Floats)::Vec
+function concentration(Ei::Vec, h::Vec, par::Collection{Float64})::Vec
     phi = @. -Ei / (par.Lf * h)
     zeroref!(phi, h)
     condcopy!(phi, 1.0, >(1.0)) # correct concentration
@@ -510,32 +498,29 @@ function concentration(Ei::Vec, h::Vec, par::Floats)::Vec
 end # function concentration
 
 # floe number
-function num(D::Vec, phi::Vec, par::Floats)::Vec
+function num(D::Vec, phi::Vec, par::Collection{Float64})::Vec
     n = @. phi / (par.alpha * D^2)
     zeroref!(n, D)
     return n
 end # function num
 
 # lead region area
-function area_lead(D::Vec, phi::Vec, n::Vec, par::Floats)::Vec
+function area_lead(D::Vec, phi::Vec, n::Vec, par::Collection{Float64})::Vec
     ring = @. par.alpha * n * ((D + 2*par.rl)^2 - D^2)
     return min.(ring, 1.0.-phi)
 end # function area_lead
 
 # fluxes
 function vert_flux(
-    x::Vec, t::Float64, ice::Bool, Ti::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Floats
-)::Vec # vert_flux(
-    zeronan!(Ti)
-    zeronan!(Tw)
+    x::Vec, t::Float64, ice::Bool, Ti::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection{Float64}
+)::Vec
     L = @. par.A + par.B * ($Tbar(Ti, Tw, phi) - par.Tm) # OLR
-    return @. $coalbedo(x, ice, par)*$insolation(x, t, par) - L + $(diffusion(Tbar(Ti, Tw, phi), st, par)) + par.Fb + f
+    return @. $solar(x, t, ice, par) - L + $(diffusion(Tbar(Ti, Tw, phi), st, par)) + par.Fb + f
 end # function vert_flux
 
-function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Floats)::Vec
+function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Collection{Float64})::Vec
     Flat = @. phi * h * par.Lf * $wlat(Tw, par) * pi / (par.alpha * D)
     zeroref!(Flat, D)
-    zeronan!(Flat, Tw)
     return Flat
 end # function lat_flux
 
@@ -557,7 +542,7 @@ function split_psiEw(psiEw::Vec, phi::Vec, Al::Vec)::@NamedTuple{Ql::Vec, Qp::Ve
     return (; Ql, Qp)
 end # function split_psiEw
 
-psinplus(Qp::Vec, par::Floats)::Vec = -Qp / (par.Lf * par.alpha * par.Dmin^2 * par.hmin)
+psinplus(Qp::Vec, par::Collection{Float64})::Vec = -Qp / (par.Lf * par.alpha * par.Dmin^2 * par.hmin)
 
 function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
     total = n .+ dn
@@ -569,8 +554,8 @@ end # function average
 # differential equations
 Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
 Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1 - phi) * Fvw - Flat
-h_t(Fvi::Vec, par::Floats)::Vec = -1/par.Lf * Fvi
-function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Floats)::Vec
+h_t(Fvi::Vec, par::Collection{Float64})::Vec = -1/par.Lf * Fvi
+function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64})::Vec
     lat_melt = -pi / (2 * par.alpha) * wlat(Tw, par)
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
@@ -590,11 +575,12 @@ export integrate
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad * dt
 
 function step!(
-    t::Float64, f::Float64, vars::Vecs, st::SpaceTime, par::Floats;
+    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Collection{Float64};
     debug::Expr=Expr(:block)
-)::Vecs
+)::Collection{Vec}
     # update temperature
     vars.Tw = water_temp(vars.Ew, vars.phi, par) # !
+    condcopy!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
     vars.Ti = solveTi(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par) # !
     # update floe number
     vars.n = num(vars.D, vars.phi, par) # !
@@ -608,36 +594,45 @@ function step!(
     Epsidt = redistributeE(rEi, rEw)
     vars.Ei = Epsidt.Ei # !
     vars.Ew = Epsidt.Ew # !
+    # condcopy!(vars.Ei, 0.0, >(-1e-3)) # TODO test if needed
+    # condcopy!(vars.Ew, 0.0, <(1e-3)) # correct round off errors
     # update floe size and thickness
     Al = area_lead(vars.D, vars.phi, vars.n, par)
     Qlp = split_psiEw(Epsidt.psiEwdt/st.dt, vars.phi, Al)
     dn = st.dt * psinplus(Qlp.Qp, par) # number of new pancakes
     rD = forward_euler(vars.D, D_t(vars.h, vars.D, vars.Tw, vars.phi, Qlp.Ql, par), st.dt)
     vars.D = average(rD, par.Dmin, vars.n, dn) # new pancakes # !
-    clamp!(vars.D, par.Dmin, par.Dmax) # TODO test if needed
+    clamp!(vars.D, par.Dmin, par.Dmax)
     zeroref!(vars.D, vars.Ei) # correct round off errors
     rh = forward_euler(vars.h, h_t(Fvi, par), st.dt)
     clamp!(rh, 0.0, Inf) # avoid overshooting to negative thickness
     vars.h = average(rh, par.hmin, vars.n, dn) # new pancakes # !
     # update concentration
     vars.phi = concentration(vars.Ei, vars.h, par) # !
+    # update total energy and temperature
+    zeroref!(vars.Ei, vars.h) # correct round off errors
     vars.E = @. vars.phi * vars.Ei + (1 - vars.phi) * vars.Ew # !
     vars.T = Tbar(vars.Ti, vars.Tw, vars.phi) # !
     # debug
     if debug != Expr(:block)
         vars.debug = eval(debug) # !
-    end # if debug != Expr(:block)
+    end # if !=
+    # set NaNs to no existence
+    condcopy!(vars.Ti, NaN, iszero, vars.Ei)
+    condcopy!(vars.Tw, NaN, isone, vars.Ew)
     return vars
 end # function step
 
-function savesol!(sols::Solutions, annusol::Solutions, vars::Vecs, tinx::Int)::Solutions
+function savesol!(
+    sols::Solutions, annusol::Solutions, vars::Collection{Vec}, tinx::Int
+)::Solutions
     varscp = deepcopy(vars) # avoid reference issues
     year = ceil(Int, sols.spacetime.T[tinx])
     ti = mod1(tinx, sols.spacetime.nt) # index of time in the year
     # save raw data to annual
     foreach(keys(annusol.raw)) do var::Symbol
         getproperty(annusol.raw, var)[ti] = getproperty(varscp, var)
-    end # foreach() do
+    end # foreach do
     # save raw data
     if !sols.lastonly # save all raw data
         foreach(
@@ -649,7 +644,7 @@ function savesol!(sols::Solutions, annusol::Solutions, vars::Vecs, tinx::Int)::S
             (var::Symbol -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti)),
             keys(sols.raw)
         )
-    end # if !sols.lastonly, elseif
+    end # if !, elseif
     # save seasonal data
     if ti == sols.spacetime.winter.inx
         foreach(
@@ -667,17 +662,17 @@ function savesol!(sols::Solutions, annusol::Solutions, vars::Vecs, tinx::Int)::S
             (var::Symbol -> setindex!(getproperty(sols.seasonal.avg, var), getproperty(means, var), year)),
             keys(sols.seasonal.avg)
         )
-    end # if ti % sols.spacetime.nt == sols.spacetime.winter.inx, elseif*2
+    end # if ==, elseif*2
     return sols
 end # function savesol!
 
 function integrate(
-    st::SpaceTime, forcing::Forcing, par::Floats, init::Vecs;
+    st::SpaceTime, forcing::Forcing, par::Collection{Float64}, init::Collection{Vec};
     lastonly::Bool=true, debug::Expr=Expr(:block)
 )::Solutions
     # initialise
     vars = deepcopy(init)
-    solvars = SymbSet([:Ei, :Ew, :E, :Ti, :Tw, :T, :h, :D, :phi, :n])
+    solvars = Set{Symbol}([:Ei, :Ew, :E, :Ti, :Tw, :T, :h, :D, :phi, :n])
     sols = Solutions(st, forcing, par, init, solvars, lastonly, debug=debug)
     annusol = Solutions(st, forcing, par, init, solvars, true, debug=debug) # for calculating annual means
     progress = Progress(length(st.T), "Integrating")
@@ -687,7 +682,7 @@ function integrate(
         step!(st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par, debug=debug)
         savesol!(sols, annusol, vars, ti)
         update!(progress)
-    end # for ti in eachindex(st.T)
+    end # for in
     return sols
 end # function integrate
 
