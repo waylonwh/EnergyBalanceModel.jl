@@ -691,6 +691,7 @@ module Classic # EnergyBalanceModel.
 
 using ..Infrastructure
 
+using AppleAccelerate
 import LinearAlgebra, SparseArrays
 
 let id::UInt64 = UInt64(0),
