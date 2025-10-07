@@ -17,7 +17,7 @@ mutable struct Progress
     started::Float64 # start time
     updated::Float64 # last external update time
     freq::Float64 # external update frequency
-    infofeed::Function # Function(done::Bool, args...)::AbstractString
+    infofeed::Function # Function(done::Bool, args...)::String
     width::Int # number of characters wide, including progress texts
     barwidth::Int # width of the progress bar
     lines::Int # lines printed
@@ -136,10 +136,10 @@ function output!(prog::Progress, feedargs::Tuple{Vararg{Any}}=())::Nothing
     println(timespeed, infopaddings, prompt)
     prog.lines += 1 # !
     # update user custom info
-    userstr = prog.infofeed(isdone, feedargs...)
+    userstr::String = prog.infofeed(isdone, feedargs...)
     userstrvec = split(userstr)
     annotatedvec = map((s -> StyledStrings.styled" {note:$s}"), userstrvec)
-    foreach(s::AbstractString -> println(s), annotatedvec)
+    foreach(s::Base.AnnotatedString{String} -> println(s), annotatedvec)
     prog.lines += length(annotatedvec) # !
     return nothing
 end # function output
@@ -185,11 +185,13 @@ module Infrastructure # EnergyBalanceModel.
 
 using ..Utilities
 
-import SparseArrays
+import EnergyBalanceModel
+import SparseArrays, Statistics
 
 export Vec, Collection, SpaceTime, Solutions, Forcing
-export default_params, miz_paramset, classic_paramset
-export get_defaultpar, diffusion!, D∇²!, diffusion, D∇², annual_mean
+export default_parval, miz_paramset, classic_paramset
+export default_parameters, diffusion!, D∇²!, diffusion, D∇², annual_mean
+export integrate
 
 const Vec = Vector{Float64} # abbreviation for vector type used in model
 
@@ -212,7 +214,7 @@ struct SpaceTime
     nt::Int # number of timesteps per year (limited by numerical stability)
     dt::Float64 # timestep
     t::Vec # time vector in a year
-    T::AbstractRange{Float64} # time vector for entire simulation
+    T::StepRangeLen{Float64,Base.TwicePrecision{Float64},Base.TwicePrecision{Float64},Int64} # full time series
     winter::@NamedTuple{t::Float64,inx::Int}
     summer::@NamedTuple{t::Float64,inx::Int}
     diffop::SparseArrays.SparseMatrixCSC{Float64,Int64} # difference operator matrix
@@ -317,7 +319,7 @@ struct Solutions
     ) # Solutions
         if lastonly
             dur_store = 1
-            ts = st.dur-1.0 + st.dt/2.0 : st.dt : st.dur - st.dt/2.0
+            ts::Vec = st.dur-1.0 + st.dt/2.0 : st.dt : st.dur - st.dt/2.0
         else # !lastonly
             dur_store = st.dur
             ts = st.dt/2.0 : st.dt : st.dur - st.dt/2.0
@@ -350,7 +352,7 @@ struct Solutions
 end # struct Solutions
 
 # default parameter values
-const default_params = Collection{Float64}(
+const default_parval = Collection{Float64}(
     :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
     :A => 193.0, # OLR when T = T_m (W m^-2)
     :B => 2.1, # OLR temperature dependence (W m^-2 K^-1)
@@ -380,20 +382,22 @@ const default_params = Collection{Float64}(
 
 # parameters used in each model
 const miz_paramset = Set{Symbol}(
-    [
+    (
         :D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :Tm, :m1, :m2, :alpha,
         :rl, :Dmin, :Dmax, :hmin, :kappa
-    ]
+    )
 )
 const classic_paramset = Set{Symbol}(
-    [:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :F, :cg, :tau]
+    (:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :F, :cg, :tau)
 )
 
 # Create a parameter dictionary from default values for a given Set
-function get_defaultpar(paramset::Set{Symbol})::Collection{Float64}
+function default_parameters(paramset::Set{Symbol})::Collection{Float64}
     setvec = collect(paramset)
-    return Collection{Float64}(setvec .=> getproperty.(Ref(default_params), setvec))
+    return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultpar
+default_parameters(model::Symbol)::Collection{Float64} =
+    model == :MIZ ? default_parameters(miz_paramset) : default_parameters(classic_paramset)
 
 # calculate diffusion operator matrix
 @inline (diffusion!(base::VT, f::VT, st::SpaceTime, par::Collection{Float64})::VT) where VT<:Vector{<:Number} =
@@ -416,22 +420,81 @@ end # function annual_mean
 
 annual_mean(forcing::Forcing, st::SpaceTime, year::Int)::Float64 = Statistics.mean(forcing.(year-1 .+ st.t))
 
+function savesol!(
+    sols::Solutions, annusol::Solutions, vars::Collection{Vec}, tinx::Int
+)::Solutions
+    varscp = deepcopy(vars) # avoid reference issues
+    year = ceil(Int, sols.spacetime.T[tinx])
+    ti = mod1(tinx, sols.spacetime.nt) # index of time in the year
+    # save raw data to annual
+    foreach(keys(annusol.raw)) do var::Symbol
+        getproperty(annusol.raw, var)[ti] = getproperty(varscp, var) # !
+    end # foreach do
+    # save raw data
+    if !sols.lastonly # save all raw data
+        foreach(
+            (var::Symbol -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), tinx)),
+            keys(sols.raw)
+        )
+    elseif tinx > length(sols.spacetime.T) - sols.spacetime.nt # save the raw data of the last year
+        foreach(
+            (var::Symbol -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti)),
+            keys(sols.raw)
+        )
+    end # if !, elseif
+    # save seasonal data
+    if ti == sols.spacetime.winter.inx
+        foreach(
+            (var::Symbol -> setindex!(getproperty(sols.seasonal.winter, var), getproperty(varscp, var), year)),
+            keys(sols.seasonal.winter)
+        )
+    elseif ti == sols.spacetime.summer.inx
+        foreach(
+            (var::Symbol -> setindex!(getproperty(sols.seasonal.summer, var), getproperty(varscp, var), year)),
+            keys(sols.seasonal.summer)
+        )
+    elseif ti == sols.spacetime.nt # calculate annual average
+        means = annual_mean(annusol)
+        foreach(
+            (var::Symbol -> setindex!(getproperty(sols.seasonal.avg, var), getproperty(means, var), year)),
+            keys(sols.seasonal.avg)
+        )
+    end # if ==, elseif*2
+    return sols
+end # function savesol!
+
+function integrate(
+    model::Symbol, st::SpaceTime, forcing::Forcing, par::Collection{Float64}, init::Collection{Vec};
+    lastonly::Bool=true, debug::Expr=Expr(:block)
+)::Solutions
+    # initialise
+    vars = deepcopy(init)
+    solvars = Set{Symbol}((:E, :T)) # always solve for these
+    if model === :MIZ # add MIZ variables
+        union!(solvars, Set{Symbol}((:Ei, :Ew, :Ti, :Tw, :h, :D, :phi, :n)))
+    end
+    Modu::Module = EnergyBalanceModel.eval(model)
+    sols = Solutions(st, forcing, par, init, solvars, lastonly, debug=debug)
+    annusol = Solutions(st, forcing, par, init, solvars, true, debug=debug) # for calculating annual means
+    progress = Progress(length(st.T), "Integrating")
+    update!(progress)
+    # loop over time
+    for ti in eachindex(st.T)
+        Modu.step!(st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par, debug=debug)
+        savesol!(sols, annusol, vars, ti)
+        update!(progress)
+    end # for in
+    return sols
+end # function integrate
+
 end # module Infrastructure
 
 
-module MIZEBM # EnergyBalanceModel.
+module MIZ # EnergyBalanceModel.
 
-module Components # EnergyBalanceModel.MIZEBM.
-
-using ...Infrastructure, ...Utilities
+using ..Infrastructure, ..Utilities
 
 import NonlinearSolve
-
-export water_temp, solveTi, Tbar
-export vert_flux, lat_flux, redistributeE
-export split_psiEw, psinplus, area_lead, average
-export concentration, num
-export Ei_t, Ew_t, h_t, D_t
 
 # solar radiation absorbed on ice and water
 @inline (solar!(base::VT, x::Vec, t::Float64, ::Val{true}, par::Collection{Float64})::VT) where VT<:Vector{<:Number} =
@@ -470,26 +533,29 @@ function T0eq(
     return vec
 end # function T0eq
 
-solveTi =
-    let T0::Vec = zeros(Float64, 100) # let T0 be a persistent variable
-        function solveTi(
-            x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection{Float64}
-        )::Vec
-            h1 = condcopy(h, 1.0, iszero) # avoid division by zero when solving T0
-            if length(T0) != length(x)
-                T0 = zeros(Float64, length(x)) # initialise T0
-            end # if !=
-            T0sol = NonlinearSolve.solve(
-                NonlinearSolve.NonlinearProblem(T0eq, T0, (; x, t, h=h1, Tw, phi, f, st, par)),
-                NonlinearSolve.TrustRegion()
-            )
-            # TODO test for solving failure
-            T0 = T0sol.u
-            Ti = ice_temp(T0, par)
-            zeroref!(Ti, h) # set Ti to 0 where no ice
-            return Ti
-        end # function solveTi
-    end # let T0 # solveTi
+let T0::Vec = zeros(Float64, 100) # let T0 be a persistent variable
+    function solveTi(
+        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection{Float64}
+    )::Vec
+        h1 = condcopy(h, 1.0, iszero) # avoid division by zero when solving T0
+        if length(T0) != length(x)
+            T0 = zeros(Float64, length(x)) # initialise T0
+        end # if !=
+        T0sol = NonlinearSolve.solve(
+            NonlinearSolve.NonlinearProblem(T0eq, T0, (; x, t, h=h1, Tw, phi, f, st, par)),
+            NonlinearSolve.TrustRegion()
+        )
+        # TODO test for solving failure
+        T0 = T0sol.u
+        Ti = ice_temp(T0, par)
+        zeroref!(Ti, h) # set Ti to 0 where no ice
+        return Ti
+    end # function solveTi
+
+    @eval (@__MODULE__) solveTi(
+        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection{Float64}
+    )::Vec = $solveTi(x, t, h, Tw, phi, f, st, par)
+end # let T0
 
 # lateral melt rate
 wlat(Tw::Vec, par::Collection{Float64})::Vec = @. par.m1 * (Tw - par.Tm^par.m2)
@@ -569,15 +635,6 @@ function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64
     return @. lat_melt + lat_grow + weld
 end # function D_t
 
-end # module Components
-
-
-module Integration # EnergyBalanceModel.MIZEBM.
-
-using ...Infrastructure, ...Utilities, ..Components
-
-export integrate
-
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad * dt
 
 function step!(
@@ -627,81 +684,100 @@ function step!(
     return vars
 end # function step
 
-function savesol!(
-    sols::Solutions, annusol::Solutions, vars::Collection{Vec}, tinx::Int
-)::Solutions
-    varscp = deepcopy(vars) # avoid reference issues
-    year = ceil(Int, sols.spacetime.T[tinx])
-    ti = mod1(tinx, sols.spacetime.nt) # index of time in the year
-    # save raw data to annual
-    foreach(keys(annusol.raw)) do var::Symbol
-        getproperty(annusol.raw, var)[ti] = getproperty(varscp, var) # !
-    end # foreach do
-    # save raw data
-    if !sols.lastonly # save all raw data
-        foreach(
-            (var::Symbol -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), tinx)),
-            keys(sols.raw)
-        )
-    elseif tinx > length(sols.spacetime.T) - sols.spacetime.nt # save the raw data of the last year
-        foreach(
-            (var::Symbol -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti)),
-            keys(sols.raw)
-        )
-    end # if !, elseif
-    # save seasonal data
-    if ti == sols.spacetime.winter.inx
-        foreach(
-            (var::Symbol -> setindex!(getproperty(sols.seasonal.winter, var), getproperty(varscp, var), year)),
-            keys(sols.seasonal.winter)
-        )
-    elseif ti == sols.spacetime.summer.inx
-        foreach(
-            (var::Symbol -> setindex!(getproperty(sols.seasonal.summer, var), getproperty(varscp, var), year)),
-            keys(sols.seasonal.summer)
-        )
-    elseif ti == sols.spacetime.nt # calculate annual average
-        means = annual_mean(annusol)
-        foreach(
-            (var::Symbol -> setindex!(getproperty(sols.seasonal.avg, var), getproperty(means, var), year)),
-            keys(sols.seasonal.avg)
-        )
-    end # if ==, elseif*2
-    return sols
-end # function savesol!
-
-function integrate(
-    st::SpaceTime, forcing::Forcing, par::Collection{Float64}, init::Collection{Vec};
-    lastonly::Bool=true, debug::Expr=Expr(:block)
-)::Solutions
-    # initialise
-    vars = deepcopy(init)
-    solvars = Set{Symbol}([:Ei, :Ew, :E, :Ti, :Tw, :T, :h, :D, :phi, :n])
-    sols = Solutions(st, forcing, par, init, solvars, lastonly, debug=debug)
-    annusol = Solutions(st, forcing, par, init, solvars, true, debug=debug) # for calculating annual means
-    progress = Progress(length(st.T), "Integrating")
-    update!(progress)
-    # loop over time
-    for ti in eachindex(st.T)
-        step!(st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par, debug=debug)
-        savesol!(sols, annusol, vars, ti)
-        update!(progress)
-    end # for in
-    return sols
-end # function integrate
-
-end # module Integration
-
-import .Integration: integrate
-
-export integrate
-
 end # module MIZEBM
 
 
-module ClassicEBM # EnergyBalanceModel.
+module Classic # EnergyBalanceModel.
+
+using ..Infrastructure
+
+import LinearAlgebra, SparseArrays
+
+let id::UInt64 = UInt64(0),
+    cg_tau::Float64 = NaN,
+    dt_tau::Float64 = NaN,
+    dc::Float64 = NaN,
+    kappa::Matrix{Float64} = Matrix{Float64}(undef, 100, 100),
+    S::Matrix{Float64} = Matrix{Float64}(undef, 100, 2001),
+    M::Float64 = NaN,
+    aw::Vec = Vec(undef, 100),
+    kLf::Float64 = NaN # let ,*8
+
+    function get_statics(st::SpaceTime, par::Collection{Float64})::@NamedTuple{
+        cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
+        S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64
+    }
+        if id != hash((st, par)) # recompute only if st or par changed
+            # Difinitions for implicit scheme for Tg
+            cg_tau = par.cg / par.tau
+            dt_tau = st.dt / par.tau
+            dc = dt_tau * cg_tau
+            kappa = (1+dt_tau) * LinearAlgebra.I(st.nx) - st.dt * par.D * st.diffop / par.cg
+            # Seasonal forcing [WE15 Eq. (3)]
+            S = repeat(par.S0 .- par.S2 * st.x.^2, 1, st.nt) -
+                repeat(par.S1 * cos.(2*pi*st.t'), st.nx, 1) .* repeat(st.x, 1, st.nt)
+            S = hcat(S, S[:,1])
+            # Further definitions
+            M = par.B + cg_tau
+            aw = @. par.a0 - par.a2 * st.x^2
+            kLf = par.k * par.Lf
+            # update id
+            id = hash((st, par))
+        end # if !=
+        return (; cg_tau, dt_tau, dc, kappa, S, M, aw, kLf)
+    end # function get_statics
+
+    @eval (@__MODULE__) get_statics(st::SpaceTime, par::Collection{Float64})::@NamedTuple{
+        cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
+        S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64
+    } = $get_statics(st, par) # @eval
+end # let id, cg_tau, dt_tau, dc, kappa, S, M, aw, kLf
+
+function step!(
+    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Collection{Float64};
+    debug::Expr=Expr(:block)
+)::Collection{Vec}
+    # get static variables
+    stat = get_statics(st, par)
+    # get time index
+    i = round(Int, mod1((t + st.dt/2.0) * st.nt, st.nt))
+    # forcing
+    alpha = @. stat.aw * (vars.E>0) + par.ai * (vars.E<0) # WE15 Eq. (4)
+    C = @. alpha*stat.S[:,i] + stat.cg_tau*vars.Tg - par.A + f
+    # surface temperature
+    T0 = @. C / (stat.M - stat.kLf/vars.E) # WE15 Eq. (A3)
+    vars.T = @. vars.E/par.cw * (vars.E>=0) + T0 * (vars.E<0)*(T0<0) # WE15 Eq. (9)
+    # Forward Euler for E
+    @. vars.E += st.dt * (C - stat.M*vars.T + par.Fb) # WE15 Eq. (A2)
+    # Implicit Euler for Tg
+    vars.Tg =
+        (stat.kappa - SparseArrays.spdiagm(stat.dc ./ (stat.M .- stat.kLf./vars.E) .* (T0.<0).*(vars.E.<0))) \
+        (
+            vars.Tg +
+            (
+                stat.dt_tau * (vars.E/par.cw.*(vars.E.>=0) +
+                (par.ai*view(stat.S, :, i+1) .- par.A .+ f) ./ (stat.M .- stat.kLf./vars.E) .* (T0.<0).*(vars.E.<0))
+            )
+        ) # () # vars.Tg # WE15 Eq. (A1)
+    # debug
+    if debug != Expr(:block)
+        vars.debug = eval(debug) # !
+    end # if !=
+    return vars
+end # function step
 
 end # module ClassicEBM
 
+
+module Plot # EnergyBalanceModel.
+
+end # module Plot
+
+
+using .Infrastructure
+
+export Vec, Collection, SpaceTime, Forcing, Solutions
+export miz_paramset, classic_paramset, default_parameters
+export integrate
 
 end # module EnergyBalanceModel
