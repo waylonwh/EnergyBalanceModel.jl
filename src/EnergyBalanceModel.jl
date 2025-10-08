@@ -6,7 +6,7 @@ module Utilities # EnergyBalanceModel.
 import StyledStrings, Statistics
 
 export Progress, update!
-export inxmean, condcopy!, condcopy, zeroref!
+export crossmean, condcopy!, condcopy, zeroref!
 
 # progress bar
 mutable struct Progress
@@ -138,7 +138,7 @@ function output!(prog::Progress, feedargs::Tuple{Vararg{Any}}=())::Nothing
     # update user custom info
     userstr::String = prog.infofeed(isdone, feedargs...)
     userstrvec = split(userstr)
-    annotatedvec = map((s -> StyledStrings.styled" {note:$s}"), userstrvec)
+    annotatedvec = map((s::String -> StyledStrings.styled" {note:$s}"), userstrvec)
     foreach(s::Base.AnnotatedString{String} -> println(s), annotatedvec)
     prog.lines += length(annotatedvec) # !
     return nothing
@@ -159,12 +159,12 @@ function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple{Va
     return nothing
 end # function update!
 
-@inline function inxmean(vecvec::Vector{Vector{T}})::Vector{T} where T<:Number
+@inline function crossmean(vecvec::Vector{Vector{T}})::Vector{T} where T<:Number
     @boundscheck if !all(length.(vecvec) .== length(vecvec[1]))
         throw(BoundsError("All vectors must be the same length."))
     end # if !
-    return  map((xi::Int -> Statistics.mean([vecvec[ti][xi] for ti in eachindex(vecvec)])), eachindex(vecvec[1]))
-end # function inxmean
+    return map((xi::Int -> Statistics.mean([vecvec[ti][xi] for ti in eachindex(vecvec)])), eachindex(vecvec[1]))
+end # function crossmean
 
 # conditional copy in place
 @inline function condcopy!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where T
@@ -190,7 +190,7 @@ import SparseArrays, Statistics
 
 export Vec, Collection, SpaceTime, Solutions, Forcing
 export default_parval, miz_paramset, classic_paramset
-export default_parameters, diffusion!, D∇²!, diffusion, D∇², annual_mean
+export default_parameters, get_diffop, diffusion!, D∇²!, diffusion, D∇², annual_mean
 export integrate
 
 const Vec = Vector{Float64} # abbreviation for vector type used in model
@@ -206,40 +206,45 @@ end # struct Collection
     setindex!(getfield(coll, :dict), val, key)
 (Base.keys(coll::Collection{V})::AbstractSet{Symbol}) where V = keys(getfield(coll, :dict))
 
-struct SpaceTime
+struct SpaceTime{F<:Function}
     nx::Int # number of evenly spaced latitudinal gridboxes (equator to pole)
-    dx::Float64 # grid box width
     x::Vec # grid
+    xmodifier::F # function to modify x grid
     dur::Int # duration of simulation in years
     nt::Int # number of timesteps per year (limited by numerical stability)
     dt::Float64 # timestep
     t::Vec # time vector in a year
     T::StepRangeLen{Float64,Base.TwicePrecision{Float64},Base.TwicePrecision{Float64},Int64} # full time series
-    winter::@NamedTuple{t::Float64,inx::Int}
-    summer::@NamedTuple{t::Float64,inx::Int}
-    diffop::SparseArrays.SparseMatrixCSC{Float64,Int64} # difference operator matrix
+    winter::@NamedTuple{t::Float64, inx::Int}
+    summer::@NamedTuple{t::Float64, inx::Int}
 
-    function get_diffop(nx::Int, dx::Float64)::SparseArrays.SparseMatrixCSC{Float64,Int64}
-        xb = dx : dx: 1.0-dx
-        lambda = @. (1 - xb^2) / dx^2
-        l1 = pushfirst!(-copy(lambda), 0.0)
-        l2 = push!(-copy(lambda), 0.0)
-        l3 = -l1 - l2
-        return SparseArrays.spdiagm(-1 => -l1[2:nx], 0 => -l3, 1 => -l2[1:nx-1])
-    end # function get_diffop
-
-    function SpaceTime(nx::Int, nt::Int, dur::Int, winter::Float64=0.26125, summer::Float64=0.77375)
-        dx = 1.0 / nx
-        x = collect(range(dx/2.0, 1.0 - dx/2.0, nx))
+    function SpaceTime{F}(
+        xrange::Tuple{Float64,Float64}, nx::Int, nt::Int, dur::Int;
+        winter::Float64=0.26125, summer::Float64=0.77375
+    ) where F<:Function
+        dx = (xrange[2]-xrange[1]) / nx
+        x = F.instance.(collect(dx/2.0 : dx : xrange[2] - dx/2.0))
+        xmodifier = F.instance
         dt = 1.0 / nt
         t = collect(range(dt/2.0, 1.0 - dt/2.0, nt))
         T = dt/2.0 : dt : dur - dt/2.0
         winterinx = round(Int, nt*winter)
         summerinx = round(Int, nt*summer)
-        diffop = get_diffop(nx, dx)
-        return new(nx, dx, x, dur, nt, dt, t, T, (t=winter, inx=winterinx), (t=summer, inx=summerinx), diffop)
+        return new{F}(
+            nx, x, xmodifier, dur, nt, dt, t, T, (t=winter, inx=winterinx), (t=summer, inx=summerinx)
+        )
     end # function SpaceTime
-end # struct SpaceTime
+end # struct SpaceTime{F<:Function}
+
+SpaceTime(
+    ::typeof(identity), nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375
+) = SpaceTime{typeof(identity)}((0.0, 1.0), nx, nt, dur, winter=winter, summer=summer)
+SpaceTime(
+    ::typeof(sin), nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375
+) = SpaceTime{typeof(sin)}((0.0, pi/2.0), nx, nt, dur, winter=winter, summer=summer)
+SpaceTime(
+    nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375
+) = SpaceTime(identity, nx, nt, dur, winter=winter, summer=summer)
 
 struct Forcing
     flat::Bool # forcing is always at base
@@ -300,7 +305,7 @@ function (forcing::Forcing)(T::Float64)::Float64
 end # function (forcing::Forcing)
 
 struct Solutions
-    spacetime::SpaceTime # space and time which solutions are defined on
+    spacetime::SpaceTime{<:Function} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing # climate forcing
     parameters::Collection{Float64} # model parameters
@@ -313,7 +318,7 @@ struct Solutions
     } # seasonal peak and annual avg
 
     function Solutions(
-        st::SpaceTime, forcing::Forcing, par::Collection{Float64}, init::Collection{Vec}, vars::Set{Symbol},
+        st::SpaceTime{<:Function}, forcing::Forcing, par::Collection{Float64}, init::Collection{Vec}, vars::Set{Symbol},
         lastonly::Bool=true;
         debug::Expr=Expr(:block)
     ) # Solutions
@@ -377,7 +382,7 @@ const default_parval = Collection{Float64}(
     :Dmin => 1.0, # new pancake size (m)
     :Dmax => 156, # largest floe length (m)
     :hmin => 0.1, # new pancake thickness (m)
-    :kappa => 0.01  * 31536000 # floe welding parameter
+    :kappa => 0.01 * 31536000 # floe welding parameter
 ) # Collection{Float64}
 
 # parameters used in each model
@@ -400,10 +405,52 @@ default_parameters(model::Symbol)::Collection{Float64} =
     model == :MIZ ? default_parameters(miz_paramset) : default_parameters(classic_paramset)
 
 # calculate diffusion operator matrix
-@inline (diffusion!(base::VT, f::VT, st::SpaceTime, par::Collection{Float64})::VT) where VT<:Vector{<:Number} =
-    base .+= par.D * st.diffop * f
-@inline diffusion(f::Vec, st::SpaceTime, par::Collection{Float64})::Vec =
-    diffusion!(zeros(Float64, length(f)), f, st, par)
+let diffop::SparseArrays.SparseMatrixCSC{Float64,Int64} = SparseArrays.spzeros(Float64, 0, 0)
+    @inline function get_diffop(nx::Int)::SparseArrays.SparseMatrixCSC{Float64,Int64}
+        if size(diffop) !== (nx, nx) # recalculate diffusion operator
+            dx = 1.0 / nx
+            xb = dx : dx : 1.0-dx
+            lambda = @. (1 - xb^2) / dx^2
+            l1 = pushfirst!(-copy(lambda), 0.0)
+            l2 = push!(-copy(lambda), 0.0)
+            l3 = -l1 - l2
+            diffop = SparseArrays.spdiagm(-1 => -l1[2:nx], 0 => -l3, 1 => -l2[1:nx-1])
+        end
+        return diffop
+    end # function get_diffop
+
+    @eval (@__MODULE__) get_diffop(nx::Int)::SparseArrays.SparseMatrixCSC{Float64,Int64} = $get_diffop(nx)
+end # let diffop
+
+# diffusion for equal spaced grid
+@inline (diffusion!(
+    base::VT, T::VT, st::SpaceTime{typeof(identity)}, par::Collection{Float64}
+)::VT) where VT<:Vector{<:Number} = base .+= par.D * get_diffop(st.nx) * T
+
+# diffusion for non-equal spaced grid
+@inline function diffusion!(
+    base::VT, T::VT, st::SpaceTime{<:Function}, par::Collection{Float64}
+)::VT where VT<:Vector{<:Number}
+    diffT = diff(T)
+    diffx = diff(st.x)
+    i = 2 : st.nx-1
+    xi = @view st.x[i]
+    xim = @view st.x[i.-1]
+    xip = @view st.x[i.+1]
+    xxph = @. (xip + xi) / 2.0
+    xxmh = @. (xi + xim) / 2.0
+    @inbounds @. base[i] +=
+        par.D * ((1-xxph^2) * diffT[i]/diffx[i] - (1-xxmh^2) * diffT[i-1]/diffx[i-1]) /
+        (xxph - xxmh) # !
+    # base[1] += par.D * (-2.0)*st.x[1] * diffT[1] / diffx[1] # !
+    base[1] += par.D * diffT[1] / diffx[1]^2 # ! # TODO why?
+    base[end] += par.D * (-2.0)*st.x[end] * diffT[end] / diffx[end] # !
+    return base
+end
+
+@inline diffusion(T::Vec, st::SpaceTime{<:Function}, par::Collection{Float64})::Vec =
+    diffusion!(zeros(Float64, length(T)), T, st, par)
+
 const D∇² = diffusion
 const D∇²! = diffusion!
 
@@ -412,13 +459,13 @@ function annual_mean(annusol::Solutions)::Collection{Vec}
     # calculate annual mean for each variable except temperatures
     means = Collection{Vec}()
     foreach(
-        (var::Symbol -> setproperty!(means, var, inxmean(getproperty(annusol.raw, var)))),
+        (var::Symbol -> setproperty!(means, var, crossmean(getproperty(annusol.raw, var)))),
         keys(annusol.raw)
     )
     return means
 end # function annual_mean
 
-annual_mean(forcing::Forcing, st::SpaceTime, year::Int)::Float64 = Statistics.mean(forcing.(year-1 .+ st.t))
+annual_mean(forcing::Forcing, st::SpaceTime{<:Function}, year::Int)::Float64 = Statistics.mean(forcing.(year-1 .+ st.t))
 
 function savesol!(
     sols::Solutions, annusol::Solutions, vars::Collection{Vec}, tinx::Int
@@ -464,7 +511,7 @@ function savesol!(
 end # function savesol!
 
 function integrate(
-    model::Symbol, st::SpaceTime, forcing::Forcing, par::Collection{Float64}, init::Collection{Vec};
+    model::Symbol, st::SpaceTime{<:Function}, forcing::Forcing, par::Collection{Float64}, init::Collection{Vec};
     lastonly::Bool=true, debug::Expr=Expr(:block)
 )::Solutions
     # initialise
@@ -498,9 +545,9 @@ import NonlinearSolve
 
 # solar radiation absorbed on ice and water
 @inline (solar!(base::VT, x::Vec, t::Float64, ::Val{true}, par::Collection{Float64})::VT) where VT<:Vector{<:Number} =
-    @. (base += par.ai * (par.S0 - par.S1 * x * cos(2 * pi * t) - par.S2 * x^2))
+    @. (base += par.ai * (par.S0 - par.S1 * x * cos(2.0*pi * t) - par.S2 * x^2))
 @inline (solar!(base::VT, x::Vec, t::Float64, ::Val{false}, par::Collection{Float64})::VT) where VT<:Vector{<:Number} =
-    @. (base += (par.a0 - par.a2 * x^2) * (par.S0 - par.S1 * x * cos(2 * pi * t) - par.S2 * x^2))
+    @. (base += (par.a0 - par.a2 * x^2) * (par.S0 - par.S1 * x * cos(2.0*pi * t) - par.S2 * x^2))
 
 @inline solar(x::Vec, t::Float64, ice::Bool, par::Collection{Float64})::Vec = solar!(
     zeros(Float64, length(x)), x, t, Val(ice), par
@@ -522,9 +569,9 @@ const T̄! = Tbar!
 function T0eq(
     T0::VT,
     args::@NamedTuple{
-        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection{Float64}
+        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64}
     }
-)::VT where VT<:Vector{<:Number} # T0eq
+)::VT where {VT<:Vector{<:Number}, F<:Function} # T0eq
     vec = @. args.par.k * (args.par.Tm - T0) / args.h # SCM
     solar!(vec, args.x, args.t, Val(true), args.par) # solar on ice
     @. vec += (-args.par.A) - args.par.B * (T0 - args.par.Tm) # OLR
@@ -535,7 +582,7 @@ end # function T0eq
 
 let T0::Vec = zeros(Float64, 100) # let T0 be a persistent variable
     function solveTi(
-        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection{Float64}
+        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{<:Function}, par::Collection{Float64}
     )::Vec
         h1 = condcopy(h, 1.0, iszero) # avoid division by zero when solving T0
         if length(T0) != length(x)
@@ -553,7 +600,7 @@ let T0::Vec = zeros(Float64, 100) # let T0 be a persistent variable
     end # function solveTi
 
     @eval (@__MODULE__) solveTi(
-        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection{Float64}
+        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{<:Function}, par::Collection{Float64}
     )::Vec = $solveTi(x, t, h, Tw, phi, f, st, par)
 end # let T0
 
@@ -565,7 +612,7 @@ function concentration(Ei::Vec, h::Vec, par::Collection{Float64})::Vec
     phi = @. -Ei / (par.Lf * h)
     zeroref!(phi, h)
     condcopy!(phi, 1.0, >(1.0)) # correct concentration
-    # phi = map((e -> Float64(e<0.0)), Ei) # reproducing WE15
+    # phi = @. Float64(Ei.<0.0) # reproducing WE15
     return phi
 end # function concentration
 
@@ -578,13 +625,14 @@ end # function num
 
 # lead region area
 function area_lead(D::Vec, phi::Vec, n::Vec, par::Collection{Float64})::Vec
-    ring = @. par.alpha * n * ((D + 2*par.rl)^2 - D^2)
+    ring = @. par.alpha * n * ((D + 2.0*par.rl)^2 - D^2)
     return min.(ring, 1.0.-phi)
 end # function area_lead
 
 # fluxes
 function vert_flux(
-    x::Vec, t::Float64, ice::Bool, Ti::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection{Float64}
+    x::Vec, t::Float64, ice::Bool, Ti::Vec, Tw::Vec, phi::Vec, f::Float64,
+    st::SpaceTime{<:Function}, par::Collection{Float64}
 )::Vec
     L = @. par.A + par.B * ($Tbar(Ti, Tw, phi) - par.Tm) # OLR
     return @. $solar(x, t, ice, par) - L + $(diffusion(Tbar(Ti, Tw, phi), st, par)) + par.Fb + f
@@ -628,7 +676,7 @@ Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
 Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1 - phi) * Fvw - Flat
 h_t(Fvi::Vec, par::Collection{Float64})::Vec = -1/par.Lf * Fvi
 function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64})::Vec
-    lat_melt = -pi / (2 * par.alpha) * wlat(Tw, par)
+    lat_melt = -pi / 2.0*par.alpha * wlat(Tw, par)
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
     zeroref!(lat_grow, h)
@@ -638,7 +686,7 @@ end # function D_t
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad * dt
 
 function step!(
-    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Collection{Float64};
+    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{<:Function}, par::Collection{Float64};
     debug::Expr=Expr(:block)
 )::Collection{Vec}
     # update temperature
@@ -704,7 +752,7 @@ let id::UInt64 = UInt64(0),
     aw::Vec = Vec(undef, 100),
     kLf::Float64 = NaN # let ,*8
 
-    function get_statics(st::SpaceTime, par::Collection{Float64})::@NamedTuple{
+    @inline function get_statics(st::SpaceTime{<:Function}, par::Collection{Float64})::@NamedTuple{
         cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
         S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64
     }
@@ -713,10 +761,10 @@ let id::UInt64 = UInt64(0),
             cg_tau = par.cg / par.tau
             dt_tau = st.dt / par.tau
             dc = dt_tau * cg_tau
-            kappa = (1+dt_tau) * LinearAlgebra.I(st.nx) - st.dt * par.D * st.diffop / par.cg
+            kappa = (1+dt_tau) * LinearAlgebra.I(st.nx) - st.dt * par.D * get_diffop(st.nx) / par.cg
             # Seasonal forcing [WE15 Eq. (3)]
             S = repeat(par.S0 .- par.S2 * st.x.^2, 1, st.nt) -
-                repeat(par.S1 * cos.(2*pi*st.t'), st.nx, 1) .* repeat(st.x, 1, st.nt)
+                repeat(par.S1 * cos.(2.0*pi*st.t'), st.nx, 1) .* repeat(st.x, 1, st.nt)
             S = hcat(S, S[:,1])
             # Further definitions
             M = par.B + cg_tau
@@ -728,14 +776,14 @@ let id::UInt64 = UInt64(0),
         return (; cg_tau, dt_tau, dc, kappa, S, M, aw, kLf)
     end # function get_statics
 
-    @eval (@__MODULE__) get_statics(st::SpaceTime, par::Collection{Float64})::@NamedTuple{
+    @eval (@__MODULE__) get_statics(st::SpaceTime{<:Function}, par::Collection{Float64})::@NamedTuple{
         cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
         S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64
     } = $get_statics(st, par) # @eval
 end # let id, cg_tau, dt_tau, dc, kappa, S, M, aw, kLf
 
 function step!(
-    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Collection{Float64};
+    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{<:Function}, par::Collection{Float64};
     debug::Expr=Expr(:block)
 )::Collection{Vec}
     # get static variables
