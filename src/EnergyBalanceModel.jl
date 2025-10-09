@@ -53,7 +53,7 @@ function display_time(time::Float64)::String
         timeint = round(Int, time)
         min = fld(timeint, 60)
         sec = timeint % 60
-        str = string(min, ':', string(sec, pad=2))
+        str = string(min, ':', string(sec; pad=2))
     else # !isfinite(time)
         str = "-:--"
     end # if isfinite, else
@@ -76,7 +76,7 @@ function output!(prog::Progress, feedargs::Tuple{Vararg{Any}}=())::Nothing
     println(StyledStrings.styled"{bold,region,warning:$(prog.title)}")
     prog.lines += 1 # !
     # get bar and info strings
-    elapsed = display_time(now - prog.started)
+    elapsed = display_time(now-prog.started)
     if prog.current >= prog.total # done
         isdone = true
         # progress
@@ -84,13 +84,13 @@ function output!(prog::Progress, feedargs::Tuple{Vararg{Any}}=())::Nothing
             # current/total
             lpad(StyledStrings.styled"{success:$(prog.current)}", ndigits(prog.total) + 1), '/', prog.total,
             # bar
-            " [", StyledStrings.styled"""{success:$(repeat("=", prog.barwidth))}""", "] ",
+            " [", StyledStrings.styled"""{bold,success:$(repeat("━", prog.barwidth))}""", "] ",
             # percentage
             lpad(StyledStrings.styled"{success:$(round(Int, prog.current/prog.total*100))%}", 5)
         ) # StyledStrings.annotatedstring
         # time and speed
-        speed = prog.current / (now - prog.started)
-        togo = display_time((prog.total - prog.current) / speed)
+        speed = prog.current / (now-prog.started)
+        togo = display_time((prog.total-prog.current) / speed)
         prompt = StyledStrings.styled"{success:{bold:Done} ✓}"
     else # in progress
         # progress
@@ -100,15 +100,15 @@ function output!(prog::Progress, feedargs::Tuple{Vararg{Any}}=())::Nothing
             lpad(StyledStrings.styled"{info:$(prog.current)}", ndigits(prog.total) + 1), '/', prog.total,
             # bar
             " [",
-            StyledStrings.styled"""{info:$(repeat("=", done))>}""",
-            repeat(" ", max(prog.barwidth - done - 1, 0)),
+            StyledStrings.styled"""{info:{bold:$(repeat("━", done))}❯}""",
+            StyledStrings.styled"""{note:$(repeat("─", max(prog.barwidth-done-1, 0)))}""",
             "] ",
             # percentage
-            lpad(StyledStrings.styled"{info:$(round(prog.current/prog.total*100, digits=1))%}", 5)
+            lpad(StyledStrings.styled"{info:$(round(prog.current/prog.total*100; digits=1))%}", 5)
         ) # StyledStrings.annotatedstring
         # time and speed
-        speed = (prog.current - prog.last) / (now - prog.updated)
-        togo = display_time((prog.total - prog.current) / speed)
+        speed = (prog.current-prog.last) / (now-prog.updated)
+        togo = display_time((prog.total-prog.current) / speed)
         prompt = StyledStrings.styled"{info:{bold:In progress} $(prog.runners[mod1(prog.updates, 4)])}"
     end # if >=, else
     prog.last = prog.current # !
@@ -117,9 +117,9 @@ function output!(prog::Progress, feedargs::Tuple{Vararg{Any}}=())::Nothing
     if !isfinite(speed) # no speed info
         spdstr = "-/sec"
     elseif (speed >= 1.0) || (iszero(speed)) # speed > 1.0
-        spdstr = string(round(speed, digits=2), "/sec")
+        spdstr = string(round(speed; digits=2), "/sec")
     else # speed < 1.0
-        spdstr = string(round(1.0 / speed, digits=2), "sec/1")
+        spdstr = string(round(1.0/speed; digits=2), "sec/1")
     end # if >, elseif, else
     timespeed = StyledStrings.annotatedstring(
         ' ',
@@ -129,7 +129,7 @@ function output!(prog::Progress, feedargs::Tuple{Vararg{Any}}=())::Nothing
         ' ',
         spdstr
     ) # StyledStrings.annotatedstring
-    infopaddings = repeat(" ", max(prog.width - length(timespeed) - length(prompt), 1))
+    infopaddings = repeat(" ", max(prog.width-length(timespeed)-length(prompt), 1))
     # output bar and info
     println(barstr)
     prog.lines += 1 # !
@@ -238,13 +238,13 @@ end # struct SpaceTime{F<:Function}
 
 SpaceTime(
     ::typeof(identity), nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375
-) = SpaceTime{typeof(identity)}((0.0, 1.0), nx, nt, dur, winter=winter, summer=summer)
+) = SpaceTime{typeof(identity)}((0.0, 1.0), nx, nt, dur; winter=winter, summer=summer)
 SpaceTime(
     ::typeof(sin), nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375
-) = SpaceTime{typeof(sin)}((0.0, pi/2.0), nx, nt, dur, winter=winter, summer=summer)
+) = SpaceTime{typeof(sin)}((0.0, pi/2.0), nx, nt, dur; winter=winter, summer=summer)
 SpaceTime(
     nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375
-) = SpaceTime(identity, nx, nt, dur, winter=winter, summer=summer)
+) = SpaceTime(identity, nx, nt, dur; winter=winter, summer=summer)
 
 struct Forcing
     flat::Bool # forcing is always at base
@@ -419,7 +419,7 @@ let diffop::SparseArrays.SparseMatrixCSC{Float64,Int64} = SparseArrays.spzeros(F
         return diffop
     end # function get_diffop
 
-    @eval (@__MODULE__) get_diffop(nx::Int)::SparseArrays.SparseMatrixCSC{Float64,Int64} = $get_diffop(nx)
+    @eval (@__MODULE__) @inline get_diffop(nx::Int)::SparseArrays.SparseMatrixCSC{Float64,Int64} = $get_diffop(nx)
 end # let diffop
 
 # diffusion for equal spaced grid
@@ -442,9 +442,9 @@ end # let diffop
     @inbounds @. base[i] +=
         par.D * ((1-xxph^2) * diffT[i]/diffx[i] - (1-xxmh^2) * diffT[i-1]/diffx[i-1]) /
         (xxph - xxmh) # !
-    # base[1] += par.D * (-2.0)*st.x[1] * diffT[1] / diffx[1] # !
-    base[1] += par.D * diffT[1] / diffx[1]^2 # ! # TODO why?
-    base[end] += par.D * (-2.0)*st.x[end] * diffT[end] / diffx[end] # !
+    # @inbounds base[1] += par.D * (-2.0)*st.x[1] * diffT[1] / diffx[1] # !
+    @inbounds base[1] += par.D * diffT[1] / diffx[1]^2 # ! # TODO why?
+    @inbounds base[end] += par.D * (-2.0)*st.x[end] * diffT[end] / diffx[end] # !
     return base
 end
 
@@ -512,7 +512,7 @@ end # function savesol!
 
 function integrate(
     model::Symbol, st::SpaceTime{<:Function}, forcing::Forcing, par::Collection{Float64}, init::Collection{Vec};
-    lastonly::Bool=true, debug::Expr=Expr(:block)
+    lastonly::Bool=true, debug::Expr=Expr(:block), verbose::Bool=false
 )::Solutions
     # initialise
     vars = deepcopy(init)
@@ -521,13 +521,13 @@ function integrate(
         union!(solvars, Set{Symbol}((:Ei, :Ew, :Ti, :Tw, :h, :D, :phi, :n)))
     end
     Modu::Module = EnergyBalanceModel.eval(model)
-    sols = Solutions(st, forcing, par, init, solvars, lastonly, debug=debug)
-    annusol = Solutions(st, forcing, par, init, solvars, true, debug=debug) # for calculating annual means
+    sols = Solutions(st, forcing, par, init, solvars, lastonly; debug=debug)
+    annusol = Solutions(st, forcing, par, init, solvars, true; debug=debug) # for calculating annual means
     progress = Progress(length(st.T), "Integrating")
     update!(progress)
     # loop over time
     for ti in eachindex(st.T)
-        Modu.step!(st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par, debug=debug)
+        Modu.step!(st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; debug=debug, verbose=verbose)
         savesol!(sols, annusol, vars, ti)
         update!(progress)
     end # for in
@@ -580,19 +580,24 @@ function T0eq(
     return vec
 end # function T0eq
 
-let T0::Vec = zeros(Float64, 100) # let T0 be a persistent variable
+let T0::Vec = zeros(Float64, 100)# let T0 be a persistent variable
     function solveTi(
-        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{<:Function}, par::Collection{Float64}
+        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{<:Function}, par::Collection{Float64};
+        verbose::Bool=false
     )::Vec
-        h1 = condcopy(h, 1.0, iszero) # avoid division by zero when solving T0
+        hp = condcopy(h, par.hmin, iszero) # avoid division by zero when solving T0
         if length(T0) != length(x)
             T0 = zeros(Float64, length(x)) # initialise T0
         end # if !=
         T0sol = NonlinearSolve.solve(
-            NonlinearSolve.NonlinearProblem(T0eq, T0, (; x, t, h=h1, Tw, phi, f, st, par)),
-            NonlinearSolve.TrustRegion()
+            NonlinearSolve.NonlinearProblem(T0eq, T0, (; x, t, h=hp, Tw, phi, f, st, par)),
+            NonlinearSolve.TrustRegion();
+            reltol=1e-6, abstol=1e-8
         )
-        # TODO test for solving failure
+        if !NonlinearSolve.SciMLBase.successful_retcode(T0sol) && verbose
+            @warn "Solving for T0 failed at t=$t. Maximum residual $(maximum(abs.(T0sol.resid)))."
+            Main.infiltrate(@__MODULE__, Base.@locals, @__FILE__, @__LINE__)
+        end # if &&
         T0 = T0sol.u
         Ti = ice_temp(T0, par)
         zeroref!(Ti, h) # set Ti to 0 where no ice
@@ -600,8 +605,9 @@ let T0::Vec = zeros(Float64, 100) # let T0 be a persistent variable
     end # function solveTi
 
     @eval (@__MODULE__) solveTi(
-        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{<:Function}, par::Collection{Float64}
-    )::Vec = $solveTi(x, t, h, Tw, phi, f, st, par)
+        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{<:Function}, par::Collection{Float64};
+        verbose::Bool=false
+    )::Vec = $solveTi(x, t, h, Tw, phi, f, st, par; verbose=verbose)
 end # let T0
 
 # lateral melt rate
@@ -687,12 +693,12 @@ forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad * dt
 
 function step!(
     t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{<:Function}, par::Collection{Float64};
-    debug::Expr=Expr(:block)
+    debug::Expr=Expr(:block), verbose::Bool=false
 )::Collection{Vec}
     # update temperature
     vars.Tw = water_temp(vars.Ew, vars.phi, par) # !
     condcopy!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
-    vars.Ti = solveTi(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par) # !
+    vars.Ti = solveTi(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par; verbose=verbose) # !
     # update floe number
     vars.n = num(vars.D, vars.phi, par) # !
     # calculate fluxes
@@ -776,7 +782,7 @@ let id::UInt64 = UInt64(0),
         return (; cg_tau, dt_tau, dc, kappa, S, M, aw, kLf)
     end # function get_statics
 
-    @eval (@__MODULE__) get_statics(st::SpaceTime{<:Function}, par::Collection{Float64})::@NamedTuple{
+    @eval (@__MODULE__) @inline get_statics(st::SpaceTime{<:Function}, par::Collection{Float64})::@NamedTuple{
         cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
         S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64
     } = $get_statics(st, par) # @eval
@@ -819,6 +825,8 @@ end # module ClassicEBM
 
 
 module Plot # EnergyBalanceModel.
+
+import Makie
 
 end # module Plot
 
