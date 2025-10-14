@@ -1,11 +1,14 @@
+# TODO documentation
 module EnergyBalanceModel # .
 
 
 module Utilities # EnergyBalanceModel.
 
-import StyledStrings as SS, Statistics as Stats
+import UUIDs, StyledStrings as SS, Statistics as Stats, TimeZones as TZ
 
 export Progress, update!
+export safehouse, house!, favorite!, note!, retrieve
+export iobuffer, unique_id, reprhex
 export crossmean, hemispheric_mean
 export condset!, condset, zeroref!
 
@@ -22,7 +25,7 @@ mutable struct Progress
     width::Int # number of characters wide, including progress texts
     barwidth::Int # width of the progress bar
     lines::Int # lines printed
-    runners::Tuple{Vararg{Char,4}} # characters to use as runners
+    runners::NTuple{4,Char} # characters to use as runners
     updates::Int # number of external updates
 
     function Progress(
@@ -49,6 +52,125 @@ mutable struct Progress
     end # function Progress
 end # struct Progress
 
+# members in the safehouse
+mutable struct Refugee{M,T}
+    varname::Symbol
+    id::UInt32
+    housed::TZ.ZonedDateTime
+    val::T
+    note::String
+
+    function Refugee{M}(var::Symbol) where M
+        val = deepcopy(getproperty(M, var))
+        return new{M,typeof(val)}(var, unique_id(), TZ.now(TZ.localzone()), val, "")
+    end # function Refugee{M}
+end # struct Refugee{M,T}
+
+function Base.show(io::IO, refugee::Refugee{M,T})::Nothing where {M, T}
+    print(
+        io,
+        typeof(refugee), '(', refugee.varname, '#', reprhex(refugee.id), " = "
+    )
+    show(io, refugee.val)
+    print(io, ')')
+end # function Base.show
+
+function Base.show(io::IO, ::MIME"text/plain", refugee::Refugee{M,T})::Nothing where {M, T}
+    println(
+        io,
+        typeof(refugee), '(', refugee.varname, '#', reprhex(refugee.id), ')', " housed at ", refugee.housed, ':'
+    )
+    buffer = iobuffer(io; sizemodifier=(0, -2))
+    show(buffer, MIME("text/plain"), refugee.val)
+    str = String(take!(buffer.io))
+    print(io, string("  ", replace(str, '\n' => "\n  ")))
+    return nothing
+end # function Base.show
+
+# safehouse to hold results before being overwritten
+struct Safehouse{M}
+    variables::Dict{Symbol,Vector{UInt32}}
+    favorites::Dict{Symbol,UInt32}
+    refugees::Dict{UInt32,Refugee{M}}
+
+    function Safehouse{M}(name::Symbol=:SAFEHOUSE) where M
+        safehouse = new{M}(Dict{Symbol,Vector{UInt32}}(), Dict{Symbol,UInt32}(), Dict{UInt32,Refugee{M}}())
+        @eval M const $name = $safehouse
+        return safehouse
+    end # function Safehouse{M}
+end # struct Safehouse{M}
+
+(Base.show(io::IO, safehouse::Safehouse{M})::Nothing) where M = print(
+    io,
+    typeof(safehouse),
+    '(',
+    join([string(length(safehouse.variables[v]), '@', v) for v in keys(safehouse.variables)], ", "),
+    ')'
+)
+
+function Base.show(io::IO, ::MIME"text/plain", safehouse::Safehouse{M})::Nothing where M
+    print(
+        io,
+        typeof(safehouse), "with ", length(safehouse.refugees), " refugees in ",
+        length(safehouse.variables), " variables:"
+    )
+    for ids in values(safehouse.variables)
+        for id in ids
+            print(io, "\n  ")
+            show(io, safehouse.refugees[id])
+        end
+    end # for (v, ids)
+    return nothing
+end # function Base.show
+
+function safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu} # TODO two safehouse created?
+    if isdefined(modu, name) && (getproperty(modu, name) isa Safehouse{modu}) # exists and correct type
+        safehouse::Safehouse{modu} = getproperty(modu, name)
+    else # create new safehouse
+        safehouse = Safehouse{modu}(name)
+        if isdefined(modu, name) # exists but wrong type
+            @warn "A variable named `$name` already exists in module `$modu` but is not a Safehouse. This variable will be housed in a new Safehouse with the given name `$name`."
+            house!(name, safehouse) # house the existing variable
+        end # if isdefined
+    end # if isdefined, else
+    return safehouse
+end
+
+function house!(var::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
+    refugee = Refugee{M}(var)
+    id = refugee.id
+    (var in keys(safehouse.variables)) ? push!(safehouse.variables[var], id) : safehouse.variables[var] = [id] # !
+    safehouse.refugees[id] = refugee # !
+    return refugee
+end # function house!
+
+function note!(id::UInt32, note::String, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
+    refugee = safehouse.refugees[id]
+    refugee.note = note
+    return refugee
+end
+
+function favorite!(id::UInt32, key::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
+    refugee = safehouse.refugees[id]
+    safehouse.favorites[key] = refugee.id # !
+    return refugee
+end # function favorite!
+
+(retrieve(id::UInt32, safehouse::Safehouse{M}=safehouse())::Refugee{M}) where M = safehouse.refugees[id]
+(retrieve(var::Symbol, safehouse::Safehouse{M}=safehouse())::Vector{Refugee{M}}) where M =
+    getindex.(safehouse.refugees, safehouse.variables[var])
+
+unique_id()::UInt32 = UInt32(UUIDs.uuid1().value>>96)
+(reprhex(hex::T)::String) where T<:Unsigned = repr(hex)[3:end]
+
+iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
+    IOBuffer(),
+    :limit => true,
+    :displaysize => displaysize(io).+sizemodifier,
+    :compact => true,
+    :color => true
+)
+
 function display_time(time::Float64)::String
     if isfinite(time) # remaining time unknown
         timeint = round(Int, time)
@@ -61,7 +183,7 @@ function display_time(time::Float64)::String
     return str
 end # function display_time
 
-function output!(prog::Progress, feedargs::Tuple{Vararg{Any}}=())::Nothing
+function output!(prog::Progress, feedargs::Tuple=())::Nothing
     now = time()
     isdone = false
     # avoid over-updating
@@ -143,7 +265,7 @@ function output!(prog::Progress, feedargs::Tuple{Vararg{Any}}=())::Nothing
     return nothing
 end # function output
 
-function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple{Vararg{Any}}=())::Nothing
+function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple=())::Nothing
     # internal update
     prog.current = current # !
     # initialise if not started
@@ -170,7 +292,7 @@ function hemispheric_mean(vec::Vector{T}, x::Vector{T})::T where T<:Number
     int = zero(T)
     for i in 1:length(x)-1
         @inbounds int += (vec[i]+vec[i+1]) * (x[i+1]-x[i]) / 2.0
-    end # for in
+    end # for i
     return int
 end # function hemispheric_mean
 
@@ -213,6 +335,26 @@ end # struct Collection
 (Base.setproperty!(coll::Collection{V}, key::Symbol, val::V)::Dict{Symbol,V}) where V =
     setindex!(getfield(coll, :dict), val, key)
 (Base.keys(coll::Collection{V})::Base.KeySet{Symbol, Dict{Symbol,V}}) where V = keys(getfield(coll, :dict))
+(Base.length(coll::Collection{V})::Int) where V = length(getfield(coll, :dict))
+
+function Base.show(io::IO, coll::Collection{V})::Nothing where V
+    buffer = iobuffer(io)
+    show(buffer, getfield(coll, :dict))
+    str = replace(String(take!(buffer.io)), "Dict"=>string(typeof(coll)))
+    print(io, str)
+    return nothing
+end # function Base.show
+
+function Base.show(io::IO, ::MIME"text/plain", coll::Collection{V})::Nothing where V
+    buffer = iobuffer(io)
+    show(buffer, MIME("text/plain"), getfield(coll, :dict))
+    str = replace(
+        String(take!(buffer.io)),
+        string(typeof(getfield(coll, :dict))) => string(typeof(coll))
+    )
+    print(io, str)
+    return nothing
+end # function Base.show
 
 struct SpaceTime{F}
     nx::Int # number of evenly spaced latitudinal gridboxes (equator to pole)
@@ -227,7 +369,7 @@ struct SpaceTime{F}
     summer::@NamedTuple{t::Float64, inx::Int}
 
     function SpaceTime{F}(
-        urange::Tuple{Float64,Float64}, nx::Int, nt::Int, dur::Int;
+        urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int;
         winter::Float64=0.26125, summer::Float64=0.77375
     ) where F
         dx = (urange[2]-urange[1]) / nx
@@ -244,54 +386,123 @@ struct SpaceTime{F}
     end # function SpaceTime{F}
 end # struct SpaceTime{F}
 
-SpaceTime{identity}(
-   nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375
-) = SpaceTime{identity}((0.0, 1.0), nx, nt, dur; winter=winter, summer=summer)
-SpaceTime{sin}(
-    nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375
-) = SpaceTime{sin}((0.0, pi/2.0), nx, nt, dur; winter=winter, summer=summer)
+SpaceTime{identity}(nx::Int, nt::Int, dur::Int; kwargs...) = SpaceTime{identity}((0.0, 1.0), nx, nt, dur; kwargs...)
+SpaceTime{sin}(nx::Int, nt::Int, dur::Int; kwargs...) = SpaceTime{sin}((0.0, pi/2.0), nx, nt, dur; kwargs...)
 SpaceTime(args...; kwargs...) = SpaceTime{identity}(args...; kwargs...)
+
+(Base.show(io::IO, st::SpaceTime{F})::Nothing) where F = print(
+    io,
+    typeof(st), '(', st.nx, ", ", st.nt, ", ", st.dur, ')'
+)
+
+function Base.show(io::IO, ::MIME"text/plain", st::SpaceTime{F})::Nothing where F
+    println(io, typeof(st), " with:")
+
+    nxstr = "  $(st.nx) latitudinal gridboxes: "
+    buffer = iobuffer(io)
+    show(buffer, st.x)
+    vecstr = ctruncate(String(take!(buffer.io)), displaysize(io)[2]-length(nxstr)-2, " … ")
+    println(io, nxstr, vecstr)
+
+    nystr = "  $(st.nt) timesteps per year: "
+    buffer = iobuffer(io)
+    show(buffer, st.t)
+    vecstr = ctruncate(String(take!(buffer.io)), displaysize(io)[2]-length(nystr)-2, " … ")
+    println(io, nystr, vecstr)
+
+    println(io, "  $(st.dur) years of simulation: t∈[0,$(st.dur)]")
+    print(io, "  winter at t=$(st.winter.t), summer at t=$(st.summer.t)")
+    return nothing
+end # function Base.show
 
 struct Forcing{F}
     base::Float64 # base forcing
     peak::Float64 # peak forcing
     cool::Float64 # forcing after cooldown
-    holdyrs::Tuple{Int,Int} # years to hold at (base, peak) forcing
-    rates::Tuple{Float64,Float64} # rates of change
-    domain::Tuple{Vararg{Int,6}} # years at which forcing pattern changes
+    holdyrs::NTuple{2,Int} # years to hold at (base, peak) forcing
+    rates::NTuple{2,Float64} # rates of change
+    domain::NTuple{5,Int} # years at which forcing pattern changes
 
     # constant forcing
     Forcing(base::Float64) = new{true}(
-        true, base, base, base, (0, 0), (0.0, 0.0), (0, 0, 0, 0, 0, 0)
+        base, base, base, (0, 0), (0.0, 0.0), (0, 0, 0, 0, 0)
     )
     # warming/cooling forcing
     function Forcing(
-        base::Float64, peak::Float64, cool::Float64, holdyrs::Tuple{Int,Int}, rates::Tuple{Float64,Float64}
+        base::Float64, peak::Float64, cool::Float64, holdyrs::NTuple{2,Int}, rates::NTuple{2,Float64}
     )
-        domainvec = zeros(Int, 6)
+        domainvec = zeros(Int, 5)
         # hold at base
-        @. domainvec[2:6] += holdyrs[1]
+        @. domainvec[2:5] += holdyrs[1]
         # time to warm
         warming = (peak - base) / rates[1]
-        isinteger(warming) ?
-            @.(domainvec[3:6] += warming) :
-            throw(ArgumentError("Warming time must be integer. Got $warming y."))
+        rates[1]>0 &&isinteger(warming) ?
+            @.(domainvec[3:5] += warming) :
+            throw(ArgumentError("Warming time must be positive integer. Got $warming y."))
         # hold at peak
-        @. domainvec[4:6] += holdyrs[2]
+        @. domainvec[4:5] += holdyrs[2]
         # time to cool
-        cooling = (peak - cool) / rates[2]
-        isinteger(cooling) ?
-            @.(domainvec[5:6] += cooling) :
-            throw(ArgumentError("Cooling time must be integer. Got $cooling y."))
-        # hold at cool
-        domainvec[6] = Inf
-        return new{false}(false, base, peak, cool, holdyrs, rates, Tuple(domainvec))
+        cooling = (cool - peak) / rates[2]
+        rates[2]<0 && isinteger(cooling) ?
+            domainvec[5] += cooling :
+            throw(ArgumentError("Cooling time must be positive integer. Got $cooling y."))
+        return new{false}(base, peak, cool, holdyrs, rates, Tuple(domainvec))
     end # function Forcing
 end # struct Forcing{F}
 
+function Base.show(io::IO, forcing::Forcing{true})::Nothing
+    print(io, typeof(forcing), '(', forcing.base, ')')
+    printstyled(io, " (constant forcing)", color=:light_black)
+    return nothing
+end
+
+Base.show(io::IO, forcing::Forcing{false})::Nothing = print(
+    io,
+    typeof(forcing), '(', forcing.base, " ↗ ", forcing.peak, " ↘ ", forcing.cool, ')'
+)
+
+function Base.show(io::IO, ::MIME"text/plain", forcing::Forcing{true})::Nothing
+    println(io, typeof(forcing), '(', forcing.base, ") is constant:")
+    print(io, "  F(t)=", forcing.base, ", t∈[0,∞)")
+    return nothing
+end
+
+function Base.show(io::IO, ::MIME"text/plain", forcing::Forcing{false})::Nothing
+    println(
+        io,
+        typeof(forcing), " varies from ", forcing.base, " up to ", forcing.peak, " and back to ", forcing.cool, ':'
+    )
+    head = "  F(t)={ "
+    headpad = lpad("{ ", length(head))
+    biaslen = maximum(length∘string, (forcing.base, forcing.peak, forcing.cool))
+    ratelen = maximum(length∘string∘abs, forcing.rates)
+    domainlen = maximum(length∘string, forcing.domain)
+    constline(field::Symbol)::String = string(
+        lpad(getfield(forcing, field), biaslen), " "^(ratelen+domainlen+7)
+    )
+    varyline(bias::Float64, rate::Float64, start::Int)::String = string(
+        lpad(bias, biaslen),
+        ' ', rate>0.0 ? '+' : '-', ' ',
+        lpad(abs(rate), ratelen), "(t-", lpad(start, domainlen), ")"
+    )
+    domainstr(i::Int, nextdomain::String=string(forcing.domain[i+1]))::String = string(
+        ", t∈[", lpad(forcing.domain[i], domainlen), ',', lpad(nextdomain, domainlen), ")"
+    )
+    print(io, head, constline(:base), domainstr(1))
+    printstyled(io, " (base)\n", color=:light_black)
+    print(io, headpad, varyline(forcing.base, forcing.rates[1], forcing.domain[2]), domainstr(2))
+    printstyled(io, " (warming)\n", color=:light_black)
+    print(io, headpad, constline(:peak), domainstr(3))
+    printstyled(io, " (peak)\n", color=:light_black)
+    print(io, headpad, varyline(forcing.peak, forcing.rates[2], forcing.domain[4]), domainstr(4))
+    printstyled(io, " (cooling)\n", color=:light_black)
+    print(io, headpad, constline(:cool), domainstr(5, "∞"))
+    printstyled(io, " (cool)", color=:light_black)
+end
+
 # evaluate forcing at time T (in years)
-@inlind (forcing::Forcing{true})(::Float64)::Float64 = forcing.base # constant forcing
-@inlind function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
+(forcing::Forcing{true})(::Float64)::Float64 = forcing.base # constant forcing
+function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
     if T < forcing.domain[2] # hold at base
         f = forcing.base
     elseif T < forcing.domain[3] # warming
@@ -299,7 +510,7 @@ end # struct Forcing{F}
     elseif T < forcing.domain[4] # hold at peak
         f = forcing.peak
     elseif T < forcing.domain[5] # cooling
-        f = forcing.peak - forcing.rates[2] * (T-forcing.domain[4])
+        f = forcing.peak + forcing.rates[2] * (T-forcing.domain[4])
     else # hold at cool
         f = forcing.cool
     end # if <, elseif*3, else
@@ -320,8 +531,7 @@ struct Solutions{F,C}
     } # seasonal peak and annual avg
 
     function Solutions(
-        st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64},
-        init::Collection{Vec}, vars::Set{Symbol},
+        st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}, vars::Set{Symbol},
         lastonly::Bool=true;
         debug::Expr=Expr(:block)
     ) where {F, C} # Solutions
@@ -357,7 +567,28 @@ struct Solutions{F,C}
             ) # ( # seasonal
         ) # new
     end # function Solutions
-end # struct Solutions
+end # struct Solutions{F,C}
+
+(Base.show(io::IO, sols::Solutions{F,C})::Nothing) where {F,C} = print(
+    io,
+    typeof(sols), '(',
+    sols.spacetime.nx, '×', length(sols.ts), "@(", first(sols.ts), ':', sols.spacetime.dt, ':', last(sols.ts), "), ",
+    keys(sols.raw),
+    ')'
+)
+
+function Base.show(io::IO, ::MIME"text/plain", sols::Solutions{F,C})::Nothing where {F,C}
+    println(io, typeof(sols), " with:")
+    println(io, "  ", length(sols.raw), " solution variables: ", keys(sols.raw))
+    xhead = "  on $(sols.spacetime.nx) latitudinal gridboxes: "
+    buffer = iobuffer(io)
+    show(buffer, sols.spacetime.x)
+    vecstr = ctruncate(String(take!(buffer.io)), displaysize(io)[2]-length(xhead)-2, " … ")
+    println(io, xhead, vecstr)
+    println(io, "  and " , length(sols.ts), " timesteps: ", first(sols.ts), ':', sols.spacetime.dt, ':', last(sols.ts))
+    print(io, "  with forcing ", repr(sols.forcing))
+    return nothing
+end # function Base.show
 
 # default parameter values
 const default_parval = Collection{Float64}(
@@ -405,7 +636,7 @@ function default_parameters(paramset::Set{Symbol})::Collection{Float64}
     return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultpar
 default_parameters(model::Symbol)::Collection{Float64} =
-    model == :MIZ ? default_parameters(miz_paramset) : default_parameters(classic_paramset)
+    model==:MIZ ? default_parameters(miz_paramset) : default_parameters(classic_paramset)
 
 # calculate diffusion operator matrix
 let diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0)
@@ -458,7 +689,7 @@ const D∇² = diffusion
 const D∇²! = diffusion!
 
 # calculate annual mean
-function annual_mean(annusol::Solutions)::Collection{Vec}
+function annual_mean(annusol::Solutions{F,C})::Collection{Vec} where {F, C}
     # calculate annual mean for each variable except temperatures
     means = Collection{Vec}()
     foreach(
@@ -472,8 +703,8 @@ end # function annual_mean
     Stats.mean(forcing.(year-1 .+ st.t))
 
 function savesol!(
-    sols::Solutions, annusol::Solutions, vars::Collection{Vec}, tinx::Int
-)::Solutions
+    sols::Solutions{F,C}, annusol::Solutions{F,C}, vars::Collection{Vec}, tinx::Int
+)::Solutions{F,C} where {F, C}
     varscp = deepcopy(vars) # avoid reference issues
     year = ceil(Int, sols.spacetime.T[tinx])
     ti = mod1(tinx, sols.spacetime.nt) # index of time in the year
@@ -516,10 +747,9 @@ function savesol!(
 end # function savesol!
 
 function integrate(
-    model::Symbol, st::SpaceTime{F}, forcing::Forcing{C},
-    par::Collection{Float64}, init::Collection{Vec};
+    model::Symbol, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
     lastonly::Bool=true, debug::Expr=Expr(:block), verbose::Bool=false
-)::Solutions where {F, C}
+)::Solutions{F,C} where {F, C}
     # initialise
     vars = deepcopy(init)
     solvars = Set{Symbol}((:E, :T, :h)) # always solve for these
@@ -536,7 +766,7 @@ function integrate(
         Modu.step!(st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; debug=debug, verbose=verbose)
         savesol!(sols, annusol, vars, ti)
         update!(progress)
-    end # for in
+    end # for ti
     return sols
 end # function integrate
 
@@ -645,8 +875,7 @@ end # function area_lead
 
 # fluxes
 function vert_flux(
-    x::Vec, t::Float64, ice::Bool, Ti::Vec, Tw::Vec, phi::Vec, f::Float64,
-    st::SpaceTime{F}, par::Collection{Float64}
+    x::Vec, t::Float64, ice::Bool, Ti::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64}
 )::Vec where F
     L = @. par.A + par.B * ($Tbar(Ti, Tw, phi) - par.Tm) # OLR
     return @. $solar(x, t, ice, par) - L + $(diffusion(Tbar(Ti, Tw, phi), st, par)) + par.Fb + f
@@ -834,27 +1063,62 @@ end # function step
 end # module ClassicEBM
 
 
+module IO # EnergyBalanceModel.
+
+using ..Utilities, ..Infrastructure
+
+import Dates, JLD2, TimeZones as TZ
+
+export save, safeload!
+
+function save( # TODO unique name for existing files
+    sols, path::String=joinpath(pwd(), string(reprhex(unique_id()), ".jld2"));
+    overwrite::Bool=false
+)::String
+    if isfile(path)
+        modified = Dates.format(
+            TZ.astimezone(
+                TZ.ZonedDateTime(Dates.unix2datetime(mtime(path)), TZ.tz"UTC"),
+                TZ.localzone()
+            ),
+            Dates.dateformat"on d u Y at HH:MM:SS"
+        ) # Dates.format
+        basestr = string("File ", path, " already exists. Last modified ", modified, ".")
+        overwrite ?
+            @warn(string(basestr, " Overwriting.")) :
+            throw(ArgumentError(string(basestr, " Use `overwrite=true` to overwrite.")))
+    end # if isfile
+    JLD2.save_object(path, sols)
+    return path
+end # function save
+
+function load(path::String)
+    @warn "Assigning the returned value of `load` to a variable could overwrite an existing results. Use `safeload!` instead."
+    return JLD2.load_object(path)
+end
+
+function safeload!(to::Symbol, path::String, modu::Module=Main; house::Symbol=:SAFEHOUSE)
+    if isdefined(modu, to)
+        refugee = house!(to, safehouse(modu, house))
+        @warn "Variable `$to` already defined in $modu. The existing value will be stored in safehouse `$modu.$safehouse` with ID $(reprhex(refugee.id))."
+    end # if isdefined
+    loaded = JLD2.load_object(path)
+    @eval modu $to = $loaded
+    return loaded
+end # function load
+
+end # module IO
+
+
 module Plot # EnergyBalanceModel.
 
 using ..Utilities, ..Infrastructure
 
 import Makie
 
-export backend, plot_raw
+export backend, plot_raw, plot_avg, plot_seasonal
 
-function init_backend(backend::Symbol=:GLMakie)::Module
-    if !isdefined(Makie, backend)
-        @eval import $backend
-    end
-    modu = eval(backend)
-    if Makie.current_backend() !== modu
-        backend == :GLMakie ? modu.activate!(; focus_on_show=true) : modu.activate!()
-    end
-    return modu
-end
-
-backend()::Union{Module,Missing} = Makie.current_backend()
-backend(backend::Symbol)::Module = init_backend(backend)
+# TODO layout struct
 
 const miz_layout = [
     (:Ew, Makie.L"$E_w$ ($\mathrm{J\,m^{-2}}$)" )  (:Ei, Makie.L"$E_i$ ($\mathrm{J\,m^{-2}}$)"      )  (:E,   Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)" )
@@ -865,38 +1129,72 @@ const classic_layout = [
     (:E, Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)"    )  (:T,  Makie.L"$T$ ($\mathrm{\degree\!C}$)"       )  (:h,   Makie.L"$h$ ($\mathrm{m}$)"         )
 ]
 
-matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
+function init_backend(backend::Symbol=:GLMakie)::Module
+    if !isdefined(Plot, backend)
+        @eval import $backend
+    end
+    modu = eval(backend)
+    if Makie.current_backend() !== modu
+        backend==:GLMakie ? modu.activate!(; focus_on_show=true) : modu.activate!()
+    end
+    return modu
+end
 
-function plot_raw( # TODO function contourf tails, and plot_raw plot_avg
-    sols::Solutions;
-    backend::Symbol=:GLMakie,
-    layout::Matrix{Tuple{Symbol,<:AbstractString}}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
-)::Makie.Figure
-    init_backend(backend)
-    fig = Makie.Figure(fontsize=12)
-    for (loc, var) in pairs(layout)
+backend()::Union{Module,Missing} = Makie.current_backend()
+backend(backend::Symbol)::Module = init_backend(backend)
+
+function contourf_tiles(t::Vec, x::Vec, datatitle::Matrix{Tuple{Matrix{Float64},<:AbstractString}})::Makie.Figure
+    fig = Makie.Figure()
+    for (loc, var) in pairs(datatitle)
         subfig = fig[loc[1],loc[2]]
         ax = Makie.Axis(
             subfig[1,1];
             title=var[2],
-            xlabel=(loc[1]==lastindex(layout, 1) ? Makie.L"$t$ ($\mathrm{y}$)" : ""),
+            xlabel=(loc[1]==lastindex(datatitle, 1) ? Makie.L"$t$ ($\mathrm{y}$)" : ""),
             ylabel=(loc[2]==1 ? Makie.L"x" : ""),
             limits=(0, 1, 0, 1)
         )
-        Makie.ylims!(ax, 0, 1)
-        ctr = Makie.contourf!(ax, sols.ts, sols.spacetime.x, matricify(getproperty(sols.raw, var[1])))
+        ctr = Makie.contourf!(ax, t, x, var[1])
         Makie.Colorbar(subfig[1,2], ctr)
     end
     return fig
+end # function contourf_tiles
+
+matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
+
+function plot_raw(
+    sols::Solutions{F,C};
+    backend::Symbol=:GLMakie,
+    layout::Matrix{Tuple{Symbol,S}}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
+)::Makie.Figure where {F, C, S<:AbstractString}
+    init_backend(backend)
+    datatitle = Matrix{Tuple{Matrix{Float64},S}}(undef, size(layout))
+    @simd for inx in eachindex(layout)
+        datatitle[inx] = (matricify(getproperty(sols.raw, layout[inx][1])), layout[inx][2])
+    end # for inx
+    return contourf_tiles(sols.ts, sols.spacetime.x, datatitle)
 end # function plot_raw
 
-function plot_seasonal( # TODO distinguish warming and cooling
-    sols::Solutions;
-    xfunc::Function=((sols::Solutions, year::Int) -> hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)),
+function plot_avg(
+    sols::Solutions{F,C};
+    backend::Symbol=:GLMakie,
+    layout::Matrix{Tuple{Symbol,S}}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
+)::Makie.Figure where {F, C, S<:AbstractString}
+    init_backend(backend)
+    datatitle = Matrix{Tuple{Matrix{Float64},S}}(undef, size(layout))
+    @simd for inx in eachindex(layout)
+        datatitle[inx] = (matricify(getproperty(sols.seasonal.avg, layout[inx][1])), layout[inx][2])
+    end # for inx
+    return contourf_tiles(sols.spacetime.dur, sols.spacetime.x, datatitle)
+end # function plot_avg
+
+function plot_seasonal(
+    sols::Solutions{F,false};
+    xfunc::Function=((sols::Solutions{F,false}, year::Int) -> hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)),
     yfunc::Function=(
             :phi in keys(sols.raw) ?
                 (
-                    (sols::Solutions, season::Symbol, year::Int) ->
+                    (sols::Solutions{F,false}, season::Symbol, year::Int) ->
                         2.0*pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
                 ) :
                 (
@@ -908,39 +1206,50 @@ function plot_seasonal( # TODO distinguish warming and cooling
     xlabel::AbstractString=Makie.L"$\tilde{\mathsf{T}}$ ($\mathrm{\degree\!C}$)",
     ylabel::AbstractString=Makie.L"A_i$",
     backend::Symbol=:GLMakie
-)::Makie.Figure
+)::Makie.Figure where F
     init_backend(backend)
     xdata = xfunc.(Ref(sols), sols.spacetime.dur)
-    fig = Makie.Figure(fontsize=12)
-    ax = Makie.Axis(fig; title=title, xlabel=xlabel, ylabel=ylabel)
-    Makie.lines!(
-        ax,
-        xdata,
-        yfunc.(Ref(sols), Ref(:avg), sols.spacetime.dur);
-        label="Mean",
-        color=Makie.wong_colors()[3] # green
+    fig = Makie.Figure()
+    ax = Makie.Axis(fig[1,1]; title=title, xlabel=xlabel, ylabel=ylabel)
+    groups = (
+        Warming=Vector{Makie.Lines{Tuple{Vector{Makie.Point{2,Float64}}}}}(),
+        Cooling=Vector{Makie.Lines{Tuple{Vector{Makie.Point{2,Float64}}}}}()
     )
-    Makie.lines!(
-        ax,
-        xdata,
-        yfunc.(Ref(sols), Ref(:winter), sols.spacetime.dur);
-        label="Winter"
+    for (domain, group, inx, colour) in zip(
+        keys(groups),
+        values(groups),
+        (sols.forcing.domain[2]:sols.forcing.domain[3], sols.forcing.domain[4]:sols.forcing.domain[5]),
+        (Makie.wong_colors()[6], Makie.wong_colors()[1])
+    ) # zip
+        for season in (:avg, :winter, :summer)
+            width = 1.0
+            if season == :avg
+                width += domain==:Warming ? 2.0 : 1.0
+            end
+            push!(
+                group,
+                Makie.lines!(
+                    ax, xdata[inx], yfunc.(Ref(sols), Ref(season), sols.spacetime.dur[inx]);
+                    color=colour, linewidth=width, linestyle=(season==:summer ? :dash : :solid)
+                )
+            ) # push!
+        end # for season
+    end # for domain, inx, colour
+    Makie.Legend(
+        fig[1,2], values(groups), fill(["mean", "winter", "summer"], 2), keys(groups)
     )
-    Makie.lines!(
-        ax,
-        xdata,
-        yfunc.(Ref(sols), Ref(:summer), sols.spacetime.dur);
-        label="Summer"
-    )
-end
+    return fig
+end # function plot_seasonal
 
 end # module Plot
 
 
-using .Infrastructure
+using .Infrastructure, .IO, .Plot
 
 export Vec, Collection, SpaceTime, Forcing, Solutions
 export miz_paramset, classic_paramset, default_parameters
 export integrate
+export save, safeload!
+export backend, plot_raw, plot_avg, plot_seasonal # TODO test
 
 end # module EnergyBalanceModel
