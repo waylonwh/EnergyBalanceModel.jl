@@ -8,7 +8,7 @@ import UUIDs, StyledStrings as SS, Statistics as Stats, TimeZones as TZ
 
 export Progress, update!
 export safehouse, house!, favorite!, note!, retrieve
-export iobuffer, unique_id, reprhex
+export @persistent, iobuffer, unique_id, reprhex
 export crossmean, hemispheric_mean
 export condset!, condset, zeroref!
 
@@ -118,23 +118,23 @@ function Base.show(io::IO, ::MIME"text/plain", safehouse::Safehouse{M})::Nothing
         for id in ids
             print(io, "\n  ")
             show(io, safehouse.refugees[id])
-        end
+        end # for id
     end # for (v, ids)
     return nothing
 end # function Base.show
 
 function safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu} # TODO two safehouse created?
     if isdefined(modu, name) && (getproperty(modu, name) isa Safehouse{modu}) # exists and correct type
-        safehouse::Safehouse{modu} = getproperty(modu, name)
+        return getproperty(modu, name)
     else # create new safehouse
         safehouse = Safehouse{modu}(name)
         if isdefined(modu, name) # exists but wrong type
             @warn "A variable named `$name` already exists in module `$modu` but is not a Safehouse. This variable will be housed in a new Safehouse with the given name `$name`."
             house!(name, safehouse) # house the existing variable
         end # if isdefined
+        return safehouse
     end # if isdefined, else
-    return safehouse
-end
+end # function safehouse
 
 function house!(var::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
     refugee = Refugee{M}(var)
@@ -148,7 +148,7 @@ function note!(id::UInt32, note::String, safehouse::Safehouse{M}=safehouse())::R
     refugee = safehouse.refugees[id]
     refugee.note = note
     return refugee
-end
+end # function note!
 
 function favorite!(id::UInt32, key::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
     refugee = safehouse.refugees[id]
@@ -159,6 +159,52 @@ end # function favorite!
 (retrieve(id::UInt32, safehouse::Safehouse{M}=safehouse())::Refugee{M}) where M = safehouse.refugees[id]
 (retrieve(var::Symbol, safehouse::Safehouse{M}=safehouse())::Vector{Refugee{M}}) where M =
     getindex.(safehouse.refugees, safehouse.variables[var])
+
+macro persistent(exprs...)
+    # syntax tree operations
+    findexpr(_, ::Symbol)::Nothing = nothing
+    function findexpr(expr::Expr, head::Symbol)::Union{Expr,Nothing}
+        if expr.head === head
+            return expr
+        elseif isempty(expr.args)
+            return nothing
+        else
+            for arg in expr.args
+                funcexpr = findexpr(arg, head)
+                if !isnothing(funcexpr)
+                    return funcexpr
+                end
+            end
+            return nothing
+        end # if ==
+    end # function findexpr
+    sign2call(expr::Symbol)::Symbol = expr
+    function sign2call(expr::Expr)::Union{Symbol,Expr}
+        if expr.head === :(::) || expr.head === :kw
+            return sign2call(expr.args[1])
+        else # :parameters
+            return Expr(expr.head, map(sign2call, expr.args)...)
+        end # if ||
+    end # function sign2call
+    # find function definition
+    funcdef = exprs[end]
+    funcnode = findexpr(funcdef, :function)
+    funcsign = findexpr(funcnode, :call)
+    funcname = funcsign.args[1]
+    hyfuncvar = gensym(funcname)
+    callexpr::Expr = sign2call(funcsign)
+    callexpr.args[1] = hyfuncvar
+    # generate code
+    return esc(
+        quote
+            let $(exprs[1:end-1]...)
+                $funcdef
+                global $hyfuncvar::typeof($funcname) = $funcname
+            end # let $vars
+            $(funcnode.args[1]) = $callexpr
+        end # return quote
+    ) # esc
+end # macro persistent
 
 unique_id()::UInt32 = UInt32(UUIDs.uuid1().value>>96)
 (reprhex(hex::T)::String) where T<:Unsigned = repr(hex)[3:end]
@@ -176,11 +222,10 @@ function display_time(time::Float64)::String
         timeint = round(Int, time)
         min = fld(timeint, 60)
         sec = timeint % 60
-        str = string(min, ':', string(sec; pad=2))
+        return string(min, ':', string(sec; pad=2))
     else # !isfinite(time)
-        str = "-:--"
+        return "-:--"
     end # if isfinite, else
-    return str
 end # function display_time
 
 function output!(prog::Progress, feedargs::Tuple=())::Nothing
@@ -327,7 +372,6 @@ const Vec = Vector{Float64} # abbreviation for vector type used in model
 
 struct Collection{V}
     dict::Dict{Symbol,V}
-
     Collection{V}(args...) where V = new(Dict{Symbol,V}(args...))
 end # struct Collection
 
@@ -436,7 +480,7 @@ struct Forcing{F}
         @. domainvec[2:5] += holdyrs[1]
         # time to warm
         warming = (peak - base) / rates[1]
-        rates[1]>0 &&isinteger(warming) ?
+        rates[1]>0 && isinteger(warming) ?
             @.(domainvec[3:5] += warming) :
             throw(ArgumentError("Warming time must be positive integer. Got $warming y."))
         # hold at peak
@@ -454,7 +498,7 @@ function Base.show(io::IO, forcing::Forcing{true})::Nothing
     print(io, typeof(forcing), '(', forcing.base, ')')
     printstyled(io, " (constant forcing)", color=:light_black)
     return nothing
-end
+end # function Base.show
 
 Base.show(io::IO, forcing::Forcing{false})::Nothing = print(
     io,
@@ -465,7 +509,7 @@ function Base.show(io::IO, ::MIME"text/plain", forcing::Forcing{true})::Nothing
     println(io, typeof(forcing), '(', forcing.base, ") is constant:")
     print(io, "  F(t)=", forcing.base, ", t∈[0,∞)")
     return nothing
-end
+end # function Base.show
 
 function Base.show(io::IO, ::MIME"text/plain", forcing::Forcing{false})::Nothing
     println(
@@ -498,23 +542,22 @@ function Base.show(io::IO, ::MIME"text/plain", forcing::Forcing{false})::Nothing
     printstyled(io, " (cooling)\n", color=:light_black)
     print(io, headpad, constline(:cool), domainstr(5, "∞"))
     printstyled(io, " (cool)", color=:light_black)
-end
+end # function Base.show
 
 # evaluate forcing at time T (in years)
 (forcing::Forcing{true})(::Float64)::Float64 = forcing.base # constant forcing
 function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
     if T < forcing.domain[2] # hold at base
-        f = forcing.base
+        return forcing.base
     elseif T < forcing.domain[3] # warming
-        f = forcing.base + forcing.rates[1] * (T-forcing.domain[2])
+        return forcing.base + forcing.rates[1] * (T-forcing.domain[2])
     elseif T < forcing.domain[4] # hold at peak
-        f = forcing.peak
+        return forcing.peak
     elseif T < forcing.domain[5] # cooling
-        f = forcing.peak + forcing.rates[2] * (T-forcing.domain[4])
+        return forcing.peak + forcing.rates[2] * (T-forcing.domain[4])
     else # hold at cool
-        f = forcing.cool
+        return forcing.cool
     end # if <, elseif*3, else
-    return f
 end # function (forcing::Forcing{false})
 
 struct Solutions{F,C}
@@ -636,25 +679,25 @@ function default_parameters(paramset::Set{Symbol})::Collection{Float64}
     return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultpar
 default_parameters(model::Symbol)::Collection{Float64} =
-    model==:MIZ ? default_parameters(miz_paramset) : default_parameters(classic_paramset)
+    model===:MIZ ? default_parameters(miz_paramset) : default_parameters(classic_paramset)
 
 # calculate diffusion operator matrix
-let diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0)
+@persistent(
+    diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
+
     @inline function get_diffop(nx::Int)::SA.SparseMatrixCSC{Float64,Int64}
         if size(diffop) != (nx, nx) # recalculate diffusion operator
             dx = 1.0 / nx
-            xb = dx : dx : 1.0-dx
+            xb = dx:dx:1.0-dx
             lambda = @. (1 - xb^2) / dx^2
             l1 = pushfirst!(-copy(lambda), 0.0)
             l2 = push!(-copy(lambda), 0.0)
             l3 = -l1 - l2
             diffop = SA.spdiagm(-1 => -l1[2:nx], 0 => -l3, 1 => -l2[1:nx-1])
-        end
+        end # if !=
         return diffop
     end # function get_diffop
-
-    @eval @inline get_diffop(nx::Int)::SA.SparseMatrixCSC{Float64,Int64} = $get_diffop(nx)
-end # let diffop
+) # @persistent
 
 # diffusion for equal spaced grid
 @inline (diffusion!(
@@ -662,25 +705,36 @@ end # let diffop
 )::Vector{T}) where T<:Number = base .+= par.D * get_diffop(st.nx) * temp
 
 # diffusion for non-equal spaced grid
-@inline function diffusion!(
-    base::Vector{T}, temp::Vector{T}, st::SpaceTime{F}, par::Collection{Float64}
-)::Vector{T} where {T<:Number, F}
-    diffT = diff(temp)
-    diffx = diff(st.x)
-    i = 2 : st.nx-1
-    xi = @view st.x[i]
-    xim = @view st.x[i.-1]
-    xip = @view st.x[i.+1]
-    xxph = @. (xip + xi) / 2.0
-    xxmh = @. (xi + xim) / 2.0
-    @inbounds @. base[i] +=
-        par.D * ((1-xxph^2) * diffT[i]/diffx[i] - (1-xxmh^2) * diffT[i-1]/diffx[i-1]) /
-        (xxph - xxmh) # !
-    # @inbounds base[1] += par.D * (-2.0)*st.x[1] * diffT[1] / diffx[1] # !
-    @inbounds base[1] += par.D * diffT[1] / diffx[1]^2 # ! # TODO why?
-    @inbounds base[end] += par.D * (-2.0)*st.x[end] * diffT[end] / diffx[end] # !
-    return base
-end
+@persistent(
+    diffx::Vector{Float64}, mxxph::Vector{Float64}, mxxmh::Vector{Float64},
+    phmmh::Vector{Float64}, i::UnitRange{Int},
+    xid::UInt64=UInt64(0),
+
+    @inline function diffusion!(
+        base::Vector{T}, temp::Vector{T}, st::SpaceTime{F}, par::Collection{Float64}
+    )::Vector{T} where {T<:Number,F}
+        # store x if changed
+        if xid != objectid(st.x)
+            x = [-st.x[1]; st.x; 2-st.x[end]]
+            diffx = diff(x)
+            diffT = zeros(Float64, st.nx+1)
+            i = 2:st.nx+1
+            xxph = @. (x[i+1]+x[i]) / 2.0
+            xxmh = @. (x[i]+x[i-1]) / 2.0
+            mxxph = @. 1.0 - xxph^2
+            mxxmh = @. 1.0 - xxmh^2
+            phmmh = @. xxph - xxmh
+            xid = objectid(st.x)
+        end # if !=
+        diffT = Vector{T}(undef, st.nx+1) # TODO eliminate memory allocations?
+        ends = [1, st.nx+1]
+        @inbounds @. diffT[ends] = temp[ends] - temp[ends]
+        @inbounds diffT[2:st.nx] .= temp[2:st.nx]
+        @inbounds diffT[2:st.nx] .-= @view temp[1:st.nx-1]
+        @inbounds @. base += par.D * (mxxph * diffT[i]/diffx[i] - mxxmh * diffT[i-1]/diffx[i-1]) / phmmh # !
+        return base
+    end # function diffusion!
+) # @persistent
 
 @inline (diffusion(T::Vec, st::SpaceTime{F}, par::Collection{Float64})::Vec) where F =
     diffusion!(zeros(Float64, length(T)), T, st, par)
@@ -753,9 +807,9 @@ function integrate(
     # initialise
     vars = deepcopy(init)
     solvars = Set{Symbol}((:E, :T, :h)) # always solve for these
-    if model == :MIZ # add MIZ variables
+    if model === :MIZ # add MIZ variables
         union!(solvars, Set{Symbol}((:Ei, :Ew, :Ti, :Tw, :D, :phi, :n)))
-    end
+    end # if ===
     Modu::Module = EnergyBalanceModel.eval(model)
     sols = Solutions(st, forcing, par, init, solvars, lastonly; debug=debug)
     annusol = Solutions(st, forcing, par, init, solvars, true; debug=debug) # for calculating annual means
@@ -796,7 +850,7 @@ import NonlinearSolve as NlSol
     Ti .*= phi # !
     @. Ti += (1 - phi) * Tw # !
     return Ti
-end
+end # function Tbar!
 @inline Tbar(Ti::Vec, Tw::Vec, phi::Vec)::Vec = Tbar!(copy(Ti), Tw, phi)
 const T̄ = Tbar
 const T̄! = Tbar!
@@ -818,35 +872,28 @@ function T0eq(
     return vec
 end # function T0eq
 
-let T0::Vec = zeros(Float64, 100)# let T0 be a persistent variable
-    function solveTi(
-        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64};
-        verbose::Bool=false
-    )::Vec where F
-        hp = condset(h, par.hmin, iszero) # avoid division by zero when solving T0
-        if length(T0) != length(x)
-            T0 = zeros(Float64, length(x)) # initialise T0
-        end # if !=
-        T0sol = NlSol.solve(
-            NlSol.NonlinearProblem(T0eq, T0, (; x, t, h=hp, Tw, phi, f, st, par)),
-            NlSol.TrustRegion();
-            reltol=1e-6,
-            abstol=1e-8
-        )
-        if !NlSol.SciMLBase.successful_retcode(T0sol) && verbose
-            @warn "Solving for T0 failed at t=$t. Maximum residual $(maximum(abs.(T0sol.resid)))."
-        end # if &&
-        T0 = T0sol.u
-        Ti = ice_temp(T0, par)
-        zeroref!(Ti, h) # set Ti to 0 where no ice
-        return Ti
-    end # function solveTi
-
-    @eval (solveTi(
-        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64};
-        verbose::Bool=false
-    )::Vec) where F = $solveTi(x, t, h, Tw, phi, f, st, par; verbose=verbose)
-end # let T0
+@persistent T0::Vec=zeros(Float64, 100) function solveTi(
+    x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64};
+    verbose::Bool=false
+)::Vec where F
+    hp = condset(h, par.hmin, iszero) # avoid division by zero when solving T0
+    if length(T0) != length(x)
+        T0 = zeros(Float64, length(x)) # initialise T0
+    end # if !=
+    T0sol = NlSol.solve(
+        NlSol.NonlinearProblem(T0eq, T0, (; x, t, h=hp, Tw, phi, f, st, par)),
+        NlSol.TrustRegion();
+        reltol=1e-6,
+        abstol=1e-8
+    )
+    if !NlSol.SciMLBase.successful_retcode(T0sol) && verbose
+        @warn "Solving for T0 failed at t=$t. Maximum residual $(maximum(abs.(T0sol.resid)))."
+    end # if &&
+    T0 = T0sol.u
+    Ti = ice_temp(T0, par)
+    zeroref!(Ti, h) # set Ti to 0 where no ice
+    return Ti
+end # function solveTi
 
 # lateral melt rate
 wlat(Tw::Vec, par::Collection{Float64})::Vec = @. par.m1 * (Tw - par.Tm^par.m2)
@@ -980,20 +1027,15 @@ end # module MIZEBM
 
 module Classic # EnergyBalanceModel.
 
-using ..Infrastructure
+using ..Utilities, ..Infrastructure
 
 using AppleAccelerate
 import LinearAlgebra as LA, SparseArrays as SA
 
-let id::UInt64 = UInt64(0),
-    cg_tau::Float64 = NaN,
-    dt_tau::Float64 = NaN,
-    dc::Float64 = NaN,
-    kappa::Matrix{Float64} = Matrix{Float64}(undef, 100, 100),
-    S::Matrix{Float64} = Matrix{Float64}(undef, 100, 2001),
-    M::Float64 = NaN,
-    aw::Vec = Vec(undef, 100),
-    kLf::Float64 = NaN # let ,*8
+@persistent(
+    cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
+    S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64,
+    id::UInt64 = UInt64(0),
 
     @inline function get_statics(st::SpaceTime{F}, par::Collection{Float64})::@NamedTuple{
         cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
@@ -1018,12 +1060,7 @@ let id::UInt64 = UInt64(0),
         end # if !=
         return (; cg_tau, dt_tau, dc, kappa, S, M, aw, kLf)
     end # function get_statics
-
-    @eval @inline (get_statics(st::SpaceTime{F}, par::Collection{Float64})::@NamedTuple{
-        cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
-        S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64
-    }) where F = $get_statics(st, par) # @eval
-end # let id, cg_tau, dt_tau, dc, kappa, S, M, aw, kLf
+) # @persistent
 
 function step!(
     t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
@@ -1095,7 +1132,7 @@ end # function save
 function load(path::String)
     @warn "Assigning the returned value of `load` to a variable could overwrite an existing results. Use `safeload!` instead."
     return JLD2.load_object(path)
-end
+end # function load
 
 function safeload!(to::Symbol, path::String, modu::Module=Main; house::Symbol=:SAFEHOUSE)
     if isdefined(modu, to)
@@ -1132,18 +1169,18 @@ const classic_layout = [
 function init_backend(backend::Symbol=:GLMakie)::Module
     if !isdefined(Plot, backend)
         @eval import $backend
-    end
+    end # if !
     modu = eval(backend)
     if Makie.current_backend() !== modu
-        backend==:GLMakie ? modu.activate!(; focus_on_show=true) : modu.activate!()
-    end
+        backend===:GLMakie ? modu.activate!(; focus_on_show=true) : modu.activate!()
+    end # if !==
     return modu
-end
+end # function init_backend
 
 backend()::Union{Module,Missing} = Makie.current_backend()
 backend(backend::Symbol)::Module = init_backend(backend)
 
-function contourf_tiles(t::Vec, x::Vec, datatitle::Matrix{Tuple{Matrix{Float64},<:AbstractString}})::Makie.Figure
+function contourf_tiles(t::Vec, x::Vec, datatitle::Matrix{Tuple{Matrix{Float64},S}})::Makie.Figure where S<:AbstractString
     fig = Makie.Figure()
     for (loc, var) in pairs(datatitle)
         subfig = fig[loc[1],loc[2]]
@@ -1156,7 +1193,7 @@ function contourf_tiles(t::Vec, x::Vec, datatitle::Matrix{Tuple{Matrix{Float64},
         )
         ctr = Makie.contourf!(ax, t, x, var[1])
         Makie.Colorbar(subfig[1,2], ctr)
-    end
+    end # for loc, var
     return fig
 end # function contourf_tiles
 
@@ -1223,14 +1260,14 @@ function plot_seasonal(
     ) # zip
         for season in (:avg, :winter, :summer)
             width = 1.0
-            if season == :avg
-                width += domain==:Warming ? 2.0 : 1.0
-            end
+            if season === :avg
+                width += domain===:Warming ? 2.0 : 1.0
+            end # if ===
             push!(
                 group,
                 Makie.lines!(
                     ax, xdata[inx], yfunc.(Ref(sols), Ref(season), sols.spacetime.dur[inx]);
-                    color=colour, linewidth=width, linestyle=(season==:summer ? :dash : :solid)
+                    color=colour, linewidth=width, linestyle=(season===:summer ? :dash : :solid)
                 )
             ) # push!
         end # for season
