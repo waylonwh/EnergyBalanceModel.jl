@@ -111,28 +111,31 @@ end # struct Safehouse{M}
 function Base.show(io::IO, ::MIME"text/plain", safehouse::Safehouse{M})::Nothing where M
     print(
         io,
-        typeof(safehouse), "with ", length(safehouse.refugees), " refugees in ",
+        typeof(safehouse), " with ", length(safehouse.refugees), " refugees in ",
         length(safehouse.variables), " variables:"
     )
-    for ids in values(safehouse.variables)
-        for id in ids
-            print(io, "\n  ")
-            show(io, safehouse.refugees[id])
-        end # for id
-    end # for (v, ids)
+    for ids in values(safehouse.variables), id in ids
+        print(io, "\n  ")
+        show(io, safehouse.refugees[id])
+    end # for ids, id
     return nothing
 end # function Base.show
 
-function safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu} # TODO two safehouse created?
-    if isdefined(modu, name) && (getproperty(modu, name) isa Safehouse{modu}) # exists and correct type
-        return getproperty(modu, name)
-    else # create new safehouse
-        safehouse = Safehouse{modu}(name)
-        if isdefined(modu, name) # exists but wrong type
-            @warn "A variable named `$name` already exists in module `$modu` but is not a Safehouse. This variable will be housed in a new Safehouse with the given name `$name`."
+function safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu}
+    if isdefined(modu, name)
+        existed = getproperty(modu, name)
+        if existed isa Safehouse{modu} # exists and correct type
+            return existed
+        else # exists but not a Safehouse{modu}
+            @warn "A variable named `$name` already exists in module `$modu` but is not a Safehouse. This variable has been housed in a new Safehouse with the given name `$name`."
+            tempname = gensym(name) # protect existing variable
+            safehouse = Safehouse{modu}(tempname)
             house!(name, safehouse) # house the existing variable
-        end # if isdefined
-        return safehouse
+            @eval modu $name = $safehouse # overwrite existing variable
+            return safehouse
+        end # if isa, else
+    else # create new safehouse
+        return Safehouse{modu}(name)
     end # if isdefined, else
 end # function safehouse
 
@@ -199,7 +202,7 @@ macro persistent(exprs...)
         quote
             let $(exprs[1:end-1]...)
                 $funcdef
-                global $hyfuncvar::typeof($funcname) = $funcname
+                global const $hyfuncvar::typeof($funcname) = $funcname
             end # let $vars
             $(funcnode.args[1]) = $callexpr
         end # return quote
@@ -567,7 +570,7 @@ struct Solutions{F,C}
     parameters::Collection{Float64} # model parameters
     initconds::Collection{Vec} # initial conditions
     lastonly::Bool # store only last year of solution
-    debug::Expr # store debug variables
+    debug::Union{Expr,Nothing} # store debug variables
     raw::Collection{Vector{Vec}} # solution storage
     seasonal::@NamedTuple{
         winter::Collection{Vector{Vec}}, summer::Collection{Vector{Vec}}, avg::Collection{Vector{Vec}}
@@ -576,7 +579,7 @@ struct Solutions{F,C}
     function Solutions(
         st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}, vars::Set{Symbol},
         lastonly::Bool=true;
-        debug::Expr=Expr(:block)
+        debug::Union{Expr,Nothing}=nothing
     ) where {F, C} # Solutions
         if lastonly
             dur_store = 1
@@ -585,7 +588,7 @@ struct Solutions{F,C}
             dur_store = st.dur
             ts = st.dt/2.0 : st.dt : st.dur - st.dt/2.0
         end # if lastonly, else
-        if debug != Expr(:block)
+        if !isnothing(debug)
             push!(vars, :debug)
         end # if !=
         # construct raw solution storage
@@ -727,10 +730,8 @@ default_parameters(model::Symbol)::Collection{Float64} =
             xid = objectid(st.x)
         end # if !=
         diffT = Vector{T}(undef, st.nx+1) # TODO eliminate memory allocations?
-        ends = [1, st.nx+1]
-        @inbounds @. diffT[ends] = temp[ends] - temp[ends]
-        @inbounds diffT[2:st.nx] .= temp[2:st.nx]
-        @inbounds diffT[2:st.nx] .-= @view temp[1:st.nx-1]
+        @inbounds diffT[1] = diffT[end] = zero(T)
+        @inbounds diffT[2:st.nx] .= diff(temp) # !
         @inbounds @. base += par.D * (mxxph * diffT[i]/diffx[i] - mxxmh * diffT[i-1]/diffx[i-1]) / phmmh # !
         return base
     end # function diffusion!
@@ -802,7 +803,7 @@ end # function savesol!
 
 function integrate(
     model::Symbol, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
-    lastonly::Bool=true, debug::Expr=Expr(:block), verbose::Bool=false
+    lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
 )::Solutions{F,C} where {F, C}
     # initialise
     vars = deepcopy(init)
@@ -977,7 +978,7 @@ forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad * dt
 
 function step!(
     t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
-    debug::Expr=Expr(:block), verbose::Bool=false
+    debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
 )::Collection{Vec} where F
     # update temperature
     vars.Tw = water_temp(vars.Ew, vars.phi, par) # !
@@ -1013,7 +1014,7 @@ function step!(
     vars.E = @. vars.phi * vars.Ei + (1 - vars.phi) * vars.Ew # !
     vars.T = Tbar(vars.Ti, vars.Tw, vars.phi) # !
     # debug
-    if debug != Expr(:block)
+    if !isnothing(debug)
         vars.debug = eval(debug) # !
     end # if !=
     # set NaNs to no existence
@@ -1022,14 +1023,18 @@ function step!(
     return vars
 end # function step
 
-end # module MIZEBM
+for xfunc in (identity, sin)
+    precompile(solveTi, (Vec, Float64, Vec, Vec, Vec, Float64, SpaceTime{xfunc}, Collection{Float64}))
+    precompile(step!, (Float64, Float64, Collection{Vec}, SpaceTime{xfunc}, Collection{Float64}))
+end # for xfunc
+
+end # module MIZ
 
 
 module Classic # EnergyBalanceModel.
 
 using ..Utilities, ..Infrastructure
 
-using AppleAccelerate
 import LinearAlgebra as LA, SparseArrays as SA
 
 @persistent(
@@ -1064,7 +1069,7 @@ import LinearAlgebra as LA, SparseArrays as SA
 
 function step!(
     t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
-    debug::Expr=Expr(:block)
+    debug::Union{Expr,Nothing}=nothing
 )::Collection{Vec} where F
     # get static variables
     stat = get_statics(st, par)
@@ -1091,11 +1096,13 @@ function step!(
     # Infer ice thickness
     vars.h = @. -vars.E / par.Lf * (vars.E<0.0)
     # debug
-    if debug != Expr(:block)
+    if !isnothing(debug)
         vars.debug = eval(debug) # !
     end # if !=
     return vars
 end # function step
+
+precompile(step!, (Float64, Float64, Collection{Vec}, SpaceTime{identity}, Collection{Float64}))
 
 end # module ClassicEBM
 
@@ -1104,12 +1111,15 @@ module IO # EnergyBalanceModel.
 
 using ..Utilities, ..Infrastructure
 
-import Dates, JLD2, TimeZones as TZ
+import Dates, JLD2, Makie, TimeZones as TZ
 
 export save, safeload!
 
-function save( # TODO unique name for existing files
-    sols, path::String=joinpath(pwd(), string(reprhex(unique_id()), ".jld2"));
+unsafesave(sols, path::String) = JLD2.save_object(path, sols)
+unsafesave(plt::Makie.Figure, path::String; kwargs...) = Makie.save(path, plt; kwargs...)
+
+function save(
+    obj, path::String=joinpath(pwd(), string(reprhex(unique_id()), ".dat"));
     overwrite::Bool=false
 )::String
     if isfile(path)
@@ -1120,12 +1130,17 @@ function save( # TODO unique name for existing files
             ),
             Dates.dateformat"on d u Y at HH:MM:SS"
         ) # Dates.format
-        basestr = string("File ", path, " already exists. Last modified ", modified, ".")
-        overwrite ?
-            @warn(string(basestr, " Overwriting.")) :
-            throw(ArgumentError(string(basestr, " Use `overwrite=true` to overwrite.")))
+        basestr = string("File ", path, " already exists. Last modified ", modified, '.')
+        if overwrite
+            @warn(string(basestr, " Overwriting."))
+        else # !overwrite
+            nameext = splitext(path)
+            newpath = string(nameext[1], '_', reprhex(unique_id()), nameext[2])
+            @warn(string(basestr, " The EXISTING file has been renamed to ", newpath, '.'))
+            mv(path, newpath)
+        end # if overwrite
     end # if isfile
-    JLD2.save_object(path, sols)
+    unsafesave(obj, path)
     return path
 end # function save
 
@@ -1137,7 +1152,7 @@ end # function load
 function safeload!(to::Symbol, path::String, modu::Module=Main; house::Symbol=:SAFEHOUSE)
     if isdefined(modu, to)
         refugee = house!(to, safehouse(modu, house))
-        @warn "Variable `$to` already defined in $modu. The existing value will be stored in safehouse `$modu.$safehouse` with ID $(reprhex(refugee.id))."
+        @warn "Variable `$to` already defined in $modu. The existing value has been stored in safehouse `$modu.$safehouse` with ID $(reprhex(refugee.id))."
     end # if isdefined
     loaded = JLD2.load_object(path)
     @eval modu $to = $loaded
@@ -1153,18 +1168,44 @@ using ..Utilities, ..Infrastructure
 
 import Makie
 
-export backend, plot_raw, plot_avg, plot_seasonal
+export Layout, backend
+export plot_raw, plot_avg, plot_seasonal
 
-# TODO layout struct
+struct Layout{T}
+    vars::Matrix{T}
+    titles::Matrix{AbstractString}
+    function Layout{T}(vars::Matrix{T}, titles::Matrix{AbstractString}) where T
+        if size(vars) != size(titles)
+            throw(ArgumentError("Size of vars and titles must be the same."))
+        end # if !=
+        return new{T}(vars, titles)
+    end # function Layout
+    Layout(vars::Matrix{T}, titles::Matrix{AbstractString}) where T = Layout{T}(vars, titles)
+end
 
-const miz_layout = [
-    (:Ew, Makie.L"$E_w$ ($\mathrm{J\,m^{-2}}$)" )  (:Ei, Makie.L"$E_i$ ($\mathrm{J\,m^{-2}}$)"      )  (:E,   Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)" )
-    (:Tw, Makie.L"$T_w$ ($\mathrm{\degree\!C}$)")  (:Ti, Makie.L"$T_i$ ($\mathrm{\degree\!C}$)"     )  (:T,   Makie.L"$T$ ($\mathrm{\degree\!C}$)")
-    (:h,  Makie.L"$\bar{h}$ ($\mathrm{m}$)"     )  (:D,  Makie.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)")  (:phi, Makie.L"\varphi"                    )
-]
-const classic_layout = [
-    (:E, Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)"    )  (:T,  Makie.L"$T$ ($\mathrm{\degree\!C}$)"       )  (:h,   Makie.L"$h$ ($\mathrm{m}$)"         )
-]
+(Base.size(layout::Layout{T})::NTuple{2,Int}) where T = size(layout.vars)
+(Base.axes(layout::Layout{T}, dim::Int)::Base.OneTo{Int64}) where T = axes(layout.vars, dim)
+(Base.eachindex(layout::Layout{T})::Base.OneTo{Int64}) where T = eachindex(layout.vars)
+(Base.getindex(layout::Layout{T}, inx...)::@NamedTuple{var::T, title::AbstractString}) where T =
+    (var=layout.vars[inx...], title=layout.titles[inx...])
+
+const miz_layout = Layout(
+    [
+        :Ew :Ei :E
+        :Tw :Ti :T
+        :h  :D  :phi
+    ],
+    AbstractString[
+        Makie.L"$E_w$ ($\mathrm{J\,m^{-2}}$)"  Makie.L"$E_i$ ($\mathrm{J\,m^{-2}}$)"       Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)"
+        Makie.L"$T_w$ ($\mathrm{\degree\!C}$)" Makie.L"$T_i$ ($\mathrm{\degree\!C}$)"      Makie.L"$T$ ($\mathrm{\degree\!C}$)"
+        Makie.L"$\bar{h}$ ($\mathrm{m}$)"      Makie.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)" Makie.L"\varphi"
+    ]
+)
+
+const classic_layout = Layout(
+    [:E :T :h],
+    AbstractString[Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)" Makie.L"$T$ ($\mathrm{\degree\!C}$)" Makie.L"$h$ ($\mathrm{m}$)"]
+)
 
 function init_backend(backend::Symbol=:GLMakie)::Module
     if !isdefined(Plot, backend)
@@ -1180,20 +1221,21 @@ end # function init_backend
 backend()::Union{Module,Missing} = Makie.current_backend()
 backend(backend::Symbol)::Module = init_backend(backend)
 
-function contourf_tiles(t::Vec, x::Vec, datatitle::Matrix{Tuple{Matrix{Float64},S}})::Makie.Figure where S<:AbstractString
+function contourf_tiles(t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}})::Makie.Figure where T<:Real
     fig = Makie.Figure()
-    for (loc, var) in pairs(datatitle)
-        subfig = fig[loc[1],loc[2]]
+    for row in axes(layout, 1), col in axes(layout, 2)
+        subfig = fig[row,col]
         ax = Makie.Axis(
             subfig[1,1];
-            title=var[2],
-            xlabel=(loc[1]==lastindex(datatitle, 1) ? Makie.L"$t$ ($\mathrm{y}$)" : ""),
-            ylabel=(loc[2]==1 ? Makie.L"x" : ""),
+            title=layout[row,col].title,
+            xlabel=(row==lastindex(layout, 1) ? Makie.L"$t$ ($\mathrm{y}$)" : ""),
+            ylabel=(col==1 ? Makie.L"x" : ""),
             limits=(0, 1, 0, 1)
         )
-        ctr = Makie.contourf!(ax, t, x, var[1])
+        ctr = Makie.contourf!(ax, t, x, layout[row,col].var)
         Makie.Colorbar(subfig[1,2], ctr)
-    end # for loc, var
+    end # for row, col
+    @eval Main innerfig = $fig
     return fig
 end # function contourf_tiles
 
@@ -1202,12 +1244,12 @@ matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecve
 function plot_raw(
     sols::Solutions{F,C};
     backend::Symbol=:GLMakie,
-    layout::Matrix{Tuple{Symbol,S}}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
-)::Makie.Figure where {F, C, S<:AbstractString}
+    layout::Layout{Symbol}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
+)::Makie.Figure where {F, C}
     init_backend(backend)
-    datatitle = Matrix{Tuple{Matrix{Float64},S}}(undef, size(layout))
+    datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
-        datatitle[inx] = (matricify(getproperty(sols.raw, layout[inx][1])), layout[inx][2])
+        datatitle.vars[inx] = matricify(getproperty(sols.raw, layout[inx].var))
     end # for inx
     return contourf_tiles(sols.ts, sols.spacetime.x, datatitle)
 end # function plot_raw
@@ -1215,19 +1257,22 @@ end # function plot_raw
 function plot_avg(
     sols::Solutions{F,C};
     backend::Symbol=:GLMakie,
-    layout::Matrix{Tuple{Symbol,S}}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
-)::Makie.Figure where {F, C, S<:AbstractString}
+    layout::Layout{Symbol}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
+)::Makie.Figure where {F, C}
     init_backend(backend)
-    datatitle = Matrix{Tuple{Matrix{Float64},S}}(undef, size(layout))
+    datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
-        datatitle[inx] = (matricify(getproperty(sols.seasonal.avg, layout[inx][1])), layout[inx][2])
+        datatitle.vars[inx] = matricify(getproperty(sols.seasonal.avg, layout[inx].var))
     end # for inx
-    return contourf_tiles(sols.spacetime.dur, sols.spacetime.x, datatitle)
+    return contourf_tiles(collect(1:sols.spacetime.dur), sols.spacetime.x, datatitle)
 end # function plot_avg
 
 function plot_seasonal(
     sols::Solutions{F,false};
-    xfunc::Function=((sols::Solutions{F,false}, year::Int) -> hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)),
+    xfunc::Function=(
+        (sols::Solutions{F,false}, year::Int) ->
+            hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)
+    ),
     yfunc::Function=(
             :phi in keys(sols.raw) ?
                 (
@@ -1257,21 +1302,19 @@ function plot_seasonal(
         values(groups),
         (sols.forcing.domain[2]:sols.forcing.domain[3], sols.forcing.domain[4]:sols.forcing.domain[5]),
         (Makie.wong_colors()[6], Makie.wong_colors()[1])
-    ) # zip
-        for season in (:avg, :winter, :summer)
-            width = 1.0
-            if season === :avg
-                width += domain===:Warming ? 2.0 : 1.0
-            end # if ===
-            push!(
-                group,
-                Makie.lines!(
-                    ax, xdata[inx], yfunc.(Ref(sols), Ref(season), sols.spacetime.dur[inx]);
-                    color=colour, linewidth=width, linestyle=(season===:summer ? :dash : :solid)
-                )
-            ) # push!
-        end # for season
-    end # for domain, inx, colour
+    ), season in (:avg, :winter, :summer)
+        width = 1.0
+        if season === :avg
+            width += domain===:Warming ? 2.0 : 1.0
+        end # if ===
+        push!(
+            group,
+            Makie.lines!(
+                ax, xdata[inx], yfunc.(Ref(sols), Ref(season), sols.spacetime.dur[inx]);
+                color=colour, linewidth=width, linestyle=(season===:summer ? :dash : :solid)
+            )
+        ) # push!
+    end # for domain, inx, colour, season
     Makie.Legend(
         fig[1,2], values(groups), fill(["mean", "winter", "summer"], 2), keys(groups)
     )
@@ -1281,12 +1324,12 @@ end # function plot_seasonal
 end # module Plot
 
 
-using .Infrastructure, .IO, .Plot
+using .Utilities, .Infrastructure, .IO, .Plot
 
 export Vec, Collection, SpaceTime, Forcing, Solutions
 export miz_paramset, classic_paramset, default_parameters
 export integrate
-export save, safeload!
-export backend, plot_raw, plot_avg, plot_seasonal # TODO test
+export safehouse, save, safeload!
+export Layout, backend, plot_raw, plot_avg, plot_seasonal # TODO blank
 
 end # module EnergyBalanceModel
