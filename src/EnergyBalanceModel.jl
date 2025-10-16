@@ -87,13 +87,13 @@ include("infrastructure.jl")
 include("miz.jl")
 include("classic.jl")
 include("io.jl")
-include("plotting.jl")
+include("plot.jl")
 
 using .Utilities
 using .Infrastructure
 using .MIZ
 using .Classic
 using .IO
-using .Plotting
+using .Plot
 
 end # module EnergyBalanceModel

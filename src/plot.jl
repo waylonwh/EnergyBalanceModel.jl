@@ -1,4 +1,4 @@
-module Plotting # EnergyBalanceModel.
+module Plot
 
 using ..Utilities, ..Infrastructure
 
@@ -139,4 +139,4 @@ function plot_seasonal(
     return fig
 end # function plot_seasonal
 
-end # module Plotting
+end # module Plot
