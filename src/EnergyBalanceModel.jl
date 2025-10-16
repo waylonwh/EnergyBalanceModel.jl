@@ -77,8 +77,7 @@ visualization.
 module EnergyBalanceModel
 
 export Vec, Collection, SpaceTime, Forcing, Solutions
-export miz_paramset, classic_paramset, default_parameters
-export integrate
+export integrate, default_parameters
 export safehouse, save, load!
 export Layout, backend, plot_raw, plot_avg, plot_seasonal
 

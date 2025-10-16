@@ -21,7 +21,7 @@ mutable struct Progress
     width::Int # number of characters wide, including progress texts
     barwidth::Int # width of the progress bar
     lines::Int # lines printed
-    runners::NTuple{4,Char} # characters to use as runners
+    runners::Tuple{Vararg{Char}} # characters to use as runners
     updates::Int # number of external updates
 
     function Progress(
@@ -159,7 +159,7 @@ macro persistent(exprs...)
                 global const $hyfuncvar::typeof($funcname) = $funcname
             end # let $vars
             $(funcnode.args[1]) = $callexpr
-        end # return quote
+        end # quote
     ) # esc
 end # macro persistent
 
@@ -224,7 +224,7 @@ function output!(prog::Progress, feedargs::Tuple=())::Nothing
         # time and speed
         speed = (prog.current-prog.last) / (now-prog.updated)
         togo = display_time((prog.total-prog.current) / speed)
-        prompt = SS.styled"{info:{bold:In progress} $(prog.runners[mod1(prog.updates, 4)])}"
+        prompt = SS.styled"{info:{bold:In progress} $(prog.runners[mod1(prog.updates, length(prog.runners))])}"
     end # if >=, else
     prog.last = prog.current # !
     prog.updated = now # !
