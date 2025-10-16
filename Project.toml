@@ -1,7 +1,7 @@
 name = "EnergyBalanceModel"
 uuid = "68dbb056-390c-4f33-8773-0304cbd749ae"
-version = "1.2.0"
 authors = ["Waylon Wu <me@waylonwu.net>", "Navid C. Constantinou <navidcy@users.noreply.github.com>"]
+version = "1.2.0"
 
 [deps]
 AppleAccelerate = "13e28ba4-7ad8-5781-acae-3021b1ed3924"
@@ -21,14 +21,20 @@ UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 [compat]
 AppleAccelerate = "0.4.1"
 CairoMakie = "0.15.6"
-Dates = "1.11.0"
+Dates = "1.10, 1.11, 1.12"
 GLMakie = "0.13.6"
 JLD2 = "0.6.2"
-LinearAlgebra = "1.12.0"
+LinearAlgebra = "1.10, 1.11, 1.12"
 Makie = "0.24.6"
 NonlinearSolve = "4.12.0"
-SparseArrays = "1.12.0"
-Statistics = "1.11.1"
-StyledStrings = "1.11.0"
+SparseArrays = "1.10, 1.11, 1.12"
+Statistics = "1.10, 1.11, 1.12"
+StyledStrings = "1"
 TimeZones = "1.22.1"
-UUIDs = "1.11.0"
+UUIDs = "1.10, 1.11, 1.12"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
