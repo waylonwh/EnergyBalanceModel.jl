@@ -1,4 +1,79 @@
-# TODO documentation
+"""
+    EnergyBalanceModel
+
+A comprehensive package for solving a classic Energy Balance Model (EBM) (Wagner and
+Eisenman, 2015) and an extended EBM with the inclusion of a Marginal Ice Zone (MIZ). Other
+utilities for data handling and visualization are also provided.
+
+To get started, define a space-time domain, a forcing function, parameters, and initial
+conditions. Then call `integrate` to run the model. See documentation of `SpaceTime`,
+`Forcing`, `default_parameters`, `Collection`, and `integrate` for details. The following
+example runs the EBM with MIZ for 30 years on a 180-point latitudinal grid equally spaced in
+sine latitude, with 2000 timesteps per year and a constant forcing of 0.0. Then the results
+are saved and plotted.
+
+```julia-repl
+julia> using EnergyBalanceModel
+
+julia> st = SpaceTime{sin}(180, 2000, 30)
+SpaceTime{sin} with:
+  180 latitudinal gridboxes: [0.00436331, 0.0130896, … 762, 0.999914, 0.99999]
+  2000 timesteps per year: [0.00025, 0.00075, 0.001 … 99875, 0.99925, 0.99975]
+  30 years of simulation: t∈[0,30]
+  winter at t=0.26125, summer at t=0.77375
+
+julia> forcing = Forcing(0.0)
+Forcing{true}(0.0) is constant:
+  F(t)=0.0, t∈[0,∞)
+
+julia> par = default_parameters(:MIZ)
+Collection{Float64} with 22 entries:
+  :Dmax  => 156.0
+  :a2    => 0.1
+  :alpha => 0.66
+  :m1    => 50.4576
+  :D     => 0.6
+  :S1    => 338.0
+  :B     => 2.1
+  :cw    => 9.8
+  :rl    => 0.5
+  :Fb    => 4.0
+  ⋮      => ⋮
+
+julia> init = Collection{Vec}(
+           :Ei => zeros(st.nx),
+           :Ew => zeros(st.nx),
+           :h => zeros(st.nx),
+           :D => zeros(st.nx),
+           :phi => zeros(st.nx)
+       )
+Collection{Vector{Float64}} with 5 entries:
+  :Ei  => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
+  :D   => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
+  :h   => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
+  :phi => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
+  :Ew  => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
+
+julia> sols = integrate(:MIZ, st, forcing, par, init)
+Integrating
+ 60000/60000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
+ 1:57/-0:00 511.24/sec                      Done ✓
+ t = 30.0
+Solutions{sin, true} with:
+  10 solution variables: [:T, :Ei, :Ti, :D, :n, :h, :phi, :E, :Ew, :Tw]
+  on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
+  and 2000 timesteps: 29.00025:0.0005:29.99975
+  with forcing Forcing{true}(0.0) (constant forcing)
+
+julia> save(sols, "./miz_sol.jld2")
+"./miz_sol.jld2"
+
+julia> plot_raw(sols)
+```
+
+See the documentation for submodules `IO` and `Plot` for details on data handling and
+visualization.
+"""
 module EnergyBalanceModel # .
 
 
@@ -30,8 +105,8 @@ mutable struct Progress
 
     function Progress(
         total::Int,
-        title::String="Progress", freq::Float64=1.0, infofeed::Function=(done::Bool -> "");
-        width::Int=50
+        title::String="Progress", freq::Float64=1.0;
+        width::Int=50, infofeed::Function=(_ -> "")
     )
         barwidth = width - (ndigits(total) * 2 + 1) - 2 - 5 - 3 # current/total [=> ] xx.x%
         return new(
@@ -121,48 +196,6 @@ function Base.show(io::IO, ::MIME"text/plain", safehouse::Safehouse{M})::Nothing
     return nothing
 end # function Base.show
 
-function safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu}
-    if isdefined(modu, name)
-        existed = getproperty(modu, name)
-        if existed isa Safehouse{modu} # exists and correct type
-            return existed
-        else # exists but not a Safehouse{modu}
-            @warn "A variable named `$name` already exists in module `$modu` but is not a Safehouse. This variable has been housed in a new Safehouse with the given name `$name`."
-            tempname = gensym(name) # protect existing variable
-            safehouse = Safehouse{modu}(tempname)
-            house!(name, safehouse) # house the existing variable
-            @eval modu $name = $safehouse # overwrite existing variable
-            return safehouse
-        end # if isa, else
-    else # create new safehouse
-        return Safehouse{modu}(name)
-    end # if isdefined, else
-end # function safehouse
-
-function house!(var::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
-    refugee = Refugee{M}(var)
-    id = refugee.id
-    (var in keys(safehouse.variables)) ? push!(safehouse.variables[var], id) : safehouse.variables[var] = [id] # !
-    safehouse.refugees[id] = refugee # !
-    return refugee
-end # function house!
-
-function note!(id::UInt32, note::String, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
-    refugee = safehouse.refugees[id]
-    refugee.note = note
-    return refugee
-end # function note!
-
-function favorite!(id::UInt32, key::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
-    refugee = safehouse.refugees[id]
-    safehouse.favorites[key] = refugee.id # !
-    return refugee
-end # function favorite!
-
-(retrieve(id::UInt32, safehouse::Safehouse{M}=safehouse())::Refugee{M}) where M = safehouse.refugees[id]
-(retrieve(var::Symbol, safehouse::Safehouse{M}=safehouse())::Vector{Refugee{M}}) where M =
-    getindex.(safehouse.refugees, safehouse.variables[var])
-
 macro persistent(exprs...)
     # syntax tree operations
     findexpr(_, ::Symbol)::Nothing = nothing
@@ -209,17 +242,7 @@ macro persistent(exprs...)
     ) # esc
 end # macro persistent
 
-unique_id()::UInt32 = UInt32(UUIDs.uuid1().value>>96)
-(reprhex(hex::T)::String) where T<:Unsigned = repr(hex)[3:end]
-
-iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
-    IOBuffer(),
-    :limit => true,
-    :displaysize => displaysize(io).+sizemodifier,
-    :compact => true,
-    :color => true
-)
-
+# Progress operations
 function display_time(time::Float64)::String
     if isfinite(time) # remaining time unknown
         timeint = round(Int, time)
@@ -305,15 +328,15 @@ function output!(prog::Progress, feedargs::Tuple=())::Nothing
     println(timespeed, infopaddings, prompt)
     prog.lines += 1 # !
     # update user custom info
-    userstr::String = prog.infofeed(isdone, feedargs...)
-    userstrvec = split(userstr)
+    userstr::String = prog.infofeed(feedargs...)
+    userstrvec = split(userstr, '\n')
     annotatedvec = map((s -> SS.styled" {note:$s}"), userstrvec)
     foreach(s -> println(s), annotatedvec)
     prog.lines += length(annotatedvec) # !
     return nothing
 end # function output
 
-function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple=())::Nothing
+function update!(prog::Progress, current::Int=prog.current+1; feedargs::Tuple=())::Nothing
     # internal update
     prog.current = current # !
     # initialise if not started
@@ -327,6 +350,61 @@ function update!(prog::Progress, current::Int=prog.current+1, feedargs::Tuple=()
     end # if ||
     return nothing
 end # function update!
+
+# Safehouse operations
+function safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu}
+    if isdefined(modu, name)
+        existed = getproperty(modu, name)
+        if existed isa Safehouse{modu} # exists and correct type
+            return existed
+        else # exists but not a Safehouse{modu}
+            @warn "A variable named `$name` already exists in module `$modu` but is not a Safehouse. This variable has been housed in a new Safehouse with the given name `$name`."
+            tempname = gensym(name) # protect existing variable
+            safehouse = Safehouse{modu}(tempname)
+            house!(name, safehouse) # house the existing variable
+            @eval modu $name = $safehouse # overwrite existing variable
+            return safehouse
+        end # if isa, else
+    else # create new safehouse
+        return Safehouse{modu}(name)
+    end # if isdefined, else
+end # function safehouse
+
+function house!(var::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
+    refugee = Refugee{M}(var)
+    id = refugee.id
+    (var in keys(safehouse.variables)) ? push!(safehouse.variables[var], id) : safehouse.variables[var] = [id] # !
+    safehouse.refugees[id] = refugee # !
+    return refugee
+end # function house!
+
+function note!(id::UInt32, note::String, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
+    refugee = safehouse.refugees[id]
+    refugee.note = note
+    return refugee
+end # function note!
+
+function favorite!(id::UInt32, key::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
+    refugee = safehouse.refugees[id]
+    safehouse.favorites[key] = refugee.id # !
+    return refugee
+end # function favorite!
+
+(retrieve(id::UInt32, safehouse::Safehouse{M}=safehouse())::Refugee{M}) where M = safehouse.refugees[id]
+(retrieve(var::Symbol, safehouse::Safehouse{M}=safehouse())::Vector{Refugee{M}}) where M =
+    getindex.(safehouse.refugees, safehouse.variables[var])
+
+# miscellaneous utilities
+unique_id()::UInt32 = UInt32(UUIDs.uuid1().value >> 96)
+(reprhex(hex::T)::String) where T<:Unsigned = repr(hex)[3:end]
+
+iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
+    IOBuffer(),
+    :limit => true,
+    :displaysize => displaysize(io) .+ sizemodifier,
+    :compact => true,
+    :color => true
+)
 
 # mean across vectors
 @inline function crossmean(vecvec::Vector{Vector{T}})::Vector{T} where T<:Number
@@ -814,13 +892,13 @@ function integrate(
     Modu::Module = EnergyBalanceModel.eval(model)
     sols = Solutions(st, forcing, par, init, solvars, lastonly; debug=debug)
     annusol = Solutions(st, forcing, par, init, solvars, true; debug=debug) # for calculating annual means
-    progress = Progress(length(st.T), "Integrating")
-    update!(progress)
+    progress = Progress(length(st.T), "Integrating"; infofeed=(t -> string("t = ", round(t, digits=2))))
+    update!(progress; feedargs=(0,))
     # loop over time
     for ti in eachindex(st.T)
         Modu.step!(st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; debug=debug, verbose=verbose)
         savesol!(sols, annusol, vars, ti)
-        update!(progress)
+        update!(progress; feedargs=(st.T[ti],))
     end # for ti
     return sols
 end # function integrate
@@ -1019,7 +1097,7 @@ function step!(
     end # if !=
     # set NaNs to no existence
     condset!(vars.Ti, NaN, iszero, vars.Ei)
-    condset!(vars.Tw, NaN, isone, vars.Ew)
+    condset!(vars.Tw, NaN, >(0.99), vars.phi)
     return vars
 end # function step
 
@@ -1113,15 +1191,25 @@ using ..Utilities, ..Infrastructure
 
 import Dates, JLD2, Makie, TimeZones as TZ
 
-export save, safeload!
+export save, load!
 
-unsafesave(sols, path::String) = JLD2.save_object(path, sols)
-unsafesave(plt::Makie.Figure, path::String; kwargs...) = Makie.save(path, plt; kwargs...)
+function unsafesave(sols, path::String; spwarn::Bool=false)::String
+    if !spwarn
+        @warn "`unsafesave` may overwrite existing files. Use `save` instead."
+    end # if !
+    JLD2.save_object(path, sols)
+    return path
+end
 
-function save(
-    obj, path::String=joinpath(pwd(), string(reprhex(unique_id()), ".dat"));
-    overwrite::Bool=false
-)::String
+function unsafesave(plt::Makie.Figure, path::String; spwarn::Bool=false, kwargs...)::String
+    if !spwarn
+        @warn "`unsafesave` may overwrite existing files. Use `save` instead."
+    end # if !
+    Makie.save(path, plt; kwargs...)
+    return path
+end
+
+function save(obj, path::String=joinpath(pwd(), string(reprhex(unique_id()), ".dat")))::String
     if isfile(path)
         modified = Dates.format(
             TZ.astimezone(
@@ -1130,34 +1218,30 @@ function save(
             ),
             Dates.dateformat"on d u Y at HH:MM:SS"
         ) # Dates.format
-        basestr = string("File ", path, " already exists. Last modified ", modified, '.')
-        if overwrite
-            @warn(string(basestr, " Overwriting."))
-        else # !overwrite
-            nameext = splitext(path)
-            newpath = string(nameext[1], '_', reprhex(unique_id()), nameext[2])
-            @warn(string(basestr, " The EXISTING file has been renamed to ", newpath, '.'))
-            mv(path, newpath)
-        end # if overwrite
+        nameext = splitext(path)
+        newpath = string(nameext[1], '_', reprhex(unique_id()), nameext[2])
+        @warn "File $path already exists. Last modified $modified. The EXISTING file has been renamed to $newpath."
+        mv(path, newpath)
     end # if isfile
-    unsafesave(obj, path)
-    return path
+    return unsafesave(obj, path; spwarn=true)
 end # function save
 
-function load(path::String)
-    @warn "Assigning the returned value of `load` to a variable could overwrite an existing results. Use `safeload!` instead."
+function unsafeload(path::String; spwarn::Bool=false)
+    if !spwarn
+        @warn "`unsafeload` could overwrite existing variables. Use `load!` instead."
+    end # if !
     return JLD2.load_object(path)
-end # function load
+end # function unsafeload
 
-function safeload!(to::Symbol, path::String, modu::Module=Main; house::Symbol=:SAFEHOUSE)
+function load!(to::Symbol, path::String, modu::Module=Main; house::Symbol=:SAFEHOUSE)
     if isdefined(modu, to)
         refugee = house!(to, safehouse(modu, house))
         @warn "Variable `$to` already defined in $modu. The existing value has been stored in safehouse `$modu.$safehouse` with ID $(reprhex(refugee.id))."
     end # if isdefined
-    loaded = JLD2.load_object(path)
+    loaded = unsafeload(path; spwarn=true)
     @eval modu $to = $loaded
     return loaded
-end # function load
+end # function load!
 
 end # module IO
 
@@ -1230,7 +1314,7 @@ function contourf_tiles(t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}})::
             title=layout[row,col].title,
             xlabel=(row==lastindex(layout, 1) ? Makie.L"$t$ ($\mathrm{y}$)" : ""),
             ylabel=(col==1 ? Makie.L"x" : ""),
-            limits=(0, 1, 0, 1)
+            limits=(nothing, (0, 1))
         )
         ctr = Makie.contourf!(ax, t, x, layout[row,col].var)
         Makie.Colorbar(subfig[1,2], ctr)
@@ -1329,7 +1413,7 @@ using .Utilities, .Infrastructure, .IO, .Plot
 export Vec, Collection, SpaceTime, Forcing, Solutions
 export miz_paramset, classic_paramset, default_parameters
 export integrate
-export safehouse, save, safeload!
-export Layout, backend, plot_raw, plot_avg, plot_seasonal # TODO blank
+export safehouse, save, load!
+export Layout, backend, plot_raw, plot_avg, plot_seasonal
 
 end # module EnergyBalanceModel
