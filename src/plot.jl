@@ -57,6 +57,24 @@ end # function init_backend
 backend()::Union{Module,Missing} = Makie.current_backend()
 backend(backend::Symbol)::Module = init_backend(backend)
 
+function contourf_tiles(t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}})::Makie.Figure where T<:Real
+    fig = Makie.Figure()
+    for row in axes(layout, 1), col in axes(layout, 2)
+        subfig = fig[row,col]
+        ax = Makie.Axis(
+            subfig[1,1];
+            title=layout[row,col].title,
+            xlabel=(row==lastindex(layout, 1) ? Makie.L"$t$ ($\mathrm{y}$)" : ""),
+            ylabel=(col==1 ? Makie.L"x" : ""),
+            limits=(nothing, (0, 1))
+        )
+        ctr = Makie.contourf!(ax, t, x, layout[row,col].var)
+        Makie.Colorbar(subfig[1,2], ctr)
+    end # for row, col
+    @eval Main innerfig = $fig
+    return fig
+end # function contourf_tiles
+
 matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
 
 function plot_raw(
@@ -138,5 +156,13 @@ function plot_seasonal(
     )
     return fig
 end # function plot_seasonal
+
+function unsafesave(plt::Makie.Figure, path::String; spwarn::Bool=false, kwargs...)::String
+    if !spwarn
+        @warn "`unsafesave` may overwrite existing files. Use `save` instead."
+    end # if !
+    Makie.save(path, plt; kwargs...)
+    return path
+end
 
 end # module Plot

@@ -11,7 +11,7 @@ function unsafesave(sols, path::String; spwarn::Bool=false)::String
         @warn "`unsafesave` may overwrite existing files. Use `save` instead."
     end # if !
     JLD2.save_object(path, sols)
-    return pathunsafesave
+    return path
 end
 
 function save(obj, path::String=joinpath(pwd(), string(reprhex(unique_id()), ".dat")))::String
