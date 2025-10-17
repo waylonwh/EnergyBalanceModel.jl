@@ -49,7 +49,7 @@ function init_backend(val::Val)
         throw(ArgumentError("Backend not loaded. Please load the backend package $name first."))
     else
         throw(ArgumentError("Unsupported backend $name."))
-    end # if in
+    end # if ||, else
 end
 
 backend()::Union{Module,Missing} = Makie.current_backend()
