@@ -43,19 +43,17 @@ const classic_layout = Layout(
     AbstractString[Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)" Makie.L"$T$ ($\mathrm{\degree\!C}$)" Makie.L"$h$ ($\mathrm{m}$)"]
 )
 
-function init_backend(backend::Symbol=:GLMakie)::Module
-    if !isdefined(Plot, backend)
-        @eval import $backend
-    end # if !
-    modu = eval(backend)
-    if Makie.current_backend() !== modu
-        backend===:GLMakie ? modu.activate!(; focus_on_show=true) : modu.activate!()
-    end # if !==
-    return modu
-end # function init_backend
+function init_backend(val::Val)
+    name = typeof(val).parameters[1]
+    if val isa Val{:GLMakie} || val isa Val{:CairoMakie}
+        throw(ArgumentError("Backend not loaded. Please load the backend package $name first."))
+    else
+        throw(ArgumentError("Unsupported backend $name."))
+    end # if in
+end
 
 backend()::Union{Module,Missing} = Makie.current_backend()
-backend(backend::Symbol)::Module = init_backend(backend)
+backend(bcknd::Symbol)::Module = init_backend(Val(bcknd))
 
 function contourf_tiles(t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}})::Makie.Figure where T<:Real
     fig = Makie.Figure()
@@ -78,11 +76,11 @@ end # function contourf_tiles
 matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
 
 function plot_raw(
-    sols::Solutions{F,C};
-    backend::Symbol=:GLMakie,
+    sols::Solutions{F,C},
+    bcknd::Symbol=:GLMakie;
     layout::Layout{Symbol}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
 )::Makie.Figure where {F, C}
-    init_backend(backend)
+    backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
         datatitle.vars[inx] = matricify(getproperty(sols.raw, layout[inx].var))
@@ -91,11 +89,11 @@ function plot_raw(
 end # function plot_raw
 
 function plot_avg(
-    sols::Solutions{F,C};
-    backend::Symbol=:GLMakie,
+    sols::Solutions{F,C},
+    bcknd::Symbol=:GLMakie;
     layout::Layout{Symbol}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
 )::Makie.Figure where {F, C}
-    init_backend(backend)
+    backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
         datatitle.vars[inx] = matricify(getproperty(sols.seasonal.avg, layout[inx].var))
@@ -104,28 +102,28 @@ function plot_avg(
 end # function plot_avg
 
 function plot_seasonal(
-    sols::Solutions{F,false};
+    sols::Solutions{F,false},
+    bcknd::Symbol=:GLMakie;
     xfunc::Function=(
         (sols::Solutions{F,false}, year::Int) ->
             hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)
     ),
     yfunc::Function=(
-            :phi in keys(sols.raw) ?
-                (
-                    (sols::Solutions{F,false}, season::Symbol, year::Int) ->
-                        2.0*pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
-                ) :
-                (
-                    (sols, season, year) ->
-                        2.0*pi * hemispheric_mean((getproperty(sols.seasonal, season).E[year]<0.0), sols.spacetime.x)
-                ) # ? :
-        ), # () # yfunc
+        :phi in keys(sols.raw) ?
+            (
+                (sols::Solutions{F,false}, season::Symbol, year::Int) ->
+                    2.0*pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
+            ) :
+            (
+                (sols, season, year) ->
+                    2.0*pi * hemispheric_mean((getproperty(sols.seasonal, season).E[year]<0.0), sols.spacetime.x)
+            ) # ? :
+    ), # ()
     title::AbstractString="Ice covered area",
     xlabel::AbstractString=Makie.L"$\tilde{\mathsf{T}}$ ($\mathrm{\degree\!C}$)",
-    ylabel::AbstractString=Makie.L"A_i$",
-    backend::Symbol=:GLMakie
+    ylabel::AbstractString=Makie.L"A_i$"
 )::Makie.Figure where F
-    init_backend(backend)
+    backend(bcknd)
     xdata = xfunc.(Ref(sols), sols.spacetime.dur)
     fig = Makie.Figure()
     ax = Makie.Axis(fig[1,1]; title=title, xlabel=xlabel, ylabel=ylabel)
