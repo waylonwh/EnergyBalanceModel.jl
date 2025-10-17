@@ -8,8 +8,9 @@ on:
 
 jobs:
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
-    runs-on: ${{ matrix.os }}
+    name: Julia ${{ matrix.version }} - ${{ matrix.runner_name }}
+    # Run on both GitHub-hosted and self-hosted runners. You can further specialize self-hosted with more labels.
+    runs-on: ${{ matrix.runs_on }}
     strategy:
       fail-fast: false
       matrix:
@@ -17,18 +18,22 @@ jobs:
           - '1.10'
           - '1.11'
           - '1.12'
-        os:
-          - ubuntu-latest
-          - macos-latest
-        arch:
-          - x64
+        include:
+          # GitHub-hosted runners
+          - runner_name: ubuntu-latest
+            runs_on: ubuntu-latest
+          - runner_name: macos-latest
+            runs_on: macos-latest
+          # Self-hosted runner (broad). Add more labels if you want to target a specific machine.
+          - runner_name: self-hosted
+            runs_on: self-hosted
 
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v1
         with:
           version: ${{ matrix.version }}
-          arch: ${{ matrix.arch }}
+          # Omit arch to let the action pick the correct architecture for the runner
 
       - uses: actions/cache@v3
         env:
