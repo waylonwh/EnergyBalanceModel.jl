@@ -58,7 +58,7 @@ end # function T0eq
         reltol=1e-6,
         abstol=1e-8
     )
-    if !NlSol.SciMLBase.successful_retcode(T0sol) && verbose
+    if verbose && !NlSol.SciMLBase.successful_retcode(T0sol)
         @warn "Solving for T0 failed at t=$t. Maximum residual $(maximum(abs.(T0sol.resid)))."
     end # if &&
     T0 = T0sol.u

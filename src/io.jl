@@ -1,6 +1,7 @@
 module IO # EnergyBalanceModel.
 
 using ..Utilities, ..Infrastructure
+import ..Plot: unsafesave
 
 import Dates, JLD2, TimeZones as TZ
 
