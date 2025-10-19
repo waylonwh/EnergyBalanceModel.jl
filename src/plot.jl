@@ -69,7 +69,6 @@ function contourf_tiles(t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}})::
         ctr = Makie.contourf!(ax, t, x, layout[row,col].var)
         Makie.Colorbar(subfig[1,2], ctr)
     end # for row, col
-    @eval Main innerfig = $fig
     return fig
 end # function contourf_tiles
 
