@@ -12,6 +12,30 @@ export integrate
 
 const Vec = Vector{Float64} # abbreviation for vector type used in model
 
+"""
+    Collection{V}(args...)
+
+A simple wrapper around `Dict{Symbol,V}` to allow dot syntax access to fields. Use syntax
+for constructing a `Dict{Symbol,V}` to create a `Collection{V}`.
+
+# Examples
+```julia-repl
+julia> parameters = Collection{Float64}(:D => 0.6, :A => 193.0, :B => 2.1)
+Collection{Float64} with 3 entries:
+  :A => 193.0
+  :D => 0.6
+  :B => 2.1
+
+julia> parameters.D
+0.6
+
+julia> getproperty(parameters, :A)
+193.0
+
+julia> parameters.F = 0.0; parameters.F
+0.0
+```
+"""
 struct Collection{V}
     dict::Dict{Symbol,V}
     Collection{V}(args...) where V = new(Dict{Symbol,V}(args...))
@@ -20,7 +44,7 @@ end # struct Collection
 (Base.getproperty(coll::Collection{V}, key::Symbol)::V) where V = getindex(getfield(coll, :dict), key)
 (Base.setproperty!(coll::Collection{V}, key::Symbol, val::V)::Dict{Symbol,V}) where V =
     setindex!(getfield(coll, :dict), val, key)
-(Base.keys(coll::Collection{V})::Base.KeySet{Symbol, Dict{Symbol,V}}) where V = keys(getfield(coll, :dict))
+(Base.propertynames(coll::Collection{V})::Set{Symbol}) where V = Set(keys(getfield(coll, :dict)))
 (Base.length(coll::Collection{V})::Int) where V = length(getfield(coll, :dict))
 
 function Base.show(io::IO, coll::Collection{V})::Nothing where V
@@ -258,13 +282,13 @@ end # struct Solutions{F,C}
     io,
     typeof(sols), '(',
     sols.spacetime.nx, '×', length(sols.ts), "@(", first(sols.ts), ':', sols.spacetime.dt, ':', last(sols.ts), "), ",
-    keys(sols.raw),
+    propertynames(sols.raw),
     ')'
 )
 
 function Base.show(io::IO, ::MIME"text/plain", sols::Solutions{F,C})::Nothing where {F,C}
     println(io, typeof(sols), " with:")
-    println(io, "  ", length(sols.raw), " solution variables: ", keys(sols.raw))
+    println(io, "  ", length(sols.raw), " solution variables: ", propertynames(sols.raw))
     xhead = "  on $(sols.spacetime.nx) latitudinal gridboxes: "
     buffer = iobuffer(io)
     show(buffer, sols.spacetime.x)
@@ -388,7 +412,7 @@ function annual_mean(annusol::Solutions{F,C})::Collection{Vec} where {F, C}
     means = Collection{Vec}()
     foreach(
         (var -> setproperty!(means, var, crossmean(getproperty(annusol.raw, var)))),
-        keys(annusol.raw)
+        propertynames(annusol.raw)
     )
     return means
 end # function annual_mean
@@ -405,36 +429,36 @@ function savesol!(
     # save raw data to annual
     foreach(
         (var -> getproperty(annusol.raw, var)[ti] = getproperty(varscp, var)), # !
-        keys(annusol.raw)
+        propertynames(annusol.raw)
     )
     # save raw data
     if !sols.lastonly # save all raw data
         foreach(
             (var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), tinx)),
-            keys(sols.raw)
+            propertynames(sols.raw)
         )
     elseif tinx > length(sols.spacetime.T) - sols.spacetime.nt # save the raw data of the last year
         foreach(
             (var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti)),
-            keys(sols.raw)
+            propertynames(sols.raw)
         )
     end # if !, elseif
     # save seasonal data
     if ti == sols.spacetime.winter.inx
         foreach(
             (var -> setindex!(getproperty(sols.seasonal.winter, var), getproperty(varscp, var), year)),
-            keys(sols.seasonal.winter)
+            propertynames(sols.seasonal.winter)
         )
     elseif ti == sols.spacetime.summer.inx
         foreach(
             (var -> setindex!(getproperty(sols.seasonal.summer, var), getproperty(varscp, var), year)),
-            keys(sols.seasonal.summer)
+            propertynames(sols.seasonal.summer)
         )
     elseif ti == sols.spacetime.nt # calculate annual average
         means = annual_mean(annusol)
         foreach(
             (var -> setindex!(getproperty(sols.seasonal.avg, var), getproperty(means, var), year)),
-            keys(sols.seasonal.avg)
+            propertynames(sols.seasonal.avg)
         )
     end # if ==, elseif*2
     return sols

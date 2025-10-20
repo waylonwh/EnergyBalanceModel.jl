@@ -78,7 +78,7 @@ matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecve
 function plot_raw(
     sols::Solutions{F,C},
     bcknd::Symbol=:GLMakie;
-    layout::Layout{Symbol}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
+    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
 )::Makie.Figure where {F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -91,7 +91,7 @@ end # function plot_raw
 function plot_avg(
     sols::Solutions{F,C},
     bcknd::Symbol=:GLMakie;
-    layout::Layout{Symbol}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
+    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
 )::Makie.Figure where {F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -109,7 +109,7 @@ function plot_seasonal(
             hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)
     ),
     yfunc::Function=(
-        :phi in keys(sols.raw) ?
+        :phi in propertynames(sols.raw) ?
             (
                 (sols::Solutions{F,false}, season::Symbol, year::Int) ->
                     2.0*pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
