@@ -66,6 +66,45 @@ function Base.show(io::IO, ::MIME"text/plain", coll::Collection{V})::Nothing whe
     return nothing
 end # function Base.show
 
+"""
+    SpaceTime{F}(urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375)
+
+Defines the spatial and temporal grid for the model.
+
+Type parameter `F` is a function that maps the uniform grid `u` with `nx` gridboxes in the
+range `urange` to the model grid `x`. `urange` and `F` should be chosen such that
+F(urange)=[0,1] and F(u₂)>F(u₁) for u₂>u₁.
+
+`nt` is the number of timesteps per year, and `dur` is the duration of the simulation in
+years. `winter` and `summer` are the times in a year (in [0,1]) when winter and summer peaks
+occur.
+
+    SpaceTime(nx::Int, nt::Int, dur::Int; kwargs...)
+    SpaceTime{identity}(nx::Int, nt::Int, dur::Int; kwargs...)
+
+A convenience constructor for `SpaceTime{identity}` with `urange=(0.0, 1.0)`.
+
+    SpaceTime{sin}(nx::Int, nt::Int, dur::Int; kwargs...)
+
+A convenience constructor for `SpaceTime{sin}` with `urange=(0.0, π/2)`.
+
+# Examples
+```julia-repl
+julia> SpaceTime(100, 2000, 30)
+SpaceTime{identity} with:
+  100 latitudinal gridboxes: [0.005, 0.015, 0.025, 0 … 5, 0.975, 0.985, 0.995]
+  2000 timesteps per year: [0.00025, 0.00075, 0.001 … 99875, 0.99925, 0.99975]
+  30 years of simulation: t∈[0,30]
+  winter at t=0.26125, summer at t=0.77375
+
+julia> SpaceTime{sin}(180, 2000, 30)
+SpaceTime{sin} with:
+  180 latitudinal gridboxes: [0.00436331, 0.0130896, … 762, 0.999914, 0.99999]
+  2000 timesteps per year: [0.00025, 0.00075, 0.001 … 99875, 0.99925, 0.99975]
+  30 years of simulation: t∈[0,30]
+  winter at t=0.26125, summer at t=0.77375
+```
+"""
 struct SpaceTime{F}
     nx::Int # number of evenly spaced latitudinal gridboxes (equator to pole)
     u::Vec # grid before modification/scale
@@ -125,6 +164,46 @@ function Base.show(io::IO, ::MIME"text/plain", st::SpaceTime{F})::Nothing where 
     return nothing
 end # function Base.show
 
+"""
+    Forcing(base::Float64)
+
+Defines a constant climate forcing of value `base`.
+
+    Forcing(base::Float64, peak::Float64, cool::Float64, holdyrs::NTuple{2,Int}, rates::NTuple{2,Float64})
+
+Defines a time-varying climate forcing that first holds at `base` for `holdyrs[1]` years,
+warms to `peak` at rate `rates[1]>0` per year, holds at `peak` for `holdyrs[2]` years, cools
+to `cool` at rate `rates[2]<0` per year, and then holds at `cool` thereafter. Warming and
+cooling times (`(peak-base)/rates[1]` and `(cool-peak)/rates[2]`) must be positive integers.
+
+`Forcing` has a field `domain` which is a tuple of years at which the forcing pattern
+changes: `Forcing.domain=(1:0, 2:start of warming, 3:reach peak, 4:start of cooling,
+5:reach cool)`.
+
+A `Forcing` object can be called as a function to evaluate the forcing at a given time in
+years.
+
+# Examples
+```julia-repl
+julia> Forcing(0.0)
+Forcing{true}(0.0) is constant:
+  F(t)=0.0, t∈[0,∞)
+
+julia> f = Forcing(0.0, 5.0, -5.0, (10, 10), (0.5, -0.5))
+Forcing{false} varies from 0.0 up to 5.0 and back to -5.0:
+  F(t)={  0.0            , t∈[ 0,10) (base)
+       {  0.0 + 0.5(t-10), t∈[10,20) (warming)
+       {  5.0            , t∈[20,30) (peak)
+       {  5.0 - 0.5(t-30), t∈[30,50) (cooling)
+       { -5.0            , t∈[50, ∞) (cool)
+
+julia> f.domain
+(0, 10, 20, 30, 50)
+
+julia> f(17.57)
+3.785
+```
+"""
 struct Forcing{F}
     base::Float64 # base forcing
     peak::Float64 # peak forcing
@@ -145,14 +224,14 @@ struct Forcing{F}
         # hold at base
         @. domainvec[2:5] += holdyrs[1]
         # time to warm
-        warming = (peak - base) / rates[1]
+        warming = (peak-base) / rates[1]
         rates[1]>0 && isinteger(warming) ?
             @.(domainvec[3:5] += warming) :
             throw(ArgumentError("Warming time must be positive integer. Got $warming y."))
         # hold at peak
         @. domainvec[4:5] += holdyrs[2]
         # time to cool
-        cooling = (cool - peak) / rates[2]
+        cooling = (cool-peak) / rates[2]
         rates[2]<0 && isinteger(cooling) ?
             domainvec[5] += cooling :
             throw(ArgumentError("Cooling time must be positive integer. Got $cooling y."))
@@ -226,6 +305,30 @@ function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
     end # if <, elseif*3, else
 end # function (forcing::Forcing{false})
 
+"""
+    Solutions{F,C}
+
+An object to store model solutions. Type parameter `F` is the function used to map the
+uniform grid to the model grid in `SpaceTime{F}`. Type parameter `C` is a boolean indicating
+whether the climate forcing is constant. `C` is `true` for constant forcing.
+
+# Fields
+- `spacetime::SpaceTime{F}`: space and time on which solutions are defined
+- `ts::Vec`: time vector for stored solutions
+- `forcing::Forcing{C}`: climate forcing
+- `parameters::Collection{Float64}`: model parameters
+- `initconds::Collection{Vec}`: initial conditions
+- `lastonly::Bool`: whether to store solutions for each time step only for the last year
+- `debug::Union{Expr,Nothing}`: expression for evaluating debug variables
+- `raw::Collection{Vector{Vec}}`: solutions for each time step
+- `seasonal::@NamedTuple{winter::..., summer::..., avg::...}`: seasonal peak and annual
+    average solution storage for each year
+
+Note that each value of `raw`, `seasonal.winter`, `seasonal.summer`, and `seasonal.avg` is
+a vector of vectors. For example, `raw.E[ti]::Vector{Float64}` stores the solution for
+enthalpy at time step `ts[ti]::Float64`, and `seasonal.avg.T[y]::Vector{Float64}` stores
+the annual average temperature for year `y::Int`.
+"""
 struct Solutions{F,C}
     spacetime::SpaceTime{F} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
@@ -344,6 +447,28 @@ function default_parameters(paramset::Set{Symbol})::Collection{Float64}
     setvec = collect(paramset)
     return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultpar
+"""
+    default_parameters(model::Symbol)::Collection{Float64}
+
+Get default parameters for a given model. `model` can be `:MIZ` or `:classic`.
+
+# Examples
+```julia-repl
+julia> default_parameters(:Classic)
+Collection{Float64} with 16 entries:
+  :a2 => 0.1
+  :F  => 0.0
+  :A  => 193.0
+  :k  => 2.0
+  :D  => 0.6
+  :S1 => 338.0
+  :B  => 2.1
+  :cw => 9.8
+  :S2 => 240.0
+  :S0 => 420.0
+  ⋮   => ⋮
+```
+"""
 default_parameters(model::Symbol)::Collection{Float64} =
     model===:MIZ ? default_parameters(miz_paramset) : default_parameters(classic_paramset)
 
@@ -464,6 +589,28 @@ function savesol!(
     return sols
 end # function savesol!
 
+"""
+    integrate(
+        model::Symbol, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+        lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
+    )::Solutions{F,C}
+
+Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
+parameters `par`, and initial conditions `init`. Results and inputs are stored in a
+`Solutions` object.
+
+`model` can be `:MIZ` or `:classic`. Use `default_parameters` to get default model
+parameters. For `:MIZ`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D` and
+`:phi`; for `:classic`, `init` must contain `:E` and `:Tg`.
+
+When `lastonly=true`, only the last year of the solution is stored for each time step,
+otherwise the full solution is stored. When `debug` expression is provided, a variable
+`:debug` is added to the solution storage which contains the evaluated expression at each
+time step. If `verbose=true`, a warning message is showed when the SCM nonlinear equation
+fails to converge at any time step.
+
+Refer to the documentation of the module `EnergyBalanceModel` for an example.
+"""
 function integrate(
     model::Symbol, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
     lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
@@ -474,7 +621,7 @@ function integrate(
     if model === :MIZ # add MIZ variables
         union!(solvars, Set{Symbol}((:Ei, :Ew, :Ti, :Tw, :D, :phi, :n)))
     end # if ===
-    Modu::Module = EnergyBalanceModel.eval(model)
+    Modu::Module = EnergyBalanceModel.eval(model) # TODO use multiple dispatch
     sols = Solutions(st, forcing, par, init, solvars, lastonly; debug=debug)
     annusol = Solutions(st, forcing, par, init, solvars, true; debug=debug) # for calculating annual means
     progress = Progress(length(st.T), "Integrating"; infofeed=(t -> string("t = ", round(t, digits=2))))
