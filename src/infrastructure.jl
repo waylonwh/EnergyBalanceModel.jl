@@ -87,21 +87,13 @@ function Base.show(io::IO, ::MIME"text/plain", st::SpaceTime{F})::Nothing where 
     nxstr = "  $(st.nx) latitudinal gridboxes: "
     buffer = iobuffer(io)
     show(buffer, st.x)
-    vecstr = if VERSION >= v"1.12"
-        ctruncate(String(take!(buffer.io)), displaysize(io)[2]-length(nxstr)-2, " … ")
-    else
-        String(take!(buffer.io))
-    end
+    vecstr = ctruncate(String(take!(buffer.io)), displaysize(io)[2]-length(nxstr)-2, " … ")
     println(io, nxstr, vecstr)
 
     nystr = "  $(st.nt) timesteps per year: "
     buffer = iobuffer(io)
     show(buffer, st.t)
-    vecstr = if VERSION >= v"1.12"
-        ctruncate(String(take!(buffer.io)), displaysize(io)[2]-length(nystr)-2, " … ")
-    else
-        String(take!(buffer.io))
-    end
+    vecstr = ctruncate(String(take!(buffer.io)), displaysize(io)[2]-length(nystr)-2, " … ")
     println(io, nystr, vecstr)
 
     println(io, "  $(st.dur) years of simulation: t∈[0,$(st.dur)]")
@@ -276,11 +268,7 @@ function Base.show(io::IO, ::MIME"text/plain", sols::Solutions{F,C})::Nothing wh
     xhead = "  on $(sols.spacetime.nx) latitudinal gridboxes: "
     buffer = iobuffer(io)
     show(buffer, sols.spacetime.x)
-    vecstr = if VERSION >= v"1.12"
-        ctruncate(String(take!(buffer.io)), displaysize(io)[2]-length(xhead)-2, " … ")
-    else
-        String(take!(buffer.io))
-    end
+    vecstr = ctruncate(String(take!(buffer.io)), displaysize(io)[2]-length(xhead)-2, " … ")
     println(io, xhead, vecstr)
     println(io, "  and " , length(sols.ts), " timesteps: ", first(sols.ts), ':', sols.spacetime.dt, ':', last(sols.ts))
     print(io, "  with forcing ", repr(sols.forcing))

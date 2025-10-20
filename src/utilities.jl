@@ -315,7 +315,13 @@ end # function favorite!
 (retrieve(var::Symbol, safehouse::Safehouse{M}=safehouse())::Vector{Refugee{M}}) where M =
     getindex.(safehouse.refugees, safehouse.variables[var])
 
-# miscellaneous utilities
+# Miscellaneous utilities
+# add new function introduced in Julia 1.12
+if VERSION < v"1.12"
+    export ctruncate
+    ctruncate(x, _...) = x
+end # if <
+
 unique_id()::UInt32 = UInt32(UUIDs.uuid1().value >> 96)
 (reprhex(hex::T)::String) where T<:Unsigned = repr(hex)[3:end]
 

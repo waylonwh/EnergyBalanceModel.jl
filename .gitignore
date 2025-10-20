@@ -28,3 +28,6 @@ Manifest.toml
 
 # macOS system files
 .DS_Store
+
+# Additional Manifest files for different Julia versions
+Manifest10.toml
