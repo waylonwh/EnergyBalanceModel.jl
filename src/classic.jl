@@ -75,4 +75,4 @@ precompile(
     (Val{:Classic}, Float64, Float64, Collection{Vec}, SpaceTime{identity}, Collection{Float64})
 )
 
-end # module ClassicEBM
+end # module Classic
