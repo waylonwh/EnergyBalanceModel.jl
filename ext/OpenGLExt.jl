@@ -9,6 +9,6 @@ function EBM.Plot.init_backend(::Val{:GLMakie})::Module
         GLMakie.activate!(; focus_on_show=true)
     end # if !==
     return GLMakie
-end # function init_backend
+end # function EBM.Plot.init_backend
 
 end # module OpenGLExt

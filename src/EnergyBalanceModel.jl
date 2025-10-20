@@ -68,7 +68,7 @@ Solutions{sin, true} with:
 julia> save(sols, "./miz_sol.jld2")
 "./miz_sol.jld2"
 
-julia> plot_raw(sols)
+julia> import GLMakie; plot_raw(sols)
 ```
 
 See the documentation for submodules `IO` and `Plot` for details on data handling and

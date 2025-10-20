@@ -589,6 +589,9 @@ function savesol!(
     return sols
 end # function savesol!
 
+# stub for step! function
+function step! end
+
 """
     integrate(
         model::Symbol, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
@@ -621,14 +624,13 @@ function integrate(
     if model === :MIZ # add MIZ variables
         union!(solvars, Set{Symbol}((:Ei, :Ew, :Ti, :Tw, :D, :phi, :n)))
     end # if ===
-    Modu::Module = EnergyBalanceModel.eval(model) # TODO use multiple dispatch
     sols = Solutions(st, forcing, par, init, solvars, lastonly; debug=debug)
     annusol = Solutions(st, forcing, par, init, solvars, true; debug=debug) # for calculating annual means
     progress = Progress(length(st.T), "Integrating"; infofeed=(t -> string("t = ", round(t, digits=2))))
     update!(progress; feedargs=(0,))
     # loop over time
     for ti in eachindex(st.T)
-        Modu.step!(st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; debug=debug, verbose=verbose)
+        step!(Val(model), st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; debug=debug, verbose=verbose)
         savesol!(sols, annusol, vars, ti)
         update!(progress; feedargs=(st.T[ti],))
     end # for ti

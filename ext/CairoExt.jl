@@ -9,6 +9,6 @@ function EBM.Plot.init_backend(::Val{:CairoMakie})::Module
         CairoMakie.activate!()
     end # if !==
     return CairoMakie
-end # function init_backend
+end # function EBM.Plot.init_backend
 
 end # module CairoExt

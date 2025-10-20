@@ -34,7 +34,8 @@ import LinearAlgebra as LA, SparseArrays as SA
     end # function get_statics
 ) # @persistent
 
-function step!(
+function Infrastructure.step!(
+    ::Val{:Classic},
     t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
     debug::Union{Expr,Nothing}=nothing
 )::Collection{Vec} where F
@@ -67,8 +68,11 @@ function step!(
         vars.debug = eval(debug) # !
     end # if !=
     return vars
-end # function step
+end # function Infrastructure.step!
 
-precompile(step!, (Float64, Float64, Collection{Vec}, SpaceTime{identity}, Collection{Float64}))
+precompile(
+    Infrastructure.step!,
+    (Val{:Classic}, Float64, Float64, Collection{Vec}, SpaceTime{identity}, Collection{Float64})
+)
 
 end # module ClassicEBM
