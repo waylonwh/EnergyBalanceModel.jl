@@ -8,6 +8,12 @@ export @persistent, iobuffer, unique_id, reprhex
 export crossmean, hemispheric_mean
 export condset!, condset, zeroref!
 
+# add new function introduced in Julia 1.12
+if VERSION < v"1.12"
+    export ctruncate
+    ctruncate(x, _...) = x
+end # if <
+
 # progress bar
 mutable struct Progress
     title::String
@@ -316,11 +322,6 @@ end # function favorite!
     getindex.(safehouse.refugees, safehouse.variables[var])
 
 # Miscellaneous utilities
-# add new function introduced in Julia 1.12
-if VERSION < v"1.12"
-    export ctruncate
-    ctruncate(x, _...) = x
-end # if <
 
 unique_id()::UInt32 = UInt32(UUIDs.uuid1().value >> 96)
 (reprhex(hex::T)::String) where T<:Unsigned = repr(hex)[3:end]
