@@ -59,7 +59,7 @@ mutable struct Refugee{M,T}
     varname::Symbol
     id::UInt32
     housed::TZ.ZonedDateTime
-    val::T
+    val::T # TODO remove
     note::String
 
     function Refugee{M}(var::Symbol) where M
@@ -67,6 +67,8 @@ mutable struct Refugee{M,T}
         return new{M,typeof(val)}(var, unique_id(), TZ.now(TZ.localzone()), val, "")
     end # function Refugee{M}
 end # struct Refugee{M,T}
+
+Base.getindex(refugee::Refugee{M,T})::T where {M, T} = refugee.val
 
 function Base.show(io::IO, refugee::Refugee{M,T})::Nothing where {M, T}
     print(
@@ -92,7 +94,7 @@ end # function Base.show
 # safehouse to hold results before being overwritten
 struct Safehouse{M}
     variables::Dict{Symbol,Vector{UInt32}}
-    favorites::Dict{Symbol,UInt32}
+    favorites::Dict{Symbol,UInt32} # TODO remove
     refugees::Dict{UInt32,Refugee{M}}
 
     function Safehouse{M}(name::Symbol=:SAFEHOUSE) where M
@@ -279,6 +281,19 @@ function update!(prog::Progress, current::Int=prog.current+1; feedargs::Tuple=()
 end # function update!
 
 # Safehouse operations
+"""
+    safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu}
+
+Create or retrieve a `Safehouse` in the specified module `modu` with the given name `name`.
+If a variable with the specified name already exists in the module but is not a `Safehouse`,
+it will be housed in a new `Safehouse`, and a warning will be issued.
+
+# Examples
+```julia-repl
+julia> safehouse()
+EnergyBalanceModel.Utilities.Safehouse{Main} with 0 refugees in 0 variables:
+```
+"""
 function safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu}
     if isdefined(modu, name)
         existed = getproperty(modu, name)
@@ -297,6 +312,14 @@ function safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu}
     end # if isdefined, else
 end # function safehouse
 
+"""
+    house!(var::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
+
+Save the current value of the variable `var` in the specified `safehouse` defined in module
+`M`.
+
+# Examples
+"""
 function house!(var::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
     refugee = Refugee{M}(var)
     id = refugee.id
