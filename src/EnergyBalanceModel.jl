@@ -78,7 +78,7 @@ module EnergyBalanceModel
 
 export Vec, Collection, SpaceTime, Forcing, Solutions
 export integrate, default_parameters
-export safehouse, house!, retrieve!, save, load!
+export safehouse, house!, retrieve, save, load!
 export Layout, backend, plot_raw, plot_avg, plot_seasonal
 
 include("utilities.jl")

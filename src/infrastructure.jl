@@ -448,7 +448,7 @@ function default_parameters(paramset::Set{Symbol})::Collection{Float64}
     return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultpar
 """
-    default_parameters(model::Symbol)::Collection{Float64}
+    default_parameters(model::Symbol) -> Collection{Float64}
 
 Get default parameters for a given model. `model` can be `:MIZ` or `:classic`.
 
@@ -593,10 +593,7 @@ end # function savesol!
 function step! end
 
 """
-    integrate(
-        model::Symbol, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
-        lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
-    )::Solutions{F,C}
+    integrate(model::Symbol, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, verbose::Bool=false) -> Solutions{F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a

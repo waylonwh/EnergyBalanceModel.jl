@@ -3,7 +3,7 @@ module Utilities # EnergyBalanceModel.
 import UUIDs, StyledStrings as SS, Statistics as Stats, TimeZones as TZ
 
 export Progress, update!
-export safehouse, house!, favorite!, note!, retrieve
+export safehouse, house!, retrieve
 export @persistent, iobuffer, unique_id, reprhex
 export crossmean, hemispheric_mean
 export condset!, condset, zeroref!
@@ -59,23 +59,22 @@ mutable struct Refugee{M,T}
     varname::Symbol
     id::UInt32
     housed::TZ.ZonedDateTime
-    val::T # TODO remove
-    note::String
+    val::T
 
     function Refugee{M}(var::Symbol) where M
         val = deepcopy(getproperty(M, var))
-        return new{M,typeof(val)}(var, unique_id(), TZ.now(TZ.localzone()), val, "")
+        return new{M,typeof(val)}(var, unique_id(), TZ.now(TZ.localzone()), val)
     end # function Refugee{M}
 end # struct Refugee{M,T}
 
-Base.getindex(refugee::Refugee{M,T})::T where {M, T} = refugee.val
+(Base.getindex(refugee::Refugee{M,T})::T) where {M, T} = refugee.val
 
 function Base.show(io::IO, refugee::Refugee{M,T})::Nothing where {M, T}
     print(
         io,
         typeof(refugee), '(', refugee.varname, '#', reprhex(refugee.id), " = "
     )
-    show(io, refugee.val)
+    show(io, refugee[])
     print(io, ')')
 end # function Base.show
 
@@ -85,7 +84,7 @@ function Base.show(io::IO, ::MIME"text/plain", refugee::Refugee{M,T})::Nothing w
         typeof(refugee), '(', refugee.varname, '#', reprhex(refugee.id), ')', " housed at ", refugee.housed, ':'
     )
     buffer = iobuffer(io; sizemodifier=(0, -2))
-    show(buffer, MIME("text/plain"), refugee.val)
+    show(buffer, MIME("text/plain"), refugee[])
     str = String(take!(buffer.io))
     print(io, string("  ", replace(str, '\n' => "\n  ")))
     return nothing
@@ -94,11 +93,10 @@ end # function Base.show
 # safehouse to hold results before being overwritten
 struct Safehouse{M}
     variables::Dict{Symbol,Vector{UInt32}}
-    favorites::Dict{Symbol,UInt32} # TODO remove
     refugees::Dict{UInt32,Refugee{M}}
 
     function Safehouse{M}(name::Symbol=:SAFEHOUSE) where M
-        safehouse = new{M}(Dict{Symbol,Vector{UInt32}}(), Dict{Symbol,UInt32}(), Dict{UInt32,Refugee{M}}())
+        safehouse = new{M}(Dict{Symbol,Vector{UInt32}}(), Dict{UInt32,Refugee{M}}())
         @eval M const $name = $safehouse
         return safehouse
     end # function Safehouse{M}
@@ -282,7 +280,7 @@ end # function update!
 
 # Safehouse operations
 """
-    safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu}
+    safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE) -> Safehouse{modu}
 
 Create or retrieve a `Safehouse` in the specified module `modu` with the given name `name`.
 If a variable with the specified name already exists in the module but is not a `Safehouse`,
@@ -313,12 +311,23 @@ function safehouse(modu::Module=Main, name::Symbol=:SAFEHOUSE)::Safehouse{modu}
 end # function safehouse
 
 """
-    house!(var::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
+    house!(var::Symbol, safehouse::Safehouse{M}=safehouse()) -> Refugee{M}
 
 Save the current value of the variable `var` in the specified `safehouse` defined in module
 `M`.
 
 # Examples
+```julia-repl
+julia> x = "Hello";
+
+julia> house!(:x, safehouse())
+EnergyBalanceModel.Utilities.Refugee{Main, String}(x#25419adc) housed at 2025-10-21T10:40:22.719+11:00:
+  "Hello"
+
+julia> SAFEHOUSE
+EnergyBalanceModel.Utilities.Safehouse{Main} with 1 refugees in 1 variables:
+  EnergyBalanceModel.Utilities.Refugee{Main, String}(x#25419adc = "Hello")
+```
 """
 function house!(var::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
     refugee = Refugee{M}(var)
@@ -328,24 +337,44 @@ function house!(var::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} wh
     return refugee
 end # function house!
 
-function note!(id::UInt32, note::String, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
-    refugee = safehouse.refugees[id]
-    refugee.note = note
-    return refugee
-end # function note!
+"""
+    retrieve(id::UInt32, safehouse::Safehouse{M}=safehouse()) ->Refugee{M}
 
-function favorite!(id::UInt32, key::Symbol, safehouse::Safehouse{M}=safehouse())::Refugee{M} where M
-    refugee = safehouse.refugees[id]
-    safehouse.favorites[key] = refugee.id # !
-    return refugee
-end # function favorite!
+Retrieve the `Refugee` with the specified `id` from the given `safehouse` defined in module
+`M`.
 
+    retrieve(var::Symbol, safehouse::Safehouse{M}=safehouse()) -> Vector{Refugee{M}}
+
+Retrieve all `Refugee`s of the variable `var` from the specified `safehouse` defined in
+module `M`.
+
+Use `Refugee[]` to access the value stored in a `Refugee`.
+
+# Examples
+```julia-repl
+julia> for i in 1:5; global x=i; house!(:x, safehouse()); end
+
+julia> retrieve(:x, SAFEHOUSE)
+5-element Vector{EnergyBalanceModel.Utilities.Refugee{Main}}:
+ EnergyBalanceModel.Utilities.Refugee{Main, Int64}(x#34d82162 = 1)
+ EnergyBalanceModel.Utilities.Refugee{Main, Int64}(x#34ea301e = 2)
+ EnergyBalanceModel.Utilities.Refugee{Main, Int64}(x#34ea3282 = 3)
+ EnergyBalanceModel.Utilities.Refugee{Main, Int64}(x#34ea330c = 4)
+ EnergyBalanceModel.Utilities.Refugee{Main, Int64}(x#34ea3370 = 5)
+
+julia> y = retrieve(0x34ea3370, SAFEHOUSE)
+EnergyBalanceModel.Utilities.Refugee{Main, Int64}(x#34ea3370) housed at 2025-10-21T10:55:07.895+11:00:
+  5
+
+julia> y[]
+5
+```
+"""
 (retrieve(id::UInt32, safehouse::Safehouse{M}=safehouse())::Refugee{M}) where M = safehouse.refugees[id]
 (retrieve(var::Symbol, safehouse::Safehouse{M}=safehouse())::Vector{Refugee{M}}) where M =
-    getindex.(safehouse.refugees, safehouse.variables[var])
+    retrieve.(safehouse.variables[var], Ref(safehouse))
 
 # Miscellaneous utilities
-
 unique_id()::UInt32 = UInt32(UUIDs.uuid1().value >> 96)
 (reprhex(hex::T)::String) where T<:Unsigned = repr(hex)[3:end]
 
