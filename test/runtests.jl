@@ -34,7 +34,7 @@ jldsave("solution_1year.jld2", sols=sols)
     file = jldopen("solution_1year.jld2")
     sols_loaded = file["sols"]
 
-    for key in keys(sols.raw)
+    for key in propertynames(sols.raw)
 
         @show key
         solv = getproperty(sols.raw, key)[10]

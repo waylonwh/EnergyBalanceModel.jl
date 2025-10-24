@@ -7,6 +7,19 @@ import Makie
 export Layout, backend
 export plot_raw, plot_avg, plot_seasonal
 
+"""
+    Layout(vars::Matrix{T}, titles::Matrix{AbstractString})
+
+A layout structure for plotting. When using `plot_raw` or `plot_avg`, type `T` should be
+`Symbol`, representing variable names in `Solutions`. The `titles` matrix contains
+corresponding titles for each subplot.
+
+# Examples
+```julia-repl
+julia> Layout([:E :T :h], AbstractString["Enthalpy" "Temperature" "Thinkness"])
+Layout{Symbol}([:E :T :h], AbstractString["Enthalpy" "Temperature" "Thinkness"])
+```
+"""
 struct Layout{T}
     vars::Matrix{T}
     titles::Matrix{AbstractString}
@@ -52,6 +65,26 @@ function init_backend(val::Val)
     end # if ||, else
 end
 
+"""
+    backend() -> Union{Module,Missing}
+
+Get the current Makie backend module. If no backend is initialized, returns `missing`.
+
+    backend(bcknd::Symbol) -> Module
+
+Set the Makie backend to the specified `bcknd` and return the backend module. Supported
+backends are `:GLMakie` and `:CairoMakie`. You need to first load the corresponding
+backend package before calling this function.
+
+# Examples
+```julia-repl
+julia> backend()
+missing
+
+julia> import GLMakie; backend(:GLMakie)
+GLMakie
+```
+"""
 backend()::Union{Module,Missing} = Makie.current_backend()
 backend(bcknd::Symbol)::Module = init_backend(Val(bcknd))
 
@@ -74,10 +107,19 @@ end # function contourf_tiles
 
 matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
 
+"""
+    plot_raw(sols::Solutions{F,C},bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
+
+Plot the the solution variables for each time step in `sols.raw` using the specified Makie
+backend `bcknd` and `layout`. By default, the layout is set to `miz_layout` if the variable
+`:phi` exists in `sols.raw`, otherwise it uses `classic_layout`. Use
+`EnergyBalanceModel.Plot.miz_layout` or `EnergyBalanceModel.Plot.classic_layout` to get
+default layouts.
+"""
 function plot_raw(
     sols::Solutions{F,C},
     bcknd::Symbol=:GLMakie;
-    layout::Layout{Symbol}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
+    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
 )::Makie.Figure where {F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -87,10 +129,17 @@ function plot_raw(
     return contourf_tiles(sols.ts, sols.spacetime.x, datatitle)
 end # function plot_raw
 
+"""
+    plot_avg(sols::Solutions{F,C}, bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
+
+Plot the annual average of solution variables in `sols.seasonal.avg` using the specified
+Makie backend `bcknd` and `layout`. By default, the layout is set to `miz_layout` if `:phi`
+exists in the solution, otherwise it uses `classic_layout`.
+"""
 function plot_avg(
     sols::Solutions{F,C},
     bcknd::Symbol=:GLMakie;
-    layout::Layout{Symbol}=(:phi in keys(sols.raw) ? miz_layout : classic_layout)
+    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
 )::Makie.Figure where {F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -100,6 +149,27 @@ function plot_avg(
     return contourf_tiles(collect(1:sols.spacetime.dur), sols.spacetime.x, datatitle)
 end # function plot_avg
 
+"""
+    plot_seasonal(sols::Solutions{F,false}, bcknd::Symbol=:GLMakie; ...) -> Makie.Figure
+
+Using the data from `sols.seasonal`, plot lines spanned by (`xfunc(sols, year)`,
+`yfunc(sols, season, year)`) for each year and for the seasons `:avg`, `:winter`, and
+`:summer`. By default, `xfunc` computes the hemispheric mean temperature from
+`sols.seasonal.avg.T`, while `yfunc` computes the ice-covered area using either
+concentration `phi` (if it exists) or enthalpy `E`. Lines during the warming period defined
+in `sols.forcing` are coloured red, and those during the cooling period are coloured blue.
+Lines for the summer peak are dashed, those for winter are thin solid, and those for the
+annual average are thick solid.
+
+# Keyword Arguments
+- `xfunc::Function`: A function that takes in `sols` and `year` and returns a `Float64`
+    representing the x-coordinate for that year.
+- `yfunc::Function`: A function that takes in `sols`, `season`, and `year` and returns a
+    `Float64` representing the y-coordinate for that season and year.
+- `title::AbstractString`: Title of the plot.
+- `xlabel::AbstractString`: Label for the x-axis.
+- `ylabel::AbstractString`: Label for the y-axis.
+"""
 function plot_seasonal(
     sols::Solutions{F,false},
     bcknd::Symbol=:GLMakie;
@@ -108,7 +178,7 @@ function plot_seasonal(
             hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)
     ),
     yfunc::Function=(
-        :phi in keys(sols.raw) ?
+        :phi in propertynames(sols.raw) ?
             (
                 (sols::Solutions{F,false}, season::Symbol, year::Int) ->
                     2.0*pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)

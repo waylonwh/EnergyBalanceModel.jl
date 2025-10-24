@@ -68,7 +68,7 @@ Solutions{sin, true} with:
 julia> save(sols, "./miz_sol.jld2")
 "./miz_sol.jld2"
 
-julia> plot_raw(sols)
+julia> import GLMakie; plot_raw(sols)
 ```
 
 See the documentation for submodules `IO` and `Plot` for details on data handling and
@@ -78,7 +78,7 @@ module EnergyBalanceModel
 
 export Vec, Collection, SpaceTime, Forcing, Solutions
 export integrate, default_parameters
-export safehouse, save, load!
+export safehouse, house!, retrieve, save, load!
 export Layout, backend, plot_raw, plot_avg, plot_seasonal
 
 include("utilities.jl")
