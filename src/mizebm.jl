@@ -1,5 +1,5 @@
 
-module MIZ # EnergyBalanceModel.
+module MIZEBM # EnergyBalanceModel.
 
 using ..Infrastructure, ..Utilities
 
@@ -148,8 +148,7 @@ end # function D_t
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad * dt
 
 function Infrastructure.step!(
-    ::Val{:MIZ},
-    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
+    ::MIZ, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
     debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
 )::Collection{Vec} where F
     # update temperature
@@ -199,8 +198,8 @@ for xfunc in (identity, sin)
     precompile(solveTi, (Vec, Float64, Vec, Vec, Vec, Float64, SpaceTime{xfunc}, Collection{Float64}))
     precompile(
         Infrastructure.step!,
-        (Val{:MIZ}, Float64, Float64, Collection{Vec}, SpaceTime{xfunc}, Collection{Float64})
+        (MIZ, Float64, Float64, Collection{Vec}, SpaceTime{xfunc}, Collection{Float64})
     )
 end # for xfunc
 
-end # module MIZ
+end # module MIZEBM
