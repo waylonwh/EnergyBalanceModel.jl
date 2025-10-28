@@ -3,7 +3,7 @@ using EnergyBalanceModel, Test, JLD2
 #=
 st = SpaceTime{sin}(180, 2000, 1)
 forcing = Forcing(0.0)
-par = default_parameters(:MIZ)
+par = default_parameters(MIZ())
 init = Collection{Vec}(
            :Ei => zeros(st.nx),
            :Ew => zeros(st.nx),
@@ -11,7 +11,7 @@ init = Collection{Vec}(
            :D => zeros(st.nx),
            :phi => zeros(st.nx)
        )
-sols = integrate(:MIZ, st, forcing, par, init)
+sols = integrate(MIZ(), st, forcing, par, init)
 
 using JLD2
 jldsave("solution_1year.jld2", sols=sols)
@@ -21,7 +21,7 @@ jldsave("solution_1year.jld2", sols=sols)
 
     st = SpaceTime{sin}(180, 2000, 1)
     forcing = Forcing(0.0)
-    par = default_parameters(:MIZ)
+    par = default_parameters(MIZ())
     init = Collection{Vec}(
             :Ei => zeros(st.nx),
             :Ew => zeros(st.nx),
@@ -29,7 +29,7 @@ jldsave("solution_1year.jld2", sols=sols)
             :D => zeros(st.nx),
             :phi => zeros(st.nx)
         )
-    sols = integrate(:MIZ, st, forcing, par, init)
+    sols = integrate(MIZ(), st, forcing, par, init)
 
     file = jldopen("solution_1year.jld2")
     sols_loaded = file["sols"]

@@ -1,4 +1,4 @@
-module Classic # EnergyBalanceModel.
+module ClassicEBM # EnergyBalanceModel.
 
 using ..Utilities, ..Infrastructure
 
@@ -35,7 +35,7 @@ import LinearAlgebra as LA, SparseArrays as SA
 ) # @persistent
 
 function Infrastructure.step!(
-    ::Val{:Classic},
+    ::Classic,
     t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
     debug::Union{Expr,Nothing}=nothing
 )::Collection{Vec} where F
@@ -72,7 +72,7 @@ end # function Infrastructure.step!
 
 precompile(
     Infrastructure.step!,
-    (Val{:Classic}, Float64, Float64, Collection{Vec}, SpaceTime{identity}, Collection{Float64})
+    (Classic, Float64, Float64, Collection{Vec}, SpaceTime{identity}, Collection{Float64})
 )
 
-end # module Classic
+end # module ClassicEBM

@@ -5,12 +5,30 @@ using ..Utilities
 import EnergyBalanceModel
 import SparseArrays as SA, Statistics as Stats
 
+export MIZ, Classic
 export Vec, Collection, SpaceTime, Solutions, Forcing
 export default_parval, miz_paramset, classic_paramset
 export default_parameters, get_diffop, diffusion!, D∇²!, diffusion, D∇², annual_mean
 export integrate
 
 const Vec = Vector{Float64} # abbreviation for vector type used in model
+
+abstract type Model end
+
+"""
+    MIZ <: Model
+
+Singleton type representing the extended idealised climate model with a marginal ice zone
+(MIZ).
+"""
+struct MIZ <: Model end
+
+"""
+    Classic <: Model
+
+Singleton type representing the classic idealised climate model by Wagner & Eisenman (2015).
+"""
+struct Classic <: Model end
 
 """
     Collection{V}(args...)
@@ -306,13 +324,15 @@ function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
 end # function (forcing::Forcing{false})
 
 """
-    Solutions{F,C}
+    Solutions{M,F,C}
 
-An object to store model solutions. Type parameter `F` is the function used to map the
-uniform grid to the model grid in `SpaceTime{F}`. Type parameter `C` is a boolean indicating
-whether the climate forcing is constant. `C` is `true` for constant forcing.
+An object to store model solutions. Type parameter `M` is the model type (`MIZ` or
+`Classic`); `F` is the function used to map the uniform grid to the model grid in
+`SpaceTime{F}`; `C` is a boolean indicating whether the climate forcing is constant.
+`C` is `true` for constant forcing.
 
 # Fields
+- `model::M`: model type
 - `spacetime::SpaceTime{F}`: space and time on which solutions are defined
 - `ts::Vec`: time vector for stored solutions
 - `forcing::Forcing{C}`: climate forcing
@@ -329,7 +349,8 @@ a vector of vectors. For example, `raw.E[ti]::Vector{Float64}` stores the soluti
 enthalpy at time step `ts[ti]::Float64`, and `seasonal.avg.T[y]::Vector{Float64}` stores
 the annual average temperature for year `y::Int`.
 """
-struct Solutions{F,C}
+struct Solutions{M<:Model,F,C}
+    model::M # model type
     spacetime::SpaceTime{F} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing{C} # climate forcing
@@ -343,10 +364,11 @@ struct Solutions{F,C}
     } # seasonal peak and annual avg
 
     function Solutions(
-        st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}, vars::Set{Symbol},
+        model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64},
+        init::Collection{Vec}, vars::Set{Symbol},
         lastonly::Bool=true;
         debug::Union{Expr,Nothing}=nothing
-    ) where {F, C} # Solutions
+    ) where {M<:Model, F, C} # Solutions
         if lastonly
             dur_store = 1
             ts::Vec = st.dur-1.0 + st.dt/2.0 : st.dt : st.dur - st.dt/2.0
@@ -363,7 +385,8 @@ struct Solutions{F,C}
         # construct seasonal solution storage template
         seasonaltemp = Collection{Vector{Vec}}()
         foreach((var -> setproperty!(seasonaltemp, var, Vector{Vec}(undef, st.dur))), vars)
-        return new{F, C}(
+        return new{M, F, C}(
+            model,
             st, # spacetime
             ts,
             forcing,
@@ -447,14 +470,16 @@ function default_parameters(paramset::Set{Symbol})::Collection{Float64}
     setvec = collect(paramset)
     return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultpar
-"""
-    default_parameters(model::Symbol) -> Collection{Float64}
 
-Get default parameters for a given model. `model` can be `:MIZ` or `:classic`.
+"""
+    default_parameters(::MIZ) -> Collection{Float64}
+    default_parameters(::Classic) -> Collection{Float64}
+
+Get default parameters for a given model.
 
 # Examples
 ```julia-repl
-julia> default_parameters(:Classic)
+julia> default_parameters(Classic())
 Collection{Float64} with 16 entries:
   :a2 => 0.1
   :F  => 0.0
@@ -469,8 +494,8 @@ Collection{Float64} with 16 entries:
   ⋮   => ⋮
 ```
 """
-default_parameters(model::Symbol)::Collection{Float64} =
-    model===:MIZ ? default_parameters(miz_paramset) : default_parameters(classic_paramset)
+default_parameters(::MIZ)::Collection{Float64} = default_parameters(miz_paramset)
+default_parameters(::Classic)::Collection{Float64} = default_parameters(classic_paramset)
 
 # calculate diffusion operator matrix
 @persistent(
@@ -593,43 +618,49 @@ end # function savesol!
 function step! end
 
 """
-    integrate(model::Symbol, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, verbose::Bool=false) -> Solutions{F,C}
+    integrate(model::M<:Model, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, progress::Bool=true, verbose::Bool=false) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
-`Solutions` object.
-
-`model` can be `:MIZ` or `:classic`. Use `default_parameters` to get default model
-parameters. For `:MIZ`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D` and
-`:phi`; for `:classic`, `init` must contain `:E` and `:Tg`.
+`Solutions` object. Use `default_parameters` to get default model parameters. For model
+`MIZ`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D` and `:phi`; for model
+`Classic`, `init` must contain `:E` and `:Tg`.
 
 When `lastonly=true`, only the last year of the solution is stored for each time step,
 otherwise the full solution is stored. When `debug` expression is provided, a variable
 `:debug` is added to the solution storage which contains the evaluated expression at each
-time step. If `verbose=true`, a warning message is showed when the SCM nonlinear equation
-fails to converge at any time step.
+time step. If `progress=true`, a progress bar is displayed during the integration. If
+`verbose=true`, a warning message is showed when the SCM nonlinear equation fails to
+converge at any time step.
 
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
-    model::Symbol, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
-    lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
-)::Solutions{F,C} where {F, C}
+    model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+    lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, updatefreq::Float64=1.0, verbose::Bool=false
+)::Solutions{M,F,C} where {M<:Model, F, C}
     # initialise
     vars = deepcopy(init)
     solvars = Set{Symbol}((:E, :T, :h)) # always solve for these
-    if model === :MIZ # add MIZ variables
+    if model isa MIZ # add MIZ variables
         union!(solvars, Set{Symbol}((:Ei, :Ew, :Ti, :Tw, :D, :phi, :n)))
     end # if ===
-    sols = Solutions(st, forcing, par, init, solvars, lastonly; debug=debug)
-    annusol = Solutions(st, forcing, par, init, solvars, true; debug=debug) # for calculating annual means
-    progress = Progress(length(st.T), "Integrating"; infofeed=(t -> string("t = ", round(t, digits=2))))
-    update!(progress; feedargs=(0,))
+    sols = Solutions(model, st, forcing, par, init, solvars, lastonly; debug=debug)
+    annusol = Solutions(model, st, forcing, par, init, solvars, true; debug=debug) # for calculating annual means
+    if updatefreq < Inf
+        progress::Progress = Progress(
+            length(st.T), "Integrating", updatefreq;
+            infofeed=(t -> string("t = ", round(t, digits=2)))
+        )
+        update!(progress; feedargs=(0,))
+    end # if progress
     # loop over time
     for ti in eachindex(st.T)
-        step!(Val(model), st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; debug=debug, verbose=verbose)
+        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; debug=debug, verbose=verbose)
         savesol!(sols, annusol, vars, ti)
-        update!(progress; feedargs=(st.T[ti],))
+        if updatefreq < Inf
+            update!(progress; feedargs=(st.T[ti],))
+        end # if progress
     end # for ti
     return sols
 end # function integrate

@@ -184,10 +184,6 @@ end # function display_time
 function output!(prog::Progress, feedargs::Tuple=())::Nothing
     now = time()
     isdone = false
-    # avoid over-updating
-    if prog.current > prog.total
-        return nothing
-    end # if >
     # clear previous lines
     while prog.lines > 0
         print("\033[A\033[2K") # move up one line and clear the line
@@ -272,7 +268,7 @@ function update!(prog::Progress, current::Int=prog.current+1; feedargs::Tuple=()
         prog.updated = time() - prog.freq # force immediate external update # !
     end # if isnan
     # external update
-    if (prog.current >= prog.total) || (time() - prog.updated >= prog.freq)
+    if (time() - prog.updated >= prog.freq) || (prog.current == prog.total)
         output!(prog, feedargs)
     end # if ||
     return nothing
