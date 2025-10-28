@@ -204,7 +204,7 @@ function plot_seasonal(
         keys(groups),
         values(groups),
         (sols.forcing.domain[2]:sols.forcing.domain[3], sols.forcing.domain[4]:sols.forcing.domain[5]),
-        (Makie.wong_colors()[6], Makie.wong_colors()[1])
+        (Makie.Cycled(6), Makie.Cycled(1))
     ), season in (:avg, :winter, :summer)
         width = 1.0
         if season === :avg
