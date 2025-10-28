@@ -342,12 +342,13 @@ end # function (forcing::Forcing{false})
 """
     Solutions{M,F,C}
 
-An object to store model solutions. Type parameter `M` is the model type (`miz` or
-`classic`); `F` is the function used to map the uniform grid to the model grid in
+An object to store model solutions. Type parameter `M` is the model type (`MIZModel` or
+`ClassicModel`); `F` is the function used to map the uniform grid to the model grid in
 `SpaceTime{F}`; `C` is a boolean indicating whether the climate forcing is constant.
 `C` is `true` for constant forcing.
 
 # Fields
+- `model::M`: model type
 - `spacetime::SpaceTime{F}`: space and time on which solutions are defined
 - `ts::Vec`: time vector for stored solutions
 - `forcing::Forcing{C}`: climate forcing
@@ -664,13 +665,12 @@ function initialise end
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
 `Solutions` object. Use `default_parameters` to get default model parameters. For
-`MIZModel`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D`; for `ClassicModel`,
-`init` must contain `:E` and `:Tg`.
+`MIZModel`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D` and `:Tg`; for
+`ClassicModel`, `init` must contain `:E` and `:Tg`.
 
 When `lastonly=true`, only the last year of the solution is stored for each time step,
-otherwise the full solution is stored. A progress bar is displayed and updated with frequency `updatefreq`. If
-`updatefreq` is `Inf`, no progress bar is shown. If `verbose=true`, a warning message is
-showed when the SCM nonlinear equation fails to converge at any time step.
+otherwise the full solution is stored. A progress bar is displayed and updated with
+frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
 
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """

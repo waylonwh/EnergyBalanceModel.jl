@@ -1,4 +1,3 @@
-
 module MIZEBM # EnergyBalanceModel.
 
 using ..Infrastructure, ..Utilities
