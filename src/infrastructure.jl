@@ -618,7 +618,7 @@ function step! end
 function initialise end
 
 """
-    integrate(model::M<:Model, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, progress::Bool=true, verbose::Bool=false) -> Solutions{M,F,C}
+    integrate(model::M<:Model, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, updatefreq::Float64=1.0, verbose::Bool=false) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
@@ -629,9 +629,9 @@ model, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D`; for `Classic`
 When `lastonly=true`, only the last year of the solution is stored for each time step,
 otherwise the full solution is stored. When `debug` expression is provided, a variable
 `:debug` is added to the solution storage which contains the evaluated expression at each
-time step. If `progress=true`, a progress bar is displayed during the integration. If
-`verbose=true`, a warning message is showed when the SCM nonlinear equation fails to
-converge at any time step.
+time step. A progress bar is displayed and updated with frequency `updatefreq`. If
+`updatefreq` is `Inf`, no progress bar is shown. If `verbose=true`, a warning message is
+showed when the SCM nonlinear equation fails to converge at any time step.
 
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
