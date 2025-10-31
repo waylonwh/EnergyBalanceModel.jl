@@ -18,7 +18,7 @@ import LinearAlgebra as LA, SparseArrays as SA
             cg_tau = par.cg / par.tau
             dt_tau = st.dt / par.tau
             dc = dt_tau * cg_tau
-            kappa = (1+dt_tau) * LA.I(st.nx) - st.dt * par.D * get_diffop(st.nx) / par.cg
+            kappa = (1+dt_tau) * LA.I(st.nx) - st.dt * par.D * get_diffop(st) / par.cg
             # Seasonal forcing [WE15 Eq. (3)]
             S = repeat(par.S0 .- par.S2 * st.x.^2, 1, st.nt) -
                 repeat(par.S1 * cos.(2.0pi*st.t'), st.nx, 1) .* repeat(st.x, 1, st.nt)
