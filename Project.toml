@@ -28,7 +28,6 @@ WebGLExt = "WGLMakie"
 [compat]
 CairoMakie = "0.15.6"
 Dates = "1.10.10"
-Distributed = "1.10.10"
 GLMakie = "0.13.6"
 JLD2 = "0.6.2"
 LinearAlgebra = "1.10.10"

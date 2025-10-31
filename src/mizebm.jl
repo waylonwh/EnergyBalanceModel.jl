@@ -194,6 +194,53 @@ function Infrastructure.step!(
     return vars
 end # function Infrastructure.step!
 
+struct AllMIZ <: Model end
+function Infrastructure.step!(
+    ::AllMIZ, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
+    debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
+)::Collection{Vec} where F
+    # update temperature
+    vars.Tw = water_temp(vars.Ew, vars.phi, par) # !
+    condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
+    vars.Ti = solveTi(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par; verbose=verbose) # !
+    # update floe number
+    vars.n = num(vars.D, vars.phi, par) # !
+    # calculate fluxes
+    Fvi = vert_flux(st.x, t, true, vars.Ti, vars.Tw, vars.phi, f, st, par)
+    Fvw = vert_flux(st.x, t, false, vars.Ti, vars.Tw, vars.phi, f, st, par)
+    Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
+    # update enthalpy
+    rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
+    rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)
+    Epsidt = redistributeE(rEi, rEw)
+    vars.Ei = Epsidt.Ei # !
+    vars.Ew = Epsidt.Ew # !
+    # update floe size
+    Al = area_lead(vars.D, vars.phi, vars.n, par)
+    Qlp = split_psiEw(Epsidt.psiEwdt / st.dt, vars.phi, Al)
+    dn = st.dt * psinplus(Qlp.Qp, par) # number of new pancakes
+    rD = forward_euler(vars.D, D_t(vars.h, vars.D, vars.Tw, vars.phi, Qlp.Ql, par), st.dt)
+    vars.D = average(rD, par.Dmin, vars.n, dn) # new pancakes # !
+    clamp!(vars.D, par.Dmin, par.Dmax)
+    zeroref!(vars.D, vars.Ei) # correct round off errors
+    # infer thickness from prescribed concentration
+    @. vars.phi = par.phi * (vars.Ei<0.0) # !
+    vars.h = @. -vars.Ei / (par.Lf * vars.phi)
+    zeroref!(vars.h, vars.Ei)
+    # update total energy and temperature
+    # zeroref!(vars.Ei, vars.h) # correct round off errors
+    vars.E = @. vars.phi * vars.Ei + (1 - vars.phi) * vars.Ew # !
+    vars.T = Tbar(vars.Ti, vars.Tw, vars.phi) # !
+    # debug
+    if !isnothing(debug)
+        vars.debug = eval(debug) # !
+    end # if !=
+    # set NaNs to no existence
+    condset!(vars.Ti, NaN, iszero, vars.Ei)
+    condset!(vars.Tw, NaN, >(0.99), vars.phi)
+    return vars
+end # function Infrastructure.step!
+
 for xfunc in (identity, sin)
     precompile(solveTi, (Vec, Float64, Vec, Vec, Vec, Float64, SpaceTime{xfunc}, Collection{Float64}))
     precompile(

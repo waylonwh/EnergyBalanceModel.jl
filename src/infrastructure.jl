@@ -5,7 +5,7 @@ using ..Utilities
 import EnergyBalanceModel
 import SparseArrays as SA, Statistics as Stats
 
-export MIZ, Classic
+export Model, MIZ, Classic
 export Vec, Collection, SpaceTime, Solutions, Forcing
 export default_parval, miz_paramset, classic_paramset
 export default_parameters, get_diffop, diffusion!, D∇²!, diffusion, D∇², annual_mean
@@ -643,9 +643,9 @@ function integrate(
     # initialise
     vars = deepcopy(init)
     solvars = Set{Symbol}((:E, :T, :h)) # always solve for these
-    if model isa MIZ # add MIZ variables
+    if !(model isa Classic) # add MIZ variables
         union!(solvars, Set{Symbol}((:Ei, :Ew, :Ti, :Tw, :D, :phi, :n)))
-    end # if ===
+    end # if isa
     sols = Solutions(model, st, forcing, par, init, solvars, lastonly; debug=debug)
     annusol = Solutions(model, st, forcing, par, init, solvars, true; debug=debug) # for calculating annual means
     if updatefreq < Inf

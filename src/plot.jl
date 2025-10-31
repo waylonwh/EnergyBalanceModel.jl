@@ -131,10 +131,10 @@ default, the layout is set to `miz_layout` if sols is a `Solutions{MIZModel}`, a
 
 """
 function plot_raw(
-    sols::Solutions{F,C},
+    sols::Solutions{M,F,C},
     bcknd::Union{Symbol,Nothing}=find_backend();
     layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
-)::Makie.Figure where {F, C}
+)::Makie.Figure where {M<:Model, F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
@@ -150,10 +150,10 @@ Plot the annual average of solution variables in `sols.seasonal.avg` using the s
 Makie backend `bcknd` and `layout`.
 """
 function plot_avg(
-    sols::Solutions{F,C},
+    sols::Solutions{M,F,C},
     bcknd::Union{Symbol,Nothing}=find_backend();
     layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
-)::Makie.Figure where {F, C}
+)::Makie.Figure where {M<:Model, F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
@@ -184,16 +184,16 @@ annual average are thick solid.
 - `ylabel::AbstractString`: Label for the y-axis.
 """
 function plot_seasonal(
-    sols::Solutions{F,false},
+    sols::Solutions{M,F,false},
     bcknd::Union{Symbol,Nothing}=find_backend();
     xfunc::Function=(
-        (sols::Solutions{F,false}, year::Int) ->
+        (sols::Solutions{M,F,false}, year::Int) ->
             hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)
     ),
     yfunc::Function=(
         :phi in propertynames(sols.raw) ?
             (
-                (sols::Solutions{F,false}, season::Symbol, year::Int) ->
+                (sols::Solutions{M,F,false}, season::Symbol, year::Int) ->
                     2.0*pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
             ) :
             (
@@ -202,11 +202,11 @@ function plot_seasonal(
             ) # ? :
     ), # ()
     title::AbstractString="Ice covered area",
-    xlabel::AbstractString=Makie.L"$\tilde{\mathsf{T}}$ ($\mathrm{\degree\!C}$)",
-    ylabel::AbstractString=Makie.L"A_i$"
-)::Makie.Figure where F
+    xlabel::AbstractString=Makie.L"$\tilde{T}$ ($\mathrm{\degree\!C}$)",
+    ylabel::AbstractString=Makie.L"A_i"
+)::Makie.Figure where {M<:Model, F}
     backend(bcknd)
-    xdata = xfunc.(Ref(sols), sols.spacetime.dur)
+    xdata = xfunc.(Ref(sols), 1:sols.spacetime.dur)
     fig = Makie.Figure()
     ax = Makie.Axis(fig[1,1]; title=title, xlabel=xlabel, ylabel=ylabel)
     groups = (
@@ -226,13 +226,16 @@ function plot_seasonal(
         push!(
             group,
             Makie.lines!(
-                ax, xdata[inx], yfunc.(Ref(sols), Ref(season), sols.spacetime.dur[inx]);
+                ax, xdata[inx], yfunc.(Ref(sols), Ref(season), inx);
                 color=colour, linewidth=width, linestyle=(season===:summer ? :dash : :solid)
             )
         ) # push!
     end # for domain, inx, colour, season
     Makie.Legend(
-        fig[1,2], values(groups), fill(["mean", "winter", "summer"], 2), keys(groups)
+        fig[1,2],
+        collect(values(groups)),
+        fill(["mean", "winter", "summer"], 2),
+        string.(collect(keys(groups)))
     )
     return fig
 end # function plot_seasonal
