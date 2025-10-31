@@ -7,7 +7,7 @@ import LinearAlgebra as LA, SparseArrays as SA
 @persistent(
     cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
     S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64,
-    id::UInt64 = UInt64(0),
+    id::UInt = UInt(0),
 
     @inline function get_statics(st::SpaceTime{F}, par::Collection{Float64})::@NamedTuple{
         cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
