@@ -498,59 +498,27 @@ default_parameters(::Classic)::Collection{Float64} = default_parameters(classic_
 @persistent(
     diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
 
-    @inline function get_diffop(nx::Int)::SA.SparseMatrixCSC{Float64,Int64}
-        if size(diffop) != (nx, nx) # recalculate diffusion operator
-            dx = 1.0 / nx
+    @inline function get_diffop(st::SpaceTime{identity})::SA.SparseMatrixCSC{Float64,Int64}
+        if size(diffop) != (st.nx, st.nx) # recalculate diffusion operator
+            dx = 1.0 / st.nx
             xb = dx:dx:1.0-dx
             lambda = @. (1 - xb^2) / dx^2
             l1 = pushfirst!(-copy(lambda), 0.0)
             l2 = push!(-copy(lambda), 0.0)
             l3 = -l1 - l2
-            diffop = SA.spdiagm(-1 => -l1[2:nx], 0 => -l3, 1 => -l2[1:nx-1])
+            diffop = SA.spdiagm(-1 => -l1[2:st.nx], 0 => -l3, 1 => -l2[1:st.nx-1])
         end # if !=
         return diffop
     end # function get_diffop
 ) # @persistent
 
 # diffusion for equal spaced grid
-@inline (diffusion!(
-    base::Vector{T}, temp::Vector{T}, st::SpaceTime{identity}, par::Collection{Float64}
-)::Vector{T}) where T<:Number = base .+= par.D * get_diffop(st.nx) * temp
-
-# diffusion for non-equal spaced grid
-@persistent(
-    diffx::Vector{Float64}, mxxph::Vector{Float64}, mxxmh::Vector{Float64},
-    phmmh::Vector{Float64}, i::UnitRange{Int},
-    xid::UInt64=UInt64(0),
-
-    @inline function diffusion!(
-        base::Vector{T}, temp::Vector{T}, x::Vec, par::Collection{Float64}
-    )::Vector{T} where {T<:Number}
-        nx = length(x)
-        # store x if changed
-        if xid != objectid(x)
-            x = [-x[1]; x; 2-x[end]]
-            diffx = diff(x)
-            diffT = zeros(Float64, nx+1)
-            i = 2:nx+1
-            xxph = @. (x[i+1]+x[i]) / 2.0
-            xxmh = @. (x[i]+x[i-1]) / 2.0
-            mxxph = @. 1.0 - xxph^2
-            mxxmh = @. 1.0 - xxmh^2
-            phmmh = @. xxph - xxmh
-            xid = objectid(x)
-        end # if !=
-        diffT = Vector{T}(undef, nx+1) # TODO eliminate memory allocations?
-        @inbounds diffT[1] = diffT[end] = zero(T)
-        @inbounds diffT[2:nx] .= diff(temp) # !
-        @inbounds @. base += par.D * (mxxph * diffT[i]/diffx[i] - mxxmh * diffT[i-1]/diffx[i-1]) / phmmh # !
-        return base
-    end # function diffusion!
-) # @persistent
-
-@inline diffusion(temp::Vec, x::Vec, par::Collection{Float64})::Vec = diffusion!(
-    zeros(Float64, length(temp)), temp, x, par
-)
+@inline (
+    diffusion!(base::Vector{T}, temp::Vector{T}, st::SpaceTime{F}, par::Collection{Float64})::Vector{T}
+) where {T<:Number, F} = base .+= par.D * get_diffop(st) * temp
+@inline (
+    diffusion(temp::Vec, st::SpaceTime{F}, par::Collection{Float64})::Vec
+) where F = diffusion!(zeros(Float64, length(temp)), temp, st, par)
 const D∇² = diffusion
 const D∇²! = diffusion!
 

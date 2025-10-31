@@ -31,27 +31,27 @@ weighted_avg(vi::Vec, vw::Vec, phi::Vec)::Vec = weighted_avg!(copy(vi), vw, phi)
 function T0eq(
     T0::Vector{T},
     args::@NamedTuple{
-        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, par::Collection{Float64}
+        t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64}
     }
 )::Vector{T} where {T<:Number, F} # T0eq
     vec = @. args.par.k * (args.par.Tm - T0) / args.h # SCM
-    solar!(vec, args.x, args.t, Val(true), args.par) # solar on ice
+    solar!(vec, args.st.x, args.t, Val(true), args.par) # solar on ice
     @. vec += (-args.par.A) - args.par.B * (T0 - args.par.Tm) # OLR
-    diffusion!(vec, weighted_avg!(ice_temp(T0, args.par), args.Tw, args.phi), args.x, args.par) # diffusion
+    diffusion!(vec, weighted_avg!(ice_temp(T0, args.par), args.Tw, args.phi), args.st, args.par) # diffusion
     vec .+= args.f # forcing
     return vec
 end # function T0eq
 
 @persistent T0::Vec=zeros(Float64, 100) function solveTi(
-    x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, par::Collection{Float64};
+    t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64};
     verbose::Bool=false
 )::Vec where F
     hp = condset(h, par.hmin, iszero) # avoid division by zero when solving T0
-    if length(T0) != length(x)
-        T0 = zeros(Float64, length(x)) # initialise T0
+    if length(T0) != length(st.x)
+        T0 = zeros(Float64, length(st.x)) # initialise T0
     end # if !=
     T0sol = NlSol.solve(
-        NlSol.NonlinearProblem(T0eq, T0, (; x, t, h=hp, Tw, phi, f, par)),
+        NlSol.NonlinearProblem(T0eq, T0, (; t, h=hp, Tw, phi, f, st, par)),
         NlSol.TrustRegion();
         reltol=1e-6,
         abstol=1e-8
@@ -92,10 +92,10 @@ end # function area_lead
 
 # fluxes
 function vert_flux(
-    x::Vec, t::Float64, ice::Bool, Ti::Vec, Tw::Vec, phi::Vec, f::Float64, par::Collection{Float64}
-)::Vec
+    t::Float64, ice::Bool, Ti::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64}
+)::Vec where F
     L = @. par.A + par.B * ($(weighted_avg(Ti, Tw, phi)) - par.Tm) # OLR
-    return @. $solar(x, t, ice, par) - L + $(diffusion(weighted_avg(Ti, Tw, phi), x, par)) + par.Fb + f
+    return @. $solar(st.x, t, ice, par) - L + $(diffusion(weighted_avg(Ti, Tw, phi), st, par)) + par.Fb + f
 end # function vert_flux
 
 function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Collection{Float64})::Vec
@@ -171,8 +171,8 @@ function Infrastructure.step!(
 )::Collection{Vec} where F
     condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
     # calculate fluxes
-    Fvi = vert_flux(st.x, t, true, vars.Ti, vars.Tw, vars.phi, f, par)
-    Fvw = vert_flux(st.x, t, false, vars.Ti, vars.Tw, vars.phi, f, par)
+    Fvi = vert_flux(t, true, vars.Ti, vars.Tw, vars.phi, f, st, par)
+    Fvw = vert_flux(t, false, vars.Ti, vars.Tw, vars.phi, f, st, par)
     Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
@@ -198,7 +198,7 @@ function Infrastructure.step!(
     # update temperature
     vars.Tw = water_temp(vars.Ew, vars.phi, par) # !
     condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
-    vars.Ti = solveTi(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par; verbose) # !
+    vars.Ti = solveTi(t, vars.h, vars.Tw, vars.phi, f, st, par; verbose) # !
     # update total energy and temperature
     zeroref!(vars.Ei, vars.h) # correct round off errors
     vars.E = weighted_avg(vars.Ei, vars.Ew, vars.phi) # !
