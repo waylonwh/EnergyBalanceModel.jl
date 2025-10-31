@@ -512,6 +512,40 @@ default_parameters(::Classic)::Collection{Float64} = default_parameters(classic_
     end # function get_diffop
 ) # @persistent
 
+@persistent(
+    diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
+    xid::UInt = UInt(0),
+
+    @inline function get_diffop(st::SpaceTime{F})::SA.SparseMatrixCSC{Float64,Int64} where F
+        if xid != objectid(st.x) # recalculate diffusion operator
+            x = [-st.x[1]; st.x; 2.0 - st.x[end]] # include ghost points
+            diffx = diff(x)
+            f = diffx[2:st.nx+1] # (xⱼ₊₁ - xⱼ)
+            b = -diffx[1:st.nx] # (xⱼ₋₁ - xⱼ)
+            lri = 2:st.nx # lower diagonal row indices
+            iri = 2:st.nx-1 # inner row indices
+            uri = 1:st.nx-1 # upper diagonal row indices
+            first = -2.0st.x .* SA.spdiagm(
+                -1 => -1.0 ./ (f[lri]-b[lri]),
+                0 => [-1.0/(f[1]-b[1]); zeros(st.nx-2); 1.0/(f[st.nx]-b[st.nx])],
+                1 => 1.0 ./ (f[uri]-b[uri])
+            ) # -2x ∂/∂x
+            second = (1.0 .- st.x.^2.0) .* SA.spdiagm(
+                -1 => 2.0 ./ (b[lri] .* (b[lri]-f[lri])),
+                0 => [
+                    -2.0/(f[1]*(f[1]-b[1]));
+                    -2.0./(b[iri].*(b[iri]-f[iri])) - 2.0./(f[iri].*(f[iri]-b[iri]));
+                    -2.0/(b[st.nx]*(b[st.nx]-f[st.nx]))
+                ],
+                1 => 2.0 ./ (f[uri] .* (f[uri]-b[uri]))
+            ) # (1-x^2) ∂²/∂x²
+            diffop = first + second
+            xid = objectid(st)
+        end # if !=
+        return diffop
+    end # function get_diffop
+) # @persistent
+
 # diffusion for equal spaced grid
 @inline (
     diffusion!(base::Vector{T}, temp::Vector{T}, st::SpaceTime{F}, par::Collection{Float64})::Vector{T}
