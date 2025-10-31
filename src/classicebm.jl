@@ -21,7 +21,7 @@ import LinearAlgebra as LA, SparseArrays as SA
             kappa = (1+dt_tau) * LA.I(st.nx) - st.dt * par.D * get_diffop(st.nx) / par.cg
             # Seasonal forcing [WE15 Eq. (3)]
             S = repeat(par.S0 .- par.S2 * st.x.^2, 1, st.nt) -
-                repeat(par.S1 * cos.(2.0*pi*st.t'), st.nx, 1) .* repeat(st.x, 1, st.nt)
+                repeat(par.S1 * cos.(2.0pi*st.t'), st.nx, 1) .* repeat(st.x, 1, st.nt)
             S = hcat(S, S[:,1])
             # Further definitions
             M = par.B + cg_tau
@@ -33,6 +33,17 @@ import LinearAlgebra as LA, SparseArrays as SA
         return (; cg_tau, dt_tau, dc, kappa, S, M, aw, kLf)
     end # function get_statics
 ) # @persistent
+
+function Infrastructure.initialise(
+    ::Classic, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+    lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, kwargs...
+)::Tuple{Collection{Vec},Solutions{Classic,F,C},Solutions{Classic,F,C}} where {F,C}
+    vars = deepcopy(init)
+    solvars = Set{Symbol}((:E, :T, :h))
+    sols = Solutions{Classic}(st, forcing, par, init, solvars, lastonly; debug)
+    annusol = Solutions{Classic}(st, forcing, par, init, solvars, true; debug) # for calculating annual means
+    return (vars, sols, annusol)
+end # function initialise
 
 function Infrastructure.step!(
     ::Classic,

@@ -8,24 +8,22 @@ import NonlinearSolve as NlSol
 # solar radiation absorbed on ice and water
 @inline (
     solar!(base::Vector{T}, x::Vec, t::Float64, ::Val{true}, par::Collection{Float64})::Vector{T}
-) where T<:Number = @. (base += par.ai * (par.S0 - par.S1 * x * cos(2.0*pi * t) - par.S2 * x^2))
+) where T<:Number = @. (base += par.ai * (par.S0 - par.S1 * x * cos(2.0pi * t) - par.S2 * x^2))
 @inline (
     solar!(base::Vector{T}, x::Vec, t::Float64, ::Val{false}, par::Collection{Float64})::Vector{T}
-) where T<:Number = @. (base += (par.a0 - par.a2 * x^2) * (par.S0 - par.S1 * x * cos(2.0*pi * t) - par.S2 * x^2))
+) where T<:Number = @. (base += (par.a0 - par.a2 * x^2) * (par.S0 - par.S1 * x * cos(2.0pi * t) - par.S2 * x^2))
 
 @inline solar(x::Vec, t::Float64, ice::Bool, par::Collection{Float64})::Vec = solar!(
     zeros(Float64, length(x)), x, t, Val(ice), par
 )
 
-# temperatures
-@inline function Tbar!(Ti::Vector{T}, Tw::Vec, phi::Vec)::Vector{T} where T<:Number
-    Ti .*= phi # !
-    @. Ti += (1 - phi) * Tw # !
-    return Ti
-end # function Tbar!
-@inline Tbar(Ti::Vec, Tw::Vec, phi::Vec)::Vec = Tbar!(copy(Ti), Tw, phi)
-const T̄ = Tbar
-const T̄! = Tbar!
+# phi-weighted average
+@inline function weighted_avg!(vi::Vector{T}, vw::Vec, phi::Vec)::Vector{T} where T<:Number
+    @. vi *= phi # !
+    @. vi += (1 - phi) * vw # !
+    return vi
+end # function weighted_avg!
+weighted_avg(vi::Vec, vw::Vec, phi::Vec)::Vec = weighted_avg!(copy(vi), vw, phi)
 
 @inline water_temp(Ew::Vec, phi::Vec, par::Collection{Float64})::Vec = @. par.Tm + Ew / ((1-phi) * par.cw)
 @inline (ice_temp(T0::Vector{T}, par::Collection{Float64})::Vector{T}) where T<:Number = min.(T0, par.Tm)
@@ -33,19 +31,19 @@ const T̄! = Tbar!
 function T0eq(
     T0::Vector{T},
     args::@NamedTuple{
-        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64}
+        x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, par::Collection{Float64}
     }
 )::Vector{T} where {T<:Number, F} # T0eq
     vec = @. args.par.k * (args.par.Tm - T0) / args.h # SCM
     solar!(vec, args.x, args.t, Val(true), args.par) # solar on ice
     @. vec += (-args.par.A) - args.par.B * (T0 - args.par.Tm) # OLR
-    diffusion!(vec, Tbar!(ice_temp(T0, args.par), args.Tw, args.phi), args.st, args.par) # diffusion
+    diffusion!(vec, weighted_avg!(ice_temp(T0, args.par), args.Tw, args.phi), args.x, args.par) # diffusion
     vec .+= args.f # forcing
     return vec
 end # function T0eq
 
 @persistent T0::Vec=zeros(Float64, 100) function solveTi(
-    x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64};
+    x::Vec, t::Float64, h::Vec, Tw::Vec, phi::Vec, f::Float64, par::Collection{Float64};
     verbose::Bool=false
 )::Vec where F
     hp = condset(h, par.hmin, iszero) # avoid division by zero when solving T0
@@ -53,7 +51,7 @@ end # function T0eq
         T0 = zeros(Float64, length(x)) # initialise T0
     end # if !=
     T0sol = NlSol.solve(
-        NlSol.NonlinearProblem(T0eq, T0, (; x, t, h=hp, Tw, phi, f, st, par)),
+        NlSol.NonlinearProblem(T0eq, T0, (; x, t, h=hp, Tw, phi, f, par)),
         NlSol.TrustRegion();
         reltol=1e-6,
         abstol=1e-8
@@ -88,16 +86,16 @@ end # function num
 
 # lead region area
 function area_lead(D::Vec, phi::Vec, n::Vec, par::Collection{Float64})::Vec
-    ring = @. par.alpha * n * ((D + 2.0*par.rl)^2 - D^2)
+    ring = @. par.alpha * n * ((D + 2.0par.rl)^2 - D^2)
     return min.(ring, 1.0.-phi)
 end # function area_lead
 
 # fluxes
 function vert_flux(
-    x::Vec, t::Float64, ice::Bool, Ti::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64}
-)::Vec where F
-    L = @. par.A + par.B * ($Tbar(Ti, Tw, phi) - par.Tm) # OLR
-    return @. $solar(x, t, ice, par) - L + $(diffusion(Tbar(Ti, Tw, phi), st, par)) + par.Fb + f
+    x::Vec, t::Float64, ice::Bool, Ti::Vec, Tw::Vec, phi::Vec, f::Float64, par::Collection{Float64}
+)::Vec
+    L = @. par.A + par.B * ($(weighted_avg(Ti, Tw, phi)) - par.Tm) # OLR
+    return @. $solar(x, t, ice, par) - L + $(diffusion(weighted_avg(Ti, Tw, phi), x, par)) + par.Fb + f
 end # function vert_flux
 
 function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Collection{Float64})::Vec
@@ -138,12 +136,32 @@ Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
 Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1 - phi) * Fvw - Flat
 h_t(Fvi::Vec, par::Collection{Float64})::Vec = -1/par.Lf * Fvi
 function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64})::Vec
-    lat_melt = -pi / 2.0*par.alpha * wlat(Tw, par)
-    lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
+    lat_melt = -pi / 2.0 * par.alpha * wlat(Tw, par)
+    lat_grow = @. -D / (2.0 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
     zeroref!(lat_grow, h)
     return @. lat_melt + lat_grow + weld
 end # function D_t
+
+function Infrastructure.initialise(
+    ::MIZ, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+    lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
+)::Tuple{Collection{Vec}, Solutions{MIZ,F,C}, Solutions{MIZ,F,C}} where {F,C}
+    # create storage
+    vars = deepcopy(init)
+    solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
+    sols = Solutions{MIZ}(st, forcing, par, init, solvars, lastonly; debug)
+    annusol = Solutions{MIZ}(st, forcing, par, init, solvars, true; debug) # for calculating annual means
+    # complete step 0
+    vars.phi = concentration(vars.Ei, vars.h, par)
+    vars.Tw = water_temp(vars.Ew, vars.phi, par)
+    condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
+    vars.Ti = solveTi(st.x, 0.0, vars.h, vars.Tw, vars.phi, forcing(0.0), par; verbose)
+    vars.n = num(vars.D, vars.phi, par)
+    vars.E = weighted_avg(vars.Ei, vars.Ew, vars.phi)
+    vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi)
+    return (vars, sols, annusol)
+end # function initialise
 
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad * dt
 
@@ -151,15 +169,10 @@ function Infrastructure.step!(
     ::MIZ, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
     debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
 )::Collection{Vec} where F
-    # update temperature
-    vars.Tw = water_temp(vars.Ew, vars.phi, par) # !
     condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
-    vars.Ti = solveTi(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par; verbose=verbose) # !
-    # update floe number
-    vars.n = num(vars.D, vars.phi, par) # !
     # calculate fluxes
-    Fvi = vert_flux(st.x, t, true, vars.Ti, vars.Tw, vars.phi, f, st, par)
-    Fvw = vert_flux(st.x, t, false, vars.Ti, vars.Tw, vars.phi, f, st, par)
+    Fvi = vert_flux(st.x, t, true, vars.Ti, vars.Tw, vars.phi, f, par)
+    Fvw = vert_flux(st.x, t, false, vars.Ti, vars.Tw, vars.phi, f, par)
     Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
@@ -180,57 +193,16 @@ function Infrastructure.step!(
     vars.h = average(rh, par.hmin, vars.n, dn) # new pancakes # !
     # update concentration
     vars.phi = concentration(vars.Ei, vars.h, par) # !
-    # update total energy and temperature
-    zeroref!(vars.Ei, vars.h) # correct round off errors
-    vars.E = @. vars.phi * vars.Ei + (1 - vars.phi) * vars.Ew # !
-    vars.T = Tbar(vars.Ti, vars.Tw, vars.phi) # !
-    # debug
-    if !isnothing(debug)
-        vars.debug = eval(debug) # !
-    end # if !=
-    # set NaNs to no existence
-    condset!(vars.Ti, NaN, iszero, vars.Ei)
-    condset!(vars.Tw, NaN, >(0.99), vars.phi)
-    return vars
-end # function Infrastructure.step!
-
-struct AllMIZ <: Model end
-function Infrastructure.step!(
-    ::AllMIZ, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
-    debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
-)::Collection{Vec} where F
+    # update floe number
+    vars.n = num(vars.D, vars.phi, par) # !
     # update temperature
     vars.Tw = water_temp(vars.Ew, vars.phi, par) # !
     condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
-    vars.Ti = solveTi(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par; verbose=verbose) # !
-    # update floe number
-    vars.n = num(vars.D, vars.phi, par) # !
-    # calculate fluxes
-    Fvi = vert_flux(st.x, t, true, vars.Ti, vars.Tw, vars.phi, f, st, par)
-    Fvw = vert_flux(st.x, t, false, vars.Ti, vars.Tw, vars.phi, f, st, par)
-    Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
-    # update enthalpy
-    rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
-    rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)
-    Epsidt = redistributeE(rEi, rEw)
-    vars.Ei = Epsidt.Ei # !
-    vars.Ew = Epsidt.Ew # !
-    # update floe size
-    Al = area_lead(vars.D, vars.phi, vars.n, par)
-    Qlp = split_psiEw(Epsidt.psiEwdt / st.dt, vars.phi, Al)
-    dn = st.dt * psinplus(Qlp.Qp, par) # number of new pancakes
-    rD = forward_euler(vars.D, D_t(vars.h, vars.D, vars.Tw, vars.phi, Qlp.Ql, par), st.dt)
-    vars.D = average(rD, par.Dmin, vars.n, dn) # new pancakes # !
-    clamp!(vars.D, par.Dmin, par.Dmax)
-    zeroref!(vars.D, vars.Ei) # correct round off errors
-    # infer thickness from prescribed concentration
-    @. vars.phi = par.phi * (vars.Ei<0.0) # !
-    vars.h = @. -vars.Ei / (par.Lf * vars.phi)
-    zeroref!(vars.h, vars.Ei)
+    vars.Ti = solveTi(st.x, t, vars.h, vars.Tw, vars.phi, f, st, par; verbose) # !
     # update total energy and temperature
-    # zeroref!(vars.Ei, vars.h) # correct round off errors
-    vars.E = @. vars.phi * vars.Ei + (1 - vars.phi) * vars.Ew # !
-    vars.T = Tbar(vars.Ti, vars.Tw, vars.phi) # !
+    zeroref!(vars.Ei, vars.h) # correct round off errors
+    vars.E = weighted_avg(vars.Ei, vars.Ew, vars.phi) # !
+    vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi) # !
     # debug
     if !isnothing(debug)
         vars.debug = eval(debug) # !
