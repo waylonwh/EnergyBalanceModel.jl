@@ -156,7 +156,7 @@ function Infrastructure.initialise(
     vars.phi = concentration(vars.Ei, vars.h, par)
     vars.Tw = water_temp(vars.Ew, vars.phi, par)
     condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
-    vars.Ti = solveTi(st.x, 0.0, vars.h, vars.Tw, vars.phi, forcing(0.0), par; verbose)
+    vars.Ti = solveTi(0.0, vars.h, vars.Tw, vars.phi, forcing(0.0), st, par; verbose)
     vars.n = num(vars.D, vars.phi, par)
     vars.E = weighted_avg(vars.Ei, vars.Ew, vars.phi)
     vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi)
