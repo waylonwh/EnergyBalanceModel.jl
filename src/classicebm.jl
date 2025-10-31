@@ -37,7 +37,7 @@ import LinearAlgebra as LA, SparseArrays as SA
 function Infrastructure.step!(
     ::Classic,
     t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
-    debug::Union{Expr,Nothing}=nothing
+    debug::Union{Expr,Nothing}=nothing, kwargs...
 )::Collection{Vec} where F
     # get static variables
     stat = get_statics(st, par)
