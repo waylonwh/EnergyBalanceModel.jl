@@ -194,11 +194,11 @@ function plot_seasonal(
         :phi in propertynames(sols.raw) ?
             (
                 (sols::Solutions{M,F,false}, season::Symbol, year::Int) ->
-                    2.0*pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
+                    2.0pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
             ) :
             (
                 (sols, season, year) ->
-                    2.0*pi * hemispheric_mean((getproperty(sols.seasonal, season).E[year]<0.0), sols.spacetime.x)
+                    2.0pi * hemispheric_mean((getproperty(sols.seasonal, season).E[year]<0.0), sols.spacetime.x)
             ) # ? :
     ), # ()
     title::AbstractString="Ice covered area",
@@ -208,7 +208,7 @@ function plot_seasonal(
     backend(bcknd)
     xdata = xfunc.(Ref(sols), 1:sols.spacetime.dur)
     fig = Makie.Figure()
-    ax = Makie.Axis(fig[1,1]; title=title, xlabel=xlabel, ylabel=ylabel)
+    ax = Makie.Axis(fig[1,1]; title, xlabel, ylabel)
     groups = (
         Warming=Vector{Makie.Lines{Tuple{Vector{Makie.Point{2,Float64}}}}}(),
         Cooling=Vector{Makie.Lines{Tuple{Vector{Makie.Point{2,Float64}}}}}()

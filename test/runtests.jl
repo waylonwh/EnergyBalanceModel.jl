@@ -14,7 +14,7 @@ init = Collection{Vec}(
 sols = integrate(MIZ(), st, forcing, par, init)
 
 using JLD2
-jldsave("solution_1year.jld2", sols=sols)
+jldsave("solution_1year.jld2", sols)
 =#
 
 @testset "Basic Test 1year solution..." begin

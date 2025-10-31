@@ -333,7 +333,6 @@ An object to store model solutions. Type parameter `M` is the model type (`MIZ` 
 `C` is `true` for constant forcing.
 
 # Fields
-- `model::M`: model type
 - `spacetime::SpaceTime{F}`: space and time on which solutions are defined
 - `ts::Vec`: time vector for stored solutions
 - `forcing::Forcing{C}`: climate forcing
@@ -351,7 +350,6 @@ enthalpy at time step `ts[ti]::Float64`, and `seasonal.avg.T[y]::Vector{Float64}
 the annual average temperature for year `y::Int`.
 """
 struct Solutions{M<:Model,F,C}
-    model::M # model type
     spacetime::SpaceTime{F} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing{C} # climate forcing
@@ -364,8 +362,8 @@ struct Solutions{M<:Model,F,C}
         winter::Collection{Vector{Vec}}, summer::Collection{Vector{Vec}}, avg::Collection{Vector{Vec}}
     } # seasonal peak and annual avg
 
-    function Solutions(
-        model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64},
+    function Solutions{M}(
+        st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64},
         init::Collection{Vec}, vars::Set{Symbol},
         lastonly::Bool=true;
         debug::Union{Expr,Nothing}=nothing
@@ -386,8 +384,7 @@ struct Solutions{M<:Model,F,C}
         # construct seasonal solution storage template
         seasonaltemp = Collection{Vector{Vec}}()
         foreach((var -> setproperty!(seasonaltemp, var, Vector{Vec}(undef, st.dur))), vars)
-        return new{M, F, C}(
-            model,
+        return new{M,F,C}(
             st, # spacetime
             ts,
             forcing,
@@ -528,32 +525,33 @@ default_parameters(::Classic)::Collection{Float64} = default_parameters(classic_
     xid::UInt64=UInt64(0),
 
     @inline function diffusion!(
-        base::Vector{T}, temp::Vector{T}, st::SpaceTime{F}, par::Collection{Float64}
-    )::Vector{T} where {T<:Number,F}
+        base::Vector{T}, temp::Vector{T}, x::Vec, par::Collection{Float64}
+    )::Vector{T} where {T<:Number}
+        nx = length(x)
         # store x if changed
-        if xid != objectid(st.x)
-            x = [-st.x[1]; st.x; 2-st.x[end]]
+        if xid != objectid(x)
+            x = [-x[1]; x; 2-x[end]]
             diffx = diff(x)
-            diffT = zeros(Float64, st.nx+1)
-            i = 2:st.nx+1
+            diffT = zeros(Float64, nx+1)
+            i = 2:nx+1
             xxph = @. (x[i+1]+x[i]) / 2.0
             xxmh = @. (x[i]+x[i-1]) / 2.0
             mxxph = @. 1.0 - xxph^2
             mxxmh = @. 1.0 - xxmh^2
             phmmh = @. xxph - xxmh
-            xid = objectid(st.x)
+            xid = objectid(x)
         end # if !=
-        diffT = Vector{T}(undef, st.nx+1) # TODO eliminate memory allocations?
+        diffT = Vector{T}(undef, nx+1) # TODO eliminate memory allocations?
         @inbounds diffT[1] = diffT[end] = zero(T)
-        @inbounds diffT[2:st.nx] .= diff(temp) # !
+        @inbounds diffT[2:nx] .= diff(temp) # !
         @inbounds @. base += par.D * (mxxph * diffT[i]/diffx[i] - mxxmh * diffT[i-1]/diffx[i-1]) / phmmh # !
         return base
     end # function diffusion!
 ) # @persistent
 
-@inline (diffusion(T::Vec, st::SpaceTime{F}, par::Collection{Float64})::Vec) where F =
-    diffusion!(zeros(Float64, length(T)), T, st, par)
-
+@inline diffusion(temp::Vec, x::Vec, par::Collection{Float64})::Vec = diffusion!(
+    zeros(Float64, length(temp)), temp, x, par
+)
 const D∇² = diffusion
 const D∇²! = diffusion!
 
@@ -615,17 +613,18 @@ function savesol!(
     return sols
 end # function savesol!
 
-# stub for step! function
+# stub for functions for each model
 function step! end
+function initialise end
 
 """
     integrate(model::M<:Model, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, progress::Bool=true, verbose::Bool=false) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
-`Solutions` object. Use `default_parameters` to get default model parameters. For model
-`MIZ`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D` and `:phi`; for model
-`Classic`, `init` must contain `:E` and `:Tg`.
+`Solutions` object. Use `default_parameters` to get default model parameters. For `MIZ`
+model, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D`; for `Classic` model,
+`init` must contain `:E` and `:Tg`.
 
 When `lastonly=true`, only the last year of the solution is stored for each time step,
 otherwise the full solution is stored. When `debug` expression is provided, a variable
@@ -638,30 +637,25 @@ Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
     model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
-    lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, updatefreq::Float64=1.0, verbose::Bool=false
+    lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, updatefreq::Float64=1.0,
+    verbose::Bool=false
 )::Solutions{M,F,C} where {M<:Model, F, C}
     # initialise
-    vars = deepcopy(init)
-    solvars = Set{Symbol}((:E, :T, :h)) # always solve for these
-    if !(model isa Classic) # add MIZ variables
-        union!(solvars, Set{Symbol}((:Ei, :Ew, :Ti, :Tw, :D, :phi, :n)))
-    end # if isa
-    sols = Solutions(model, st, forcing, par, init, solvars, lastonly; debug=debug)
-    annusol = Solutions(model, st, forcing, par, init, solvars, true; debug=debug) # for calculating annual means
+    vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly, debug)
     if updatefreq < Inf
         progress::Progress = Progress(
             length(st.T), "Integrating", updatefreq;
             infofeed=(t -> string("t = ", round(t, digits=2)))
         )
         update!(progress; feedargs=(0,))
-    end # if progress
+    end # if <
     # loop over time
     for ti in eachindex(st.T)
-        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; debug=debug, verbose=verbose)
+        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; debug, verbose)
         savesol!(sols, annusol, vars, ti)
         if updatefreq < Inf
             update!(progress; feedargs=(st.T[ti],))
-        end # if progress
+        end # if <
     end # for ti
     return sols
 end # function integrate
