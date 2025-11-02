@@ -134,7 +134,7 @@ function plot_raw(
     sols::Solutions{M,F,C},
     bcknd::Union{Symbol,Nothing}=find_backend();
     layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
-)::Makie.Figure where {M<:Model, F, C}
+)::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
@@ -153,7 +153,7 @@ function plot_avg(
     sols::Solutions{M,F,C},
     bcknd::Union{Symbol,Nothing}=find_backend();
     layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
-)::Makie.Figure where {M<:Model, F, C}
+)::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
@@ -204,7 +204,7 @@ function plot_seasonal(
     title::AbstractString="Ice covered area",
     xlabel::AbstractString=Makie.L"$\tilde{T}$ ($\mathrm{\degree\!C}$)",
     ylabel::AbstractString=Makie.L"A_i"
-)::Makie.Figure where {M<:Model, F}
+)::Makie.Figure where {M<:AbstractModel, F}
     backend(bcknd)
     xdata = xfunc.(Ref(sols), 1:sols.spacetime.dur)
     fig = Makie.Figure()

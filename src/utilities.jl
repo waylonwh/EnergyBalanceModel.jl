@@ -5,8 +5,7 @@ import UUIDs, StyledStrings as SS, Statistics as Stats, TimeZones as TZ
 export Progress, update!
 export safehouse, house!, retrieve
 export @persistent, iobuffer, unique_id, reprhex
-export crossmean, hemispheric_mean
-export condset!, condset, zeroref!
+export crossmean, condset!, condset, zeroref!
 
 # add new function introduced in Julia 1.12
 if VERSION < v"1.12"
@@ -389,14 +388,6 @@ iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
     end # if !
     return map((xi -> Stats.mean([vecvec[ti][xi] for ti in eachindex(vecvec)])), eachindex(vecvec[1]))
 end # function crossmean
-
-function hemispheric_mean(vec::Vector{T}, x::Vector{T})::T where T<:Number
-    int = zero(T)
-    for i in 1:length(x)-1
-        @inbounds int += (vec[i]+vec[i+1]) * (x[i+1]-x[i]) / 2.0
-    end # for i
-    return int
-end # function hemispheric_mean
 
 # conditional copy in place
 @inline function condset!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where T
