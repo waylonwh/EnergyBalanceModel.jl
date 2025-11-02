@@ -56,6 +56,9 @@ const classic_layout = Layout(
     AbstractString[Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)" Makie.L"$T$ ($\mathrm{\degree\!C}$)" Makie.L"$h$ ($\mathrm{m}$)"]
 )
 
+default_layout(::MIZModel) = miz_layout
+default_layout(::ClassicModel) = classic_layout
+
 function init_backend(val::Val)
     name = typeof(val).parameters[1]
     if val isa Val{:GLMakie} || val isa Val{:CairoMakie}
@@ -108,7 +111,7 @@ end # function contourf_tiles
 matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
 
 """
-    plot_raw(sols::Solutions{F,C},bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
+    plot_raw(sols::Solutions{M,F,C},bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
 
 Plot the the solution variables for each time step in `sols.raw` using the specified Makie
 backend `bcknd` and `layout`. By default, the layout is set to `miz_layout` if the variable
@@ -119,7 +122,7 @@ default layouts.
 function plot_raw(
     sols::Solutions{M,F,C},
     bcknd::Symbol=:GLMakie;
-    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
+    layout::Layout{Symbol}=default_layout(M())
 )::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -139,7 +142,7 @@ exists in the solution, otherwise it uses `classic_layout`.
 function plot_avg(
     sols::Solutions{M,F,C},
     bcknd::Symbol=:GLMakie;
-    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
+    layout::Layout{Symbol}=default_layout(M())
 )::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -148,6 +151,11 @@ function plot_avg(
     end # for inx
     return contourf_tiles(collect(1:sols.spacetime.dur), sols.spacetime.x, datatitle)
 end # function plot_avg
+
+(ice_area(sols::Solutions{ClassicModel,F,C}, season::Symbol, year::Int)::Float64) where {F,C} =
+    2.0pi * hemispheric_mean((getproperty(sols.seasonal, season).E[year]<0.0), sols.spacetime.x)
+(ice_area(sols::Solutions{MIZModel,F,C}, season::Symbol, year::Int)::Float64) where {F,C} =
+    2.0pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
 
 """
     plot_seasonal(sols::Solutions{F,false}, bcknd::Symbol=:GLMakie; ...) -> Makie.Figure
@@ -173,21 +181,8 @@ annual average are thick solid.
 function plot_seasonal(
     sols::Solutions{M,F,false},
     bcknd::Symbol=:GLMakie;
-    xfunc::Function=(
-        (sols::Solutions{M,F,false}, year::Int) ->
-            hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)
-    ),
-    yfunc::Function=(
-        :phi in propertynames(sols.raw) ?
-            (
-                (sols::Solutions{M,F,false}, season::Symbol, year::Int) ->
-                    2.0pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
-            ) :
-            (
-                (sols, season, year) ->
-                    2.0pi * hemispheric_mean((getproperty(sols.seasonal, season).E[year]<0.0), sols.spacetime.x)
-            ) # ? :
-    ), # ()
+    xfunc::Function=((sols, year) -> hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)),
+    yfunc::Function=ice_area,
     title::AbstractString="Ice covered area",
     xlabel::AbstractString=Makie.L"$\tilde{T}$ ($\mathrm{\degree\!C}$)",
     ylabel::AbstractString=Makie.L"A_i"
