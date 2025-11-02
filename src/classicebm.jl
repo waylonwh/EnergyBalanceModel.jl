@@ -35,7 +35,8 @@ import LinearAlgebra as LA, SparseArrays as SA
 ) # @persistent
 
 function Infrastructure.initialise(
-    ::ClassicModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+    ::ClassicModel,
+    st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
     lastonly::Bool=true
 )::Tuple{Collection{Vec},Solutions{ClassicModel,F,C},Solutions{ClassicModel,F,C}} where {F, C}
     vars = deepcopy(init)
