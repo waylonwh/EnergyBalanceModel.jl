@@ -26,7 +26,7 @@ julia> forcing = Forcing(0.0)
 Forcing{true}(0.0) is constant:
   F(t)=0.0, t∈[0,∞)
 
-julia> par = default_parameters(MIZ())
+julia> par = default_parameters(MIZ)
 Collection{Float64} with 22 entries:
   :Dmax  => 156.0
   :a2    => 0.1
@@ -52,7 +52,7 @@ Collection{Vector{Float64}} with 5 entries:
   :h   => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
   :Ew  => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
 
-julia> sols = integrate(MIZ(), st, forcing, par, init)
+julia> sols = integrate(MIZ, st, forcing, par, init)
 Integrating
  60000/60000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  1:57/-0:00 511.24/sec                      Done ✓
@@ -77,6 +77,7 @@ module EnergyBalanceModel
 export MIZ, Classic
 export Vec, Collection, SpaceTime, Forcing, Solutions
 export integrate, default_parameters
+export annual_mean, hemispheric_mean
 export safehouse, house!, retrieve, save, load!
 export Layout, backend, plot_raw, plot_avg, plot_seasonal
 

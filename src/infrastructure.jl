@@ -5,30 +5,46 @@ using ..Utilities
 import EnergyBalanceModel
 import SparseArrays as SA, Statistics as Stats
 
-export Model, MIZ, Classic
+export AbstractModel, MIZModel, ClassicModel, MIZ, Classic
 export Vec, Collection, SpaceTime, Solutions, Forcing
-export default_parval, miz_paramset, classic_paramset
-export default_parameters, get_diffop, diffusion!, D∇²!, diffusion, D∇², annual_mean
+export default_parval, miz_paramset, classic_paramset, default_parameters
+export get_diffop, diffusion!, D∇²!, diffusion, D∇²
+export annual_mean, hemispheric_mean
 export integrate
 
 const Vec = Vector{Float64} # abbreviation for vector type used in model
 
-abstract type Model end
+abstract type AbstractModel end
 
 """
-    MIZ <: Model
+    MIZModel <: AbstractModel
 
 Singleton type representing the extended idealised climate model with a marginal ice zone
 (MIZ).
 """
-struct MIZ <: Model end
+struct MIZModel <: AbstractModel end
 
 """
-    Classic <: Model
+    MIZ
+
+A singleton instance of `MIZModel`.
+"""
+const MIZ = MIZModel()
+
+"""
+    ClassicModel <: AbstractModel
+    Classic = ClassicModel()
 
 Singleton type representing the classic idealised climate model by Wagner & Eisenman (2015).
 """
-struct Classic <: Model end
+struct ClassicModel <: AbstractModel end
+
+"""
+    Classic
+
+A singleton instance of `ClassicModel`.
+"""
+const Classic = ClassicModel()
 
 """
     Collection{V}(args...)
@@ -348,7 +364,7 @@ a vector of vectors. For example, `raw.E[ti]::Vector{Float64}` stores the soluti
 enthalpy at time step `ts[ti]::Float64`, and `seasonal.avg.T[y]::Vector{Float64}` stores
 the annual average temperature for year `y::Int`.
 """
-struct Solutions{M<:Model,F,C}
+struct Solutions{M<:AbstractModel,F,C}
     spacetime::SpaceTime{F} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing{C} # climate forcing
@@ -366,7 +382,7 @@ struct Solutions{M<:Model,F,C}
         init::Collection{Vec}, vars::Set{Symbol},
         lastonly::Bool=true;
         debug::Union{Expr,Nothing}=nothing
-    ) where {M<:Model, F, C} # Solutions
+    ) where {M<:AbstractModel, F, C} # Solutions
         if lastonly
             dur_store = 1
             ts::Vec = st.dur-1.0 + st.dt/2.0 : st.dt : st.dur - st.dt/2.0
@@ -466,17 +482,17 @@ const classic_paramset = Set{Symbol}(
 function default_parameters(paramset::Set{Symbol})::Collection{Float64}
     setvec = collect(paramset)
     return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
-end # function get_defaultpar
+end # function get_defaultparameters
 
 """
-    default_parameters(::MIZ) -> Collection{Float64}
-    default_parameters(::Classic) -> Collection{Float64}
+    default_parameters(::MIZModel) -> Collection{Float64}
+    default_parameters(::ClassicModel) -> Collection{Float64}
 
 Get default parameters for a given model.
 
 # Examples
 ```julia-repl
-julia> default_parameters(Classic())
+julia> default_parameters(Classic)
 Collection{Float64} with 16 entries:
   :a2 => 0.1
   :F  => 0.0
@@ -491,8 +507,8 @@ Collection{Float64} with 16 entries:
   ⋮   => ⋮
 ```
 """
-default_parameters(::MIZ)::Collection{Float64} = default_parameters(miz_paramset)
-default_parameters(::Classic)::Collection{Float64} = default_parameters(classic_paramset)
+default_parameters(::MIZModel)::Collection{Float64} = default_parameters(miz_paramset)
+default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(classic_paramset)
 
 # calculate diffusion operator matrix
 @persistent(
@@ -556,7 +572,6 @@ default_parameters(::Classic)::Collection{Float64} = default_parameters(classic_
 const D∇² = diffusion
 const D∇²! = diffusion!
 
-# calculate annual mean
 function annual_mean(annusol::Solutions{F,C})::Collection{Vec} where {F, C}
     # calculate annual mean for each variable except temperatures
     means = Collection{Vec}()
@@ -567,6 +582,21 @@ function annual_mean(annusol::Solutions{F,C})::Collection{Vec} where {F, C}
     return means
 end # function annual_mean
 
+"""
+    annual_mean(forcing::Forcing{C}, st::SpaceTime{F}, year::Int) -> Float64
+
+Calculate the annual mean of the climate forcing for a given year.
+
+# Examples
+```julia-repl
+julia> forcing = Forcing(0.0, 10.0, -5.0, (20, 10), (0.5, -0.5));
+
+julia> st = SpaceTime{sin}(180, 2000, 30);
+
+julia> annual_mean(forcing, st, 24)
+1.75
+```
+"""
 (annual_mean(forcing::Forcing{C}, st::SpaceTime{F}, year::Int)::Float64) where {C, F} =
     Stats.mean(forcing.(year-1 .+ st.t))
 
@@ -614,12 +644,36 @@ function savesol!(
     return sols
 end # function savesol!
 
+"""
+    hemispheric_mean(vec::Vec, x::Vec) -> Float64
+
+Calculate the hemispheric mean value of `vec` defined on grid `x` using the trapezoidal
+rule.
+
+# Examples
+```julia-repl
+julia> x = sin.(range(0, pi/2, 180));
+
+julia> vec = @. 7.5 + 20(1 - 2x^2);
+
+julia> hemispheric_mean(vec, x)
+14.166324413879554
+```
+"""
+function hemispheric_mean(vec::Vec, x::Vec)::Float64
+    int = zero(Float64)
+    for i in 1:length(x)-1
+        @inbounds int += (vec[i] + vec[i+1]) * (x[i+1] - x[i]) / 2.0
+    end # for i
+    return int
+end # function hemispheric_mean
+
 # stub for functions for each model
 function step! end
 function initialise end
 
 """
-    integrate(model::M<:Model, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, updatefreq::Float64=1.0, verbose::Bool=false) -> Solutions{M,F,C}
+    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, updatefreq::Float64=1.0, verbose::Bool=false) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
@@ -640,7 +694,7 @@ function integrate(
     model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
     lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, updatefreq::Float64=1.0,
     verbose::Bool=false
-)::Solutions{M,F,C} where {M<:Model, F, C}
+)::Solutions{M,F,C} where {M<:AbstractModel, F, C}
     # initialise
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly, debug)
     if updatefreq < Inf

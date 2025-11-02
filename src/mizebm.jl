@@ -144,7 +144,7 @@ function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64
 end # function D_t
 
 function Infrastructure.initialise(
-    ::MIZ, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+    ::MIZModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
     lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
 )::Tuple{Collection{Vec}, Solutions{MIZ,F,C}, Solutions{MIZ,F,C}} where {F,C}
     # create storage
@@ -166,7 +166,7 @@ end # function initialise
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad * dt
 
 function Infrastructure.step!(
-    ::MIZ, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
+    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
     debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
 )::Collection{Vec} where F
     condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
