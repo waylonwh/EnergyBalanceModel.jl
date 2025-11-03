@@ -415,9 +415,9 @@ struct Solutions{M<:AbstractModel,F,C}
             ) # ( # seasonal
         ) # new
     end # function Solutions
-end # struct Solutions{F,C}
+end # struct Solutions{M,F,C}
 
-(Base.show(io::IO, sols::Solutions{F,C})::Nothing) where {F,C} = print(
+(Base.show(io::IO, sols::Solutions{M,F,C})::Nothing) where {M<:AbstractModel, F, C} = print(
     io,
     typeof(sols), '(',
     sols.spacetime.nx, '×', length(sols.ts), "@(", first(sols.ts), ':', sols.spacetime.dt, ':', last(sols.ts), "), ",
@@ -425,7 +425,7 @@ end # struct Solutions{F,C}
     ')'
 )
 
-function Base.show(io::IO, ::MIME"text/plain", sols::Solutions{F,C})::Nothing where {F,C}
+function Base.show(io::IO, ::MIME"text/plain", sols::Solutions{M,F,C})::Nothing where {M<:AbstractModel, F, C}
     println(io, typeof(sols), " with:")
     println(io, "  ", length(sols.raw), " solution variables: ", propertynames(sols.raw))
     xhead = "  on $(sols.spacetime.nx) latitudinal gridboxes: "
@@ -536,27 +536,28 @@ default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(cla
         if xid != objectid(st.x) # recalculate diffusion operator
             x = [-st.x[1]; st.x; 2.0 - st.x[end]] # include ghost points
             diffx = diff(x)
-            f = diffx[2:st.nx+1] # (xⱼ₊₁ - xⱼ)
-            b = -diffx[1:st.nx] # (xⱼ₋₁ - xⱼ)
-            lri = 2:st.nx # lower diagonal row indices
-            iri = 2:st.nx-1 # inner row indices
-            uri = 1:st.nx-1 # upper diagonal row indices
+            f = diffx[2:st.nx+1] # (xⱼ₊₁ - xⱼ) or Δⱼ
+            b = -diffx[1:st.nx] # (xⱼ₋₁ - xⱼ) or ∇ⱼ
+            l = 2:st.nx # lower diagonal row indices
+            u = 1:st.nx-1 # upper diagonal row indices
+            A1 = @. f / (b * (f-b))
+            B1 = @. -(b+f) / (b*f)
+            C1 = @. b / (f * (b-f))
             first = -2.0st.x .* SA.spdiagm(
-                -1 => -1.0 ./ (f[lri]-b[lri]),
-                0 => [-1.0/(f[1]-b[1]); zeros(st.nx-2); 1.0/(f[st.nx]-b[st.nx])],
-                1 => 1.0 ./ (f[uri]-b[uri])
+                -1 => A1[l],
+                0 => B1 + [A1[1]; zeros(Float64, st.nx-2); C1[st.nx]],
+                1 => C1[u]
             ) # -2x ∂/∂x
+            A2 = @. 2.0 / (b * (b-f))
+            B2 = @. 2.0 / (b*f)
+            C2 = @. 2.0 / (f * (f-b))
             second = (1.0 .- st.x.^2.0) .* SA.spdiagm(
-                -1 => 2.0 ./ (b[lri] .* (b[lri]-f[lri])),
-                0 => [
-                    -2.0/(f[1]*(f[1]-b[1]));
-                    -2.0./(b[iri].*(b[iri]-f[iri])) - 2.0./(f[iri].*(f[iri]-b[iri]));
-                    -2.0/(b[st.nx]*(b[st.nx]-f[st.nx]))
-                ],
-                1 => 2.0 ./ (f[uri] .* (f[uri]-b[uri]))
+                -1 => A2[l],
+                0 => B2 + [A2[1]; zeros(Float64, st.nx-2); C2[st.nx]],
+                1 => C2[u]
             ) # (1-x^2) ∂²/∂x²
             diffop = first + second
-            xid = objectid(st)
+            xid = objectid(st.x)
         end # if !=
         return diffop
     end # function get_diffop
@@ -572,7 +573,7 @@ default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(cla
 const D∇² = diffusion
 const D∇²! = diffusion!
 
-function annual_mean(annusol::Solutions{F,C})::Collection{Vec} where {F, C}
+function annual_mean(annusol::Solutions{M,F,C})::Collection{Vec} where {M<:AbstractModel, F, C}
     # calculate annual mean for each variable except temperatures
     means = Collection{Vec}()
     foreach(
@@ -601,8 +602,8 @@ julia> annual_mean(forcing, st, 24)
     Stats.mean(forcing.(year-1 .+ st.t))
 
 function savesol!(
-    sols::Solutions{F,C}, annusol::Solutions{F,C}, vars::Collection{Vec}, tinx::Int
-)::Solutions{F,C} where {F, C}
+    sols::Solutions{M,F,C}, annusol::Solutions{M,F,C}, vars::Collection{Vec}, tinx::Int
+)::Solutions{M,F,C} where {M<:AbstractModel, F, C}
     varscp = deepcopy(vars) # avoid reference issues
     year = ceil(Int, sols.spacetime.T[tinx])
     ti = mod1(tinx, sols.spacetime.nt) # index of time in the year

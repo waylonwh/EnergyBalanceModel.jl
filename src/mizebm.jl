@@ -146,12 +146,12 @@ end # function D_t
 function Infrastructure.initialise(
     ::MIZModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
     lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
-)::Tuple{Collection{Vec}, Solutions{MIZ,F,C}, Solutions{MIZ,F,C}} where {F,C}
+)::Tuple{Collection{Vec}, Solutions{MIZModel,F,C}, Solutions{MIZModel,F,C}} where {F, C}
     # create storage
     vars = deepcopy(init)
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
-    sols = Solutions{MIZ}(st, forcing, par, init, solvars, lastonly; debug)
-    annusol = Solutions{MIZ}(st, forcing, par, init, solvars, true; debug) # for calculating annual means
+    sols = Solutions{MIZModel}(st, forcing, par, init, solvars, lastonly; debug)
+    annusol = Solutions{MIZModel}(st, forcing, par, init, solvars, true; debug) # for calculating annual means
     # complete step 0
     vars.phi = concentration(vars.Ei, vars.h, par)
     vars.Tw = water_temp(vars.Ew, vars.phi, par)
@@ -169,7 +169,9 @@ function Infrastructure.step!(
     ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
     debug::Union{Expr,Nothing}=nothing, verbose::Bool=false
 )::Collection{Vec} where F
-    condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
+    # eliminate NaNs for calculations
+    condset!(vars.Tw, 0.0, isnan)
+    condset!(vars.Ti, 0.0, isnan)
     # calculate fluxes
     Fvi = vert_flux(t, true, vars.Ti, vars.Tw, vars.phi, f, st, par)
     Fvw = vert_flux(t, false, vars.Ti, vars.Tw, vars.phi, f, st, par)
@@ -197,10 +199,11 @@ function Infrastructure.step!(
     vars.n = num(vars.D, vars.phi, par) # !
     # update temperature
     vars.Tw = water_temp(vars.Ew, vars.phi, par) # !
-    condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
     vars.Ti = solveTi(t, vars.h, vars.Tw, vars.phi, f, st, par; verbose) # !
     # update total energy and temperature
     zeroref!(vars.Ei, vars.h) # correct round off errors
+    condset!(vars.Tw, 0.0, isnan)
+    condset!(vars.Ti, 0.0, isnan) # eliminate NaNs for calculations
     vars.E = weighted_avg(vars.Ei, vars.Ew, vars.phi) # !
     vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi) # !
     # debug
