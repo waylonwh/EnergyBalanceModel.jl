@@ -147,7 +147,7 @@ function plot_raw(
 end # function plot_raw
 
 """
-    plot_avg(sols::Solutions{F,C}, bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=... -> Makie.Figure
+    plot_avg(sols::Solutions{<:AbstractModel,F,C}, bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=... -> Makie.Figure
 
 Plot the annual average of solution variables in `sols.seasonal.avg` using the specified
 Makie backend `bcknd` and `layout`.
@@ -165,9 +165,9 @@ function plot_avg(
     return contourf_tiles(collect(1:sols.spacetime.dur), sols.spacetime.x, datatitle)
 end # function plot_avg
 
-(ice_area(sols::Solutions{ClassicModel,F,C}, season::Symbol, year::Int)::Float64) where {F,C} =
+(ice_area(sols::Solutions{ClassicModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
     2.0pi * hemispheric_mean((getproperty(sols.seasonal, season).E[year]<0.0), sols.spacetime.x)
-(ice_area(sols::Solutions{MIZModel,F,C}, season::Symbol, year::Int)::Float64) where {F,C} =
+(ice_area(sols::Solutions{MIZModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
     2.0pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
 
 """

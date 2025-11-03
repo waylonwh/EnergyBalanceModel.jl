@@ -37,11 +37,11 @@ import LinearAlgebra as LA, SparseArrays as SA
 function Infrastructure.initialise(
     ::ClassicModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
     lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, kwargs...
-)::Tuple{Collection{Vec},Solutions{Classic,F,C},Solutions{Classic,F,C}} where {F,C}
+)::Tuple{Collection{Vec},Solutions{ClassicModel,F,C},Solutions{ClassicModel,F,C}} where {F, C}
     vars = deepcopy(init)
     solvars = Set{Symbol}((:E, :T, :h))
-    sols = Solutions{Classic}(st, forcing, par, init, solvars, lastonly; debug)
-    annusol = Solutions{Classic}(st, forcing, par, init, solvars, true; debug) # for calculating annual means
+    sols = Solutions{ClassicModel}(st, forcing, par, init, solvars, lastonly; debug)
+    annusol = Solutions{ClassicModel}(st, forcing, par, init, solvars, true; debug) # for calculating annual means
     return (vars, sols, annusol)
 end # function initialise
 
