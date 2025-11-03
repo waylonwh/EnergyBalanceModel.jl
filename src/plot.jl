@@ -158,7 +158,7 @@ function plot_raw(
 end # function plot_raw
 
 """
-    plot_avg(sols::Solutions{M<:AbstractModel,F,C}, bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=..., inspect::Bool=false) -> Makie.Figure
+    plot_avg(sols::Solutions{<:AbstractModel,F,C}, bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=..., inspect::Bool=false) -> Makie.Figure
 
 Plot the annual average of solution variables in `sols.annual.avg` using the specified
 Makie backend `bcknd` and `layout`.
