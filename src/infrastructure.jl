@@ -8,7 +8,7 @@ import SparseArrays as SA, Statistics as Stats
 export AbstractModel, MIZModel, ClassicModel, MIZ, Classic
 export Vec, Collection, SpaceTime, Solutions, Forcing
 export default_parval, miz_paramset, classic_paramset, default_parameters
-export get_diffop, diffusion!, D∇²!, diffusion, D∇²
+export get_diffop
 export annual_mean, hemispheric_mean
 export integrate
 
@@ -563,16 +563,6 @@ default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(cla
         return diffop
     end # function get_diffop
 ) # @persistent
-
-# diffusion for equal spaced grid
-@inline (
-    diffusion!(base::Vector{T}, temp::Vector{T}, st::SpaceTime{F}, par::Collection{Float64})::Vector{T}
-) where {T<:Number, F} = base .+= par.D * get_diffop(st) * temp
-@inline (
-    diffusion(temp::Vec, st::SpaceTime{F}, par::Collection{Float64})::Vec
-) where F = diffusion!(zeros(Float64, length(temp)), temp, st, par)
-const D∇² = diffusion
-const D∇²! = diffusion!
 
 function annual_mean(annusol::Solutions{M,F,C})::Collection{Vec} where {M<:AbstractModel, F, C}
     # calculate annual mean for each variable except temperatures
