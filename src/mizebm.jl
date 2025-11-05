@@ -34,22 +34,24 @@ function stepTg!(
     frez = @. T0<par.Tm & h>0.0
     watr = .~frez
     M = par.B*LA.I + par.k*LA.I / LA.diagm(h) + par.cg/par.taug * LA.diagm(phi)
-    lhs = (1+st.dt/par.taug)LA.I -
+    Tg .= (
+        (1+st.dt/par.taug)LA.I -
         st.dt*par.D/par.cg * get_diffop(st) -
         (st.dt*par.cg/par.taug^2.0 * LA.diagm(phi) / M) * diagm(frez)
-    rhs = Tg +
-        st.dt/par.taug * (
-            (LA.I-LA.diagm(phi)) * Tw +
+    ) \ (
+        Tg +
+        st.dt / par.taug * (
+            (LA.I - LA.diagm(phi)) * Tw +
             (
                 LA.diagm(phi) * (
-                    par.Tm * (par.BI + par.k*LA.I / LA.diagm(h)) -
-                    par.cg/par.taug * (LA.I-LA.diagm(phi))diagm(Tw) +
-                    LA.diagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
+                    par.Tm * (par.BI + par.k * LA.I / LA.diagm(h)) -
+                    par.cg / par.taug * (LA.I - LA.diagm(phi))diagm(Tw) +
+                    LA.diagm(solar(st.x, t, :ice, par)) - par.A * LA.I + f * LA.I
                 ) / M
             ) * frez +
             par.Tm * LA.diagm(phi) * watr
         )
-    Tg .= lhs \ rhs
+    )
     return Tg
 end # function stepTg!
 
