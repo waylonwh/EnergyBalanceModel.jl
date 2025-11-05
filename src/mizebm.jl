@@ -37,19 +37,19 @@ function stepTg!(
     Tg .= (
             (1+st.dt/par.taug)LA.I -
             st.dt*par.D/par.cg * get_diffop(st) -
-            (st.dt*par.cg/par.taug^2.0 * LA.diagm(phi) / M) * diagm(frez)
+            (st.dt*par.cg/par.taug^2.0 * LA.diagm(phi) / M)LA.diagm(frez)
         ) \ (
             Tg +
-            st.dt / par.taug * (
-                (LA.I - LA.diagm(phi)) * Tw +
+            st.dt/par.taug * (
+                (LA.I-LA.diagm(phi))Tw +
                 (
                     LA.diagm(phi) * (
-                        par.Tm * (par.BI + par.k * LA.I / LA.diagm(h)) -
-                        par.cg / par.taug * (LA.I - LA.diagm(phi))diagm(Tw) +
-                        LA.diagm(solar(st.x, t, :ice, par)) - par.A * LA.I + f * LA.I
+                        par.Tm * (par.BI + par.k*LA.I / LA.diagm(h)) -
+                        par.cg/par.taug * (LA.I-LA.diagm(phi))LA.diagm(Tw) +
+                        LA.diagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
                     ) / M
-                ) * frez +
-                par.Tm * LA.diagm(phi) * watr
+                )frez +
+                par.Tm * LA.diagm(phi)*watr
             )
         )
     return Tg
