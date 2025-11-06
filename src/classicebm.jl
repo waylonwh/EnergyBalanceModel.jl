@@ -36,19 +36,18 @@ import LinearAlgebra as LA, SparseArrays as SA
 
 function Infrastructure.initialise(
     ::ClassicModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
-    lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, kwargs...
+    lastonly::Bool=true
 )::Tuple{Collection{Vec},Solutions{ClassicModel,F,C},Solutions{ClassicModel,F,C}} where {F, C}
     vars = deepcopy(init)
     solvars = Set{Symbol}((:E, :T, :h))
-    sols = Solutions{ClassicModel}(st, forcing, par, init, solvars, lastonly; debug)
-    annusol = Solutions{ClassicModel}(st, forcing, par, init, solvars, true; debug) # for calculating annual means
+    sols = Solutions{ClassicModel}(st, forcing, par, init, solvars, lastonly)
+    annusol = Solutions{ClassicModel}(st, forcing, par, init, solvars, true) # for calculating annual means
     return (vars, sols, annusol)
 end # function initialise
 
 function Infrastructure.step!(
     ::ClassicModel,
     t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
-    debug::Union{Expr,Nothing}=nothing, kwargs...
 )::Collection{Vec} where F
     # get static variables
     stat = get_statics(st, par)
@@ -74,10 +73,6 @@ function Infrastructure.step!(
         ) # () # vars.Tg # WE15 Eq. (A1)
     # Infer ice thickness
     vars.h = @. -vars.E / par.Lf * (vars.E<0.0)
-    # debug
-    if !isnothing(debug)
-        vars.debug = eval(debug) # !
-    end # if !=
     return vars
 end # function Infrastructure.step!
 

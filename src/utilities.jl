@@ -130,13 +130,13 @@ macro persistent(exprs...)
             return expr
         elseif isempty(expr.args)
             return nothing
-        else
+        else # recursively search args
             for arg in expr.args
                 funcexpr = findexpr(arg, head)
                 if !isnothing(funcexpr)
                     return funcexpr
-                end
-            end
+                end # if !
+            end # for arg
             return nothing
         end # if ==
     end # function findexpr
@@ -154,7 +154,7 @@ macro persistent(exprs...)
     funcsign = findexpr(funcnode, :call)
     funcname = funcsign.args[1]
     hyfuncvar = gensym(funcname)
-    callexpr::Expr = sign2call(funcsign)
+    callexpr = sign2call(funcsign)
     callexpr.args[1] = hyfuncvar
     # generate code
     return esc(
