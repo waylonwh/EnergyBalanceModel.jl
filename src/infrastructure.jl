@@ -142,7 +142,7 @@ SpaceTime{sin} with:
 """
 struct SpaceTime{F}
     nx::Int # number of evenly spaced latitudinal gridboxes (equator to pole)
-    u::Vec # grid before modification/scale
+    u::StepRangeLen{Float64,Base.TwicePrecision{Float64},Base.TwicePrecision{Float64},Int64} # grid before scale
     x::Vec # grid
     dur::Int # duration of simulation in years
     nt::Int # number of timesteps per year (limited by numerical stability)
@@ -156,8 +156,8 @@ struct SpaceTime{F}
         urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int;
         winter::Float64=0.26125, summer::Float64=0.77375
     ) where F
-        dx = (urange[2]-urange[1]) / nx
-        u = collect(urange[1] + dx/2.0 : dx : urange[2] - dx/2.0)
+        du = (urange[2]-urange[1]) / nx
+        u = range(urange[1] + du/2.0, urange[2] - du/2.0, nx)
         x = F.(u)
         dt = 1.0 / nt
         t = collect(range(dt/2.0, 1.0 - dt/2.0, nt))
@@ -355,7 +355,6 @@ An object to store model solutions. Type parameter `M` is the model type (`MIZ` 
 - `parameters::Collection{Float64}`: model parameters
 - `initconds::Collection{Vec}`: initial conditions
 - `lastonly::Bool`: whether to store solutions for each time step only for the last year
-- `debug::Union{Expr,Nothing}`: expression for evaluating debug variables
 - `raw::Collection{Vector{Vec}}`: solutions for each time step
 - `seasonal::@NamedTuple{winter::..., summer::..., avg::...}`: seasonal peak and annual
     average solution storage for each year
@@ -372,7 +371,6 @@ struct Solutions{M<:AbstractModel,F,C}
     parameters::Collection{Float64} # model parameters
     initconds::Collection{Vec} # initial conditions
     lastonly::Bool # store only last year of solution
-    debug::Union{Expr,Nothing} # store debug variables
     raw::Collection{Vector{Vec}} # solution storage
     seasonal::@NamedTuple{
         winter::Collection{Vector{Vec}}, summer::Collection{Vector{Vec}}, avg::Collection{Vector{Vec}}
@@ -382,7 +380,6 @@ struct Solutions{M<:AbstractModel,F,C}
         st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64},
         init::Collection{Vec}, vars::Set{Symbol},
         lastonly::Bool=true;
-        debug::Union{Expr,Nothing}=nothing
     ) where {M<:AbstractModel, F, C} # Solutions
         if lastonly
             dur_store = 1
@@ -391,9 +388,6 @@ struct Solutions{M<:AbstractModel,F,C}
             dur_store = st.dur
             ts = st.dt/2.0 : st.dt : st.dur - st.dt/2.0
         end # if lastonly, else
-        if !isnothing(debug)
-            push!(vars, :debug)
-        end # if !=
         # construct raw solution storage
         solraw = Collection{Vector{Vec}}()
         foreach((var -> setproperty!(solraw, var, Vector{Vec}(undef, length(ts)))), vars)
@@ -407,7 +401,6 @@ struct Solutions{M<:AbstractModel,F,C}
             par, # parameters
             init, # initconds
             lastonly,
-            debug,
             solraw, # raw
             (
                 winter=deepcopy(seasonaltemp),
@@ -472,7 +465,7 @@ const default_parval = Collection{Float64}(
 const miz_paramset = Set{Symbol}(
     (
         :D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :Tm, :m1, :m2, :alpha,
-        :rl, :Dmin, :Dmax, :hmin, :kappa
+        :rl, :Dmin, :Dmax, :hmin, :kappa, :cg, :tau
     )
 )
 const classic_paramset = Set{Symbol}(
@@ -665,7 +658,7 @@ function step! end
 function initialise end
 
 """
-    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, updatefreq::Float64=1.0, verbose::Bool=false) -> Solutions{M,F,C}
+    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
@@ -674,9 +667,7 @@ model, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D`; for `Classic`
 `init` must contain `:E` and `:Tg`.
 
 When `lastonly=true`, only the last year of the solution is stored for each time step,
-otherwise the full solution is stored. When `debug` expression is provided, a variable
-`:debug` is added to the solution storage which contains the evaluated expression at each
-time step. A progress bar is displayed and updated with frequency `updatefreq`. If
+otherwise the full solution is stored. A progress bar is displayed and updated with frequency `updatefreq`. If
 `updatefreq` is `Inf`, no progress bar is shown. If `verbose=true`, a warning message is
 showed when the SCM nonlinear equation fails to converge at any time step.
 
@@ -684,11 +675,10 @@ Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
     model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
-    lastonly::Bool=true, debug::Union{Expr,Nothing}=nothing, updatefreq::Float64=1.0,
-    verbose::Bool=false
+    lastonly::Bool=true, updatefreq::Float64=1.0
 )::Solutions{M,F,C} where {M<:AbstractModel, F, C}
     # initialise
-    vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly, debug)
+    vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
     if updatefreq < Inf
         progress::Progress = Progress(
             length(st.T), "Integrating", updatefreq;
@@ -698,7 +688,7 @@ function integrate(
     end # if <
     # loop over time
     for ti in eachindex(st.T)
-        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; debug, verbose)
+        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par)
         savesol!(sols, annusol, vars, ti)
         if updatefreq < Inf
             update!(progress; feedargs=(st.T[ti],))
