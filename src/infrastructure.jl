@@ -356,12 +356,12 @@ An object to store model solutions. Type parameter `M` is the model type (`MIZ` 
 - `initconds::Collection{Vec}`: initial conditions
 - `lastonly::Bool`: whether to store solutions for each time step only for the last year
 - `raw::Collection{Vector{Vec}}`: solutions for each time step
-- `seasonal::@NamedTuple{winter::..., summer::..., avg::...}`: seasonal peak and annual
+- `annual::@NamedTuple{winter::..., summer::..., avg::...}`: seasonal peak and annual
     average solution storage for each year
 
-Note that each value of `raw`, `seasonal.winter`, `seasonal.summer`, and `seasonal.avg` is
+Note that each value of `raw`, `annual.winter`, `annual.summer`, and `annual.avg` is
 a vector of vectors. For example, `raw.E[ti]::Vector{Float64}` stores the solution for
-enthalpy at time step `ts[ti]::Float64`, and `seasonal.avg.T[y]::Vector{Float64}` stores
+enthalpy at time step `ts[ti]::Float64`, and `annual.avg.T[y]::Vector{Float64}` stores
 the annual average temperature for year `y::Int`.
 """
 struct Solutions{M<:AbstractModel,F,C}
@@ -372,7 +372,7 @@ struct Solutions{M<:AbstractModel,F,C}
     initconds::Collection{Vec} # initial conditions
     lastonly::Bool # store only last year of solution
     raw::Collection{Vector{Vec}} # solution storage
-    seasonal::@NamedTuple{
+    annual::@NamedTuple{
         winter::Collection{Vector{Vec}}, summer::Collection{Vector{Vec}}, avg::Collection{Vector{Vec}}
     } # seasonal peak and annual avg
 
@@ -611,19 +611,19 @@ function savesol!(
     # save seasonal data
     if ti == sols.spacetime.winter.inx
         foreach(
-            (var -> setindex!(getproperty(sols.seasonal.winter, var), getproperty(varscp, var), year)),
-            propertynames(sols.seasonal.winter)
+            (var -> setindex!(getproperty(sols.annual.winter, var), getproperty(varscp, var), year)),
+            propertynames(sols.annual.winter)
         )
     elseif ti == sols.spacetime.summer.inx
         foreach(
-            (var -> setindex!(getproperty(sols.seasonal.summer, var), getproperty(varscp, var), year)),
-            propertynames(sols.seasonal.summer)
+            (var -> setindex!(getproperty(sols.annual.summer, var), getproperty(varscp, var), year)),
+            propertynames(sols.annual.summer)
         )
     elseif ti == sols.spacetime.nt # calculate annual average
         means = annual_mean(annusol)
         foreach(
-            (var -> setindex!(getproperty(sols.seasonal.avg, var), getproperty(means, var), year)),
-            propertynames(sols.seasonal.avg)
+            (var -> setindex!(getproperty(sols.annual.avg, var), getproperty(means, var), year)),
+            propertynames(sols.annual.avg)
         )
     end # if ==, elseif*2
     return sols
