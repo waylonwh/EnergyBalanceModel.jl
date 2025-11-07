@@ -27,7 +27,7 @@ Forcing{true}(0.0) is constant:
   F(t)=0.0, t∈[0,∞)
 
 julia> par = default_parameters(MIZ)
-Collection{Float64} with 22 entries:
+Collection{Float64} with 24 entries:
   :Dmax  => 156.0
   :a2    => 0.1
   :alpha => 0.66
@@ -35,30 +35,31 @@ Collection{Float64} with 22 entries:
   :D     => 0.6
   :S1    => 338.0
   :B     => 2.1
-  :cw    => 9.8
-  :rl    => 0.5
-  :Fb    => 4.0
   ⋮      => ⋮
+
+julia> T = fill(17.0, st.nx);
 
 julia> init = Collection{Vec}(
            :Ei => zeros(st.nx),
-           :Ew => zeros(st.nx),
+           :Ew => T .* par.cw,
            :h => zeros(st.nx),
-           :D => zeros(st.nx)
+           :D => zeros(st.nx),
+           :Tg => T,
        )
 Collection{Vector{Float64}} with 5 entries:
-  :Ei  => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
-  :D   => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
-  :h   => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
-  :Ew  => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, …
+  :Tg => [17.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0, 17.0  …  17.0, …
+  :Ei => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, 0…
+  :D  => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, 0…
+  :h  => [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0  …  0.0, 0.0, 0.0, 0…
+  :Ew => [166.6, 166.6, 166.6, 166.6, 166.6, 166.6, 166.6, 166.6, 166.6, 166.6 …
 
 julia> sols = integrate(MIZ, st, forcing, par, init)
 Integrating
  60000/60000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
- 1:57/-0:00 511.24/sec                      Done ✓
+ 0:46/-0:00 1295.08/sec                     Done ✓
  t = 30.0
-Solutions{sin, true} with:
-  10 solution variables: [:T, :Ei, :Ti, :D, :n, :h, :phi, :E, :Ew, :Tw]
+Solutions{EnergyBalanceModel.Infrastructure.MIZModel, sin, true} with:
+  10 solution variables: Set([:T, :Ei, :Ti, :D, :n, :h, :phi, :Ew, :E, :Tw])
   on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
   and 2000 timesteps: 29.00025:0.0005:29.99975
   with forcing Forcing{true}(0.0) (constant forcing)
