@@ -214,7 +214,7 @@ for xfunc in (identity, sin)
     precompile(stepTg!, (Float64, Vec, Vec, Vec, Vec, Vec, Float64, SpaceTime{xfunc}, Collection{Float64}))
     precompile(
         Infrastructure.step!,
-        (MIZ, Float64, Float64, Collection{Vec}, SpaceTime{xfunc}, Collection{Float64})
+        (MIZModel, Float64, Float64, Collection{Vec}, SpaceTime{xfunc}, Collection{Float64})
     )
 end # for xfunc
 

@@ -5,7 +5,7 @@ using ..Utilities
 import EnergyBalanceModel
 import SparseArrays as SA, Statistics as Stats
 
-export AbstractModel, MIZModel, ClassicModel, MIZ, Classic
+export AbstractModel, MIZModel, ClassicModel, miz, classic
 export Vec, Collection, SpaceTime, Solutions, Forcing
 export default_parval, miz_paramset, classic_paramset, default_parameters
 export get_diffop
@@ -25,26 +25,25 @@ Singleton type representing the extended idealised climate model with a marginal
 struct MIZModel <: AbstractModel end
 
 """
-    MIZ
+    miz
 
 A singleton instance of `MIZModel`.
 """
-const MIZ = MIZModel()
+const miz = MIZModel()
 
 """
     ClassicModel <: AbstractModel
-    Classic = ClassicModel()
 
 Singleton type representing the classic idealised climate model by Wagner & Eisenman (2015).
 """
 struct ClassicModel <: AbstractModel end
 
 """
-    Classic
+    classic
 
 A singleton instance of `ClassicModel`.
 """
-const Classic = ClassicModel()
+const classic = ClassicModel()
 
 """
     Collection{V}(args...)
@@ -342,8 +341,8 @@ end # function (forcing::Forcing{false})
 """
     Solutions{M,F,C}
 
-An object to store model solutions. Type parameter `M` is the model type (`MIZ` or
-`Classic`); `F` is the function used to map the uniform grid to the model grid in
+An object to store model solutions. Type parameter `M` is the model type (`miz` or
+`classic`); `F` is the function used to map the uniform grid to the model grid in
 `SpaceTime{F}`; `C` is a boolean indicating whether the climate forcing is constant.
 `C` is `true` for constant forcing.
 
@@ -485,7 +484,7 @@ Get default parameters for a given model.
 
 # Examples
 ```julia-repl
-julia> default_parameters(Classic)
+julia> default_parameters(classic)
 Collection{Float64} with 16 entries:
   :a2 => 0.1
   :F  => 0.0
@@ -661,8 +660,8 @@ function initialise end
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
-`Solutions` object. Use `default_parameters` to get default model parameters. For `MIZ`
-model, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D`; for `Classic` model,
+`Solutions` object. Use `default_parameters` to get default model parameters. For
+`MIZModel`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D`; for `ClassicModel`,
 `init` must contain `:E` and `:Tg`.
 
 When `lastonly=true`, only the last year of the solution is stored for each time step,
