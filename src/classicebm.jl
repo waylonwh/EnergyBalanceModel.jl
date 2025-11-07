@@ -54,7 +54,7 @@ function Infrastructure.step!(
     # get time index
     i = round(Int, mod1((t + st.dt/2.0) * st.nt, st.nt))
     # forcing
-    alpha = @. stat.aw * (vars.E>0.0) + par.ai * (vars.E<0.0) # WE15 Eq. (4)
+    alpha = @. stat.aw * (vars.E>=0.0) + par.ai * (vars.E<0.0) # WE15 Eq. (4)
     C = @. alpha*stat.S[:,i] + stat.cg_tau*vars.Tg - par.A + f
     # surface temperature
     T0 = @. C / (stat.M - stat.kLf/vars.E) # WE15 Eq. (A3)

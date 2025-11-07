@@ -3,8 +3,8 @@ module MIZEBM # EnergyBalanceModel.
 
 using ..Infrastructure, ..Utilities
 
-import NonlinearSolve as NlSol
 import LinearAlgebra as LA
+import SparseArrays as SA
 
 # solar radiation absorbed on ice and water
 solar(x::Vec, t::Float64, ::Val{:ice}, par::Collection{Float64})::Vec =
@@ -33,23 +33,23 @@ function stepTg!(
 )::Vec where F
     frez = @. (T0<par.Tm) & (h>0.0)
     watr = .~frez
-    M = par.B*LA.I + par.k*LA.I * LA.diagm(inv.(h)) + par.cg/par.tau * LA.diagm(phi)
+    M = par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h)) + par.cg/par.tau * SA.spdiagm(phi)
     Tg .= (
             (1+st.dt/par.tau)LA.I -
             st.dt*par.D/par.cg * get_diffop(st) -
-            (st.dt*par.cg/par.tau^2.0 * LA.diagm(phi) / M)LA.diagm(frez)
+            (st.dt*par.cg/par.tau^2.0 * SA.spdiagm(phi) / M)SA.spdiagm(frez)
         ) \ (
             Tg +
             st.dt/par.tau * (
-                (LA.I-LA.diagm(phi))Tw +
+                (LA.I-SA.spdiagm(phi))Tw +
                 (
-                    LA.diagm(phi) * (
-                        par.Tm * (par.B*LA.I + par.k*LA.I * LA.diagm(inv.(h))) -
-                        par.cg/par.tau * (LA.I-LA.diagm(phi))LA.diagm(Tw) +
-                        LA.diagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
+                    SA.spdiagm(phi) * (
+                        par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h))) -
+                        par.cg/par.tau * (LA.I-SA.spdiagm(phi))SA.spdiagm(Tw) +
+                        SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
                     ) / M
                 )frez +
-                par.Tm * LA.diagm(phi)*watr
+                par.Tm * SA.spdiagm(phi)*watr
             )
         )
     return Tg
@@ -63,8 +63,7 @@ function concentration(Ei::Vec, h::Vec, par::Collection{Float64})::Vec
     phi = @. -Ei / (par.Lf * h)
     zeroref!(phi, h)
     condset!(phi, 1.0, >(1.0)) # correct concentration
-    # phi = @. Float64(Ei<0.0) # reproducing WE15 #TODO?
-    return phi
+    # phi = @. Float64(Ei<0.0) # reproducing WE15
 end # function concentration
 
 # floe number
@@ -118,6 +117,7 @@ function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
     total = n .+ dn
     avgd = @. (n*f + dn*fn) / total
     zeroref!(avgd, total)
+    # return f # reproducing WE15
     return avgd
 end # function average
 
@@ -166,6 +166,11 @@ function Infrastructure.step!(
     Fvi = vert_flux(t, :ice, vars.Tg, vars.T, f, st, par)
     Fvw = vert_flux(t, :water, vars.Tg, vars.T, f, st, par)
     Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
+    # update thickness by vertical fluxes
+    lasth = copy(vars.h)
+    vars.h = forward_euler(vars.h, h_t(Fvi, par), st.dt)
+    clamp!(vars.h, 0.0, Inf) # avoid overshooting to negative thickness
+    zeroref!(vars.h, vars.Ei) # restrict non-existence
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
     rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)
@@ -178,14 +183,12 @@ function Infrastructure.step!(
     dn = st.dt * psinplus(Qlp.Qp, par) # number of new pancakes
     vars.D = forward_euler(
         average(vars.D, par.Dmin, vars.n, dn), # new pancakes
-        D_t(vars.h, vars.D, vars.Tw, vars.phi, Qlp.Ql, par),
+        D_t(lasth, vars.D, vars.Tw, vars.phi, Qlp.Ql, par),
         st.dt
     ) # !
     clamp!(vars.D, par.Dmin, par.Dmax)
-    zeroref!(vars.D, vars.Ei) # correct round off errors
-    vars.h = forward_euler(average(vars.h, par.hmin, vars.n, dn), h_t(Fvi, par), st.dt)
-    clamp!(vars.h, 0.0, Inf) # avoid overshooting to negative thickness
-    zeroref!(vars.h, vars.Ei) # correct round off errors
+    zeroref!(vars.D, vars.Ei) # restrict non-existence
+    vars.h = average(vars.h, par.hmin, vars.n, dn) # !
     # update concentration
     vars.phi = concentration(vars.Ei, vars.h, par) # !
     # update temperature
@@ -203,12 +206,12 @@ function Infrastructure.step!(
     # set NaNs to no existence
     condset!(vars.Ti, NaN, iszero, vars.Ei)
     condset!(vars.Tw, NaN, >(0.99), vars.phi)
-    push!(Main.T0s, T0) # TODO remove
-    push!(Main.Tgs, copy(vars.Tg)) # TODO remove
     return vars
 end # function Infrastructure.step!
 
+precompile(solveT0, (Vec, Float64, Vec, Vec, Vec, Vec, Float64, Collection{Float64}))
 for xfunc in (identity, sin)
+    precompile(stepTg!, (Float64, Vec, Vec, Vec, Vec, Vec, Float64, SpaceTime{xfunc}, Collection{Float64}))
     precompile(
         Infrastructure.step!,
         (MIZ, Float64, Float64, Collection{Vec}, SpaceTime{xfunc}, Collection{Float64})
