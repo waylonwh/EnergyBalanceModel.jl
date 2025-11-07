@@ -6,7 +6,7 @@ import EnergyBalanceModel.Infrastructure:AbstractModel
     st = SpaceTime(180, 2000, 20)
     forcing = Forcing(0.0)
 
-    mizpar = default_parameters(MIZ)
+    mizpar = default_parameters(miz)
     T = fill(17.0, st.nx)
     mizinit = Collection{Vec}(
         :Ei => zeros(st.nx),
@@ -16,14 +16,14 @@ import EnergyBalanceModel.Infrastructure:AbstractModel
         :Tg => T,
     ) # Collection
 
-    clapar = default_parameters(Classic)
+    clapar = default_parameters(classic)
     clainit = Collection{Vec}(
         :E => clapar.cw * T,
         :Tg => T
     )
 
-    mizsols = integrate(MIZ, st, forcing, mizpar, mizinit; updatefreq=Inf)
-    clasols = integrate(Classic, st, forcing, clapar, clainit; updatefreq=Inf)
+    mizsols = integrate(miz, st, forcing, mizpar, mizinit; updatefreq=Inf)
+    clasols = integrate(classic, st, forcing, clapar, clainit; updatefreq=Inf)
 
     (lastyear_hemi_mean(sols::Solutions{<:AbstractModel,F,C}, var::Symbol)::Float64) where {F, C} =
         hemispheric_mean(getproperty(sols.annual.avg, var)[sols.spacetime.dur], sols.spacetime.x)

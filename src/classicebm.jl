@@ -78,7 +78,7 @@ end # function Infrastructure.step!
 
 precompile(
     Infrastructure.step!,
-    (Classic, Float64, Float64, Collection{Vec}, SpaceTime{identity}, Collection{Float64})
+    (ClassicModel, Float64, Float64, Collection{Vec}, SpaceTime{identity}, Collection{Float64})
 )
 
 end # module ClassicEBM

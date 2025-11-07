@@ -19,7 +19,7 @@ julia> st = SpaceTime{sin}(180, 2000, 50);
 
 julia> forcing = Forcing(0.0);
 
-julia> par = default_parameters(MIZ);
+julia> par = default_parameters(miz);
 
 julia> T = fill(17.0, st.nx);
 
@@ -31,7 +31,7 @@ julia> init = Collection{Vec}(
            :Tg => T,
        );
 
-julia> sols = integrate(MIZ, st, forcing, par, init)
+julia> sols = integrate(miz, st, forcing, par, init)
 Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  1:21/-0:00 1231.41/sec                     Done ✓
@@ -48,14 +48,14 @@ julia> import GLMakie; plot_raw(sols)
 ```
 
 You can also run the example above by calling `run_example()`. To run the classic EBM
-instead, call `run_example(Classic)`.
+instead, call `run_example(classic)`.
 
 See the documentation for `save`, `load`, `plot_raw`, `plot_avg`, and `plot_seasonal` for
 details on data handling and visualisation.
 """
 module EnergyBalanceModel
 
-export MIZ, Classic
+export miz, classic
 export Vec, Collection, SpaceTime, Forcing, Solutions
 export integrate, default_parameters
 export annual_mean, hemispheric_mean
@@ -78,9 +78,9 @@ using .Plot
 using .IO
 
 """
-    run_example(model<:AbstractModel=MIZ; saveto::String="./example.jld2", plotbackend::Symbol=:GLMakie)
+    run_example(model<:AbstractModel=miz; saveto::String="./example.jld2", plotbackend::Symbol=:GLMakie)
 
-Run a standard example simulation for the specified `model` (either `MIZ` or `Classic`).
+Run a standard example simulation for the specified `model` (either `miz` or `classic`).
 The results are saved to the file path given by `saveto`. The results of the last year
 (year 50) are plotted using the specified Makie backend `plotbackend`. The backend package
 must be loaded beforehand (e.g., `import GLMakie`).
@@ -104,7 +104,7 @@ Solutions{EnergyBalanceModel.Infrastructure.MIZModel, identity, true} with:
   and 2000 timesteps: 49.00025:0.0005:49.99975
   with forcing Forcing{true}(0.0) (constant forcing)
 
-julia> run_example(Classic)
+julia> run_example(classic)
 Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  0:17/-0:00 6008.36/sec                     Done ✓
@@ -119,7 +119,7 @@ Solutions{EnergyBalanceModel.Infrastructure.ClassicModel, identity, true} with:
 ```
 """
 function run_example(
-    model::M=MIZ;
+    model::M=miz;
     saveto::String="./example.jld2", plotbackend::Symbol=:GLMakie
 ) where M<:AbstractModel
     st = SpaceTime(180, 2000, 50)
