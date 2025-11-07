@@ -139,7 +139,7 @@ end # function plot_raw
 """
     plot_avg(sols::Solutions{M<:AbstractModel,F,C}, bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
 
-Plot the annual average of solution variables in `sols.seasonal.avg` using the specified
+Plot the annual average of solution variables in `sols.annual.avg` using the specified
 Makie backend `bcknd` and `layout`. By default, the layout is set to `miz_layout` if `:phi`
 exists in the solution, otherwise it uses `classic_layout`.
 """
@@ -151,23 +151,23 @@ function plot_avg(
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
-        datatitle.vars[inx] = matricify(getproperty(sols.seasonal.avg, layout[inx].var))
+        datatitle.vars[inx] = matricify(getproperty(sols.annual.avg, layout[inx].var))
     end # for inx
     return contourf_tiles(collect(1:sols.spacetime.dur), sols.spacetime.x, datatitle)
 end # function plot_avg
 
 (ice_area(sols::Solutions{ClassicModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
-    2.0pi * hemispheric_mean((getproperty(sols.seasonal, season).E[year]<0.0), sols.spacetime.x)
+    2.0pi * hemispheric_mean((getproperty(sols.annual, season).E[year]<0.0), sols.spacetime.x)
 (ice_area(sols::Solutions{MIZModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
-    2.0pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
+    2.0pi * hemispheric_mean(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
 
 """
     plot_seasonal(sols::Solutions{F,false}, bcknd::Symbol=:GLMakie; ...) -> Makie.Figure
 
-Using the data from `sols.seasonal`, plot lines spanned by (`xfunc(sols, year)`,
+Using the data from `sols.annual`, plot lines spanned by (`xfunc(sols, year)`,
 `yfunc(sols, season, year)`) for each year and for the seasons `:avg`, `:winter`, and
 `:summer`. By default, `xfunc` computes the hemispheric mean temperature from
-`sols.seasonal.avg.T`, while `yfunc` computes the ice-covered area using either
+`sols.annual.avg.T`, while `yfunc` computes the ice-covered area using either
 concentration `phi` (if it exists) or enthalpy `E`. Lines during the warming period defined
 in `sols.forcing` are coloured red, and those during the cooling period are coloured blue.
 Lines for the summer peak are dashed, those for winter are thin solid, and those for the
@@ -185,7 +185,7 @@ annual average are thick solid.
 function plot_seasonal(
     sols::Solutions{M,F,false},
     bcknd::Symbol=:GLMakie;
-    xfunc::Function=((sols, year) -> hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)),
+    xfunc::Function=((sols, year) -> hemispheric_mean(sols.annual.avg.T[year], sols.spacetime.x)),
     yfunc::Function=ice_area,
     title::AbstractString="Ice covered area",
     xlabel::AbstractString=Makie.L"$\tilde{T}$ ($\mathrm{\degree\!C}$)",
