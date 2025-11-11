@@ -46,6 +46,7 @@ end # struct Collection
     setindex!(getfield(coll, :dict), val, key)
 (Base.propertynames(coll::Collection{V})::Set{Symbol}) where V = Set(keys(getfield(coll, :dict)))
 (Base.length(coll::Collection{V})::Int) where V = length(getfield(coll, :dict))
+(Base.hash(coll::Collection{V}, h::UInt)::UInt) where V = hash(getfield(coll, :dict), h)
 
 function Base.show(io::IO, coll::Collection{V})::Nothing where V
     buffer = iobuffer(io)
