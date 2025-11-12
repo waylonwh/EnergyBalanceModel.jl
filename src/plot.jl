@@ -157,7 +157,7 @@ function plot_avg(
 end # function plot_avg
 
 (ice_area(sols::Solutions{ClassicModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
-    2.0pi * hemispheric_mean((getproperty(sols.annual, season).E[year]<0.0), sols.spacetime.x)
+    2.0pi * hemispheric_mean((getproperty(sols.annual, season).E[year].<0.0), sols.spacetime.x)
 (ice_area(sols::Solutions{MIZModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
     2.0pi * hemispheric_mean(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
 
