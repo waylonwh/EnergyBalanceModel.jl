@@ -186,7 +186,7 @@ function Infrastructure.step!(
         D_t(lasth, vars.D, vars.Tw, vars.phi, Qlp.Ql, par),
         st.dt
     ) # !
-    clamp!(vars.D, par.Dmin, par.Dmax)
+    clamp!(vars.D, 0.0, par.Dmax)
     zeroref!(vars.D, vars.Ei) # restrict non-existence
     vars.h = average(vars.h, par.hmin, vars.n, dn) # !
     # update concentration
