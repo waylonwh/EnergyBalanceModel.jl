@@ -146,7 +146,7 @@ to enable `Makie.DataInspect` for interactive exploration of the plot.
 function plot_raw(
     sols::Solutions{M,F,C},
     bcknd::Union{Symbol,Nothing}=find_backend();
-    layout::Layout{Symbol}=default_layout(M())
+    layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false
 )::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
@@ -166,7 +166,7 @@ Makie backend `bcknd` and `layout`.
 function plot_avg(
     sols::Solutions{M,F,C},
     bcknd::Union{Symbol,Nothing}=find_backend();
-    layout::Layout{Symbol}=default_layout(M())
+    layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false
 )::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
