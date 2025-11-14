@@ -1,48 +1,33 @@
-using EnergyBalanceModel, Test, JLD2
+using EnergyBalanceModel, Test
 
-#=
-st = SpaceTime{sin}(180, 2000, 1)
-forcing = Forcing(0.0)
-par = default_parameters(:MIZ)
-init = Collection{Vec}(
-           :Ei => zeros(st.nx),
-           :Ew => zeros(st.nx),
-           :h => zeros(st.nx),
-           :D => zeros(st.nx),
-           :phi => zeros(st.nx)
-       )
-sols = integrate(:MIZ, st, forcing, par, init)
+import EnergyBalanceModel.Infrastructure:AbstractModel
 
-using JLD2
-jldsave("solution_1year.jld2", sols=sols)
-=#
-
-@testset "Basic Test 1year solution..." begin
-
-    st = SpaceTime{sin}(180, 2000, 1)
+@testset "Test for annual hemispheric means" begin
+    st = SpaceTime(180, 2000, 20)
     forcing = Forcing(0.0)
-    par = default_parameters(:MIZ)
-    init = Collection{Vec}(
-            :Ei => zeros(st.nx),
-            :Ew => zeros(st.nx),
-            :h => zeros(st.nx),
-            :D => zeros(st.nx),
-            :phi => zeros(st.nx)
-        )
-    sols = integrate(:MIZ, st, forcing, par, init)
 
-    file = jldopen("solution_1year.jld2")
-    sols_loaded = file["sols"]
+    mizpar = default_parameters(miz)
+    T = fill(17.0, st.nx)
+    mizinit = Collection{Vec}(
+        :Ei => zeros(st.nx),
+        :Ew => T .* mizpar.cw,
+        :h => zeros(st.nx),
+        :D => zeros(st.nx),
+        :Tg => T,
+    ) # Collection
 
-    for key in propertynames(sols.raw)
+    clapar = default_parameters(classic)
+    clainit = Collection{Vec}(
+        :E => clapar.cw * T,
+        :Tg => T
+    )
 
-        @show key
-        solv = getproperty(sols.raw, key)[10]
-        solv_loaded = getproperty(sols_loaded.raw, key)[10]
-        EnergyBalanceModel.Utilities.condset!(solv, 0.0, isnan)
-        EnergyBalanceModel.Utilities.condset!(solv_loaded, 0.0, isnan)
+    mizsols = integrate(miz, st, forcing, mizpar, mizinit; updatefreq=Inf)
+    clasols = integrate(classic, st, forcing, clapar, clainit; updatefreq=Inf)
 
-        @show all(isapprox.(solv, solv_loaded))
-        @test all(isapprox.(solv, solv_loaded))
-    end
-end
+    (lastyear_hemi_mean(sols::Solutions{<:AbstractModel,F,C}, var::Symbol)::Float64) where {F, C} =
+        hemispheric_mean(getproperty(sols.annual.avg, var)[sols.spacetime.dur], sols.spacetime.x)
+
+    @test lastyear_hemi_mean(mizsols, :T) - lastyear_hemi_mean(clasols, :T) < 0.1
+    @test lastyear_hemi_mean(mizsols, :E) - lastyear_hemi_mean(clasols, :E) < 1.0
+end # @testset begin

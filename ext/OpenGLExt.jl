@@ -11,4 +11,8 @@ function EBM.Plot.init_backend(::Val{:GLMakie})::Module
     return GLMakie
 end # function EBM.Plot.init_backend
 
+for t in (Float64, Int)
+    precompile(EBM.Plot.contourf_tiles, (Vector{Float64}, EBM.Vec, EBM.Layout{Matrix{Float64}}))
+end # for t
+
 end # module OpenGLExt

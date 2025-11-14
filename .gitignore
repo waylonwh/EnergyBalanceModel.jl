@@ -30,4 +30,4 @@ Manifest.toml
 .DS_Store
 
 # Additional Manifest files for different Julia versions
-Manifest10.toml
+Manifest*.toml
