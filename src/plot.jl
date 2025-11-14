@@ -132,7 +132,7 @@ end # function contourf_tiles
 matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
 
 """
-    plot_raw(sols::Solutions{M,F,C}, bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=..., inspect::Bool=false) -> Makie.Figure
+    plot_raw(sols::Solutions{<:AbstractModel,F,C}, bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=..., inspect::Bool=false) -> Makie.Figure
 
 Plot the the solution variables for each time step in `sols.raw` using the specified Makie
 backend `bcknd` and `layout`. The function will find available backend if not specified. By
