@@ -410,7 +410,7 @@ struct Solutions{M<:AbstractModel,F,C}
     end # function Solutions
 end # struct Solutions{M,F,C}
 
-(Base.show(io::IO, sols::Solutions{M,F,C})::Nothing) where {M<:AbstractModel, F, C} = print(
+(Base.show(io::IO, sols::Solutions{<:AbstractModel,F,C})::Nothing) where {F, C} = print(
     io,
     typeof(sols), '(',
     sols.spacetime.nx, '×', length(sols.ts), "@(", first(sols.ts), ':', sols.spacetime.dt, ':', last(sols.ts), "), ",
@@ -418,7 +418,7 @@ end # struct Solutions{M,F,C}
     ')'
 )
 
-function Base.show(io::IO, ::MIME"text/plain", sols::Solutions{M,F,C})::Nothing where {M<:AbstractModel, F, C}
+function Base.show(io::IO, ::MIME"text/plain", sols::Solutions{<:AbstractModel,F,C})::Nothing where {F, C}
     println(io, typeof(sols), " with:")
     println(io, "  ", length(sols.raw), " solution variables: ", propertynames(sols.raw))
     xhead = "  on $(sols.spacetime.nx) latitudinal gridboxes: "
@@ -556,7 +556,7 @@ default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(cla
     end # function get_diffop
 ) # @persistent
 
-function annual_mean(annusol::Solutions{M,F,C})::Collection{Vec} where {M<:AbstractModel, F, C}
+function annual_mean(annusol::Solutions{<:AbstractModel,F,C})::Collection{Vec} where {F, C}
     # calculate annual mean for each variable except temperatures
     means = Collection{Vec}()
     foreach(

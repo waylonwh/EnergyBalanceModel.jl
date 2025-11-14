@@ -175,7 +175,7 @@ end # function plot_avg
     2.0pi * hemispheric_mean(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
 
 """
-    plot_seasonal(sols::Solutions{F,false}, bcknd::Union{Symbol,Nothing}=...; kwargs...) -> Makie.Figure
+    plot_seasonal(sols::Solutions{<:AbstractModel,F,false}, bcknd::Union{Symbol,Nothing}=...; kwargs...) -> Makie.Figure
 
 Using the data from `sols.annual`, plot lines spanned by (`xfunc(sols, year)`,
 `yfunc(sols, season, year)`) for each year and for the seasons `:avg`, `:winter`, and
@@ -196,7 +196,7 @@ annual average are thick solid.
 - `ylabel::AbstractString`: Label for the y-axis.
 """
 function plot_seasonal(
-    sols::Solutions{M,F,false},
+    sols::Solutions{<:AbstractModel,F,false},
     bcknd::Union{Symbol,Nothing}=find_backend();
     xfunc::Function=((sols, year) -> hemispheric_mean(sols.annual.avg.T[year], sols.spacetime.x)),
     yfunc::Function=ice_area,
