@@ -203,7 +203,7 @@ function plot_seasonal(
     title::AbstractString="Ice covered area",
     xlabel::AbstractString=Makie.L"$\tilde{T}$ ($\mathrm{\degree\!C}$)",
     ylabel::AbstractString=Makie.L"A_i"
-)::Makie.Figure where {M<:AbstractModel, F}
+)::Makie.Figure where F
     backend(bcknd)
     xdata = xfunc.(Ref(sols), 1:sols.spacetime.dur)
     fig = Makie.Figure()
