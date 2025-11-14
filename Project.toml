@@ -1,6 +1,6 @@
 name = "EnergyBalanceModel"
 uuid = "68dbb056-390c-4f33-8773-0304cbd749ae"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["Waylon Wu <me@waylonwu.net>", "Navid C. Constantinou <navidcy@users.noreply.github.com>"]
 
 [deps]
@@ -18,10 +18,12 @@ UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 [weakdeps]
 CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+WGLMakie = "276b4fcb-3e11-5398-bf8b-a0c2d153d008"
 
 [extensions]
 CairoExt = "CairoMakie"
 OpenGLExt = "GLMakie"
+WebGLExt = "WGLMakie"
 
 [compat]
 CairoMakie = "0.15.6"
@@ -36,6 +38,7 @@ Statistics = "1.10.0"
 StyledStrings = "1.0.3"
 TimeZones = "1.22.1"
 UUIDs = "1.10.10"
+WGLMakie = "0.13.6"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
