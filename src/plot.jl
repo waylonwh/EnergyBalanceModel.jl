@@ -59,25 +59,37 @@ const classic_layout = Layout(
 default_layout(::MIZModel) = miz_layout
 default_layout(::ClassicModel) = classic_layout
 
-function init_backend(val::Val)
+isloaded(::Val)::Bool = false
+
+function find_backend()::Union{Symbol,Nothing}
+    for backend in (:GLMakie, :CairoMakie, :WGLMakie)
+        if isloaded(Val(backend))
+            return backend
+        end # if isloaded
+    end # for backend
+    return nothing
+end # function find_backend
+
+function init_backend(val::Val) # -> ERROR
     name = typeof(val).parameters[1]
-    if val isa Val{:GLMakie} || val isa Val{:CairoMakie}
-        throw(ArgumentError("Backend not loaded. Please load the backend package $name first."))
-    else
-        throw(ArgumentError("Unsupported backend $name."))
-    end # if ||, else
-end
+    loaded = find_backend()
+    errmsg = "Backend package $name is not loaded or unsupported. Please load the the backend package first."
+    if !isnothing(loaded)
+        errmsg *= "\nHint: Another backend package $loaded is already loaded."
+    end # if !
+    throw(ArgumentError(errmsg))
+end # function init_backend
 
 """
     backend() -> Union{Module,Missing}
 
 Get the current Makie backend module. If no backend is initialized, returns `missing`.
 
-    backend(bcknd::Symbol) -> Module
+    backend(bcknd) -> Module
 
 Set the Makie backend to the specified `bcknd` and return the backend module. Supported
-backends are `:GLMakie` and `:CairoMakie`. You need to first load the corresponding
-backend package before calling this function.
+backends are `:GLMakie`, `:CairoMakie` and `:WGLMakie`. You need to first load the
+corresponding backend package before calling this function.
 
 # Examples
 ```julia-repl
@@ -89,7 +101,7 @@ GLMakie
 ```
 """
 backend()::Union{Module,Missing} = Makie.current_backend()
-backend(bcknd::Symbol)::Module = init_backend(Val(bcknd))
+backend(bcknd)::Module = init_backend(Val(bcknd))
 
 function contourf_tiles(t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}})::Makie.Figure where T<:Real
     fig = Makie.Figure()
@@ -115,17 +127,19 @@ end # function contourf_tiles
 matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
 
 """
-    plot_raw(sols::Solutions{M,F,C},bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
+    plot_raw(sols::Solutions{M,F,C},bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=... -> Makie.Figure
 
 Plot the the solution variables for each time step in `sols.raw` using the specified Makie
-backend `bcknd` and `layout`. By default, the layout is set to `miz_layout` if the variable
-`:phi` exists in `sols.raw`, otherwise it uses `classic_layout`. Use
-`EnergyBalanceModel.Plot.miz_layout` or `EnergyBalanceModel.Plot.classic_layout` to get
-default layouts.
+backend `bcknd` and `layout`. The function will find available backend if not specified. By
+default, the layout is set to `miz_layout` if sols is a `Solutions{MIZModel}`, and
+`classic_layout` if sols is a `Solutions{ClassicModel}`. Use
+`EnergyBalanceModel.Plot.default_layout(miz)` or
+`EnergyBalanceModel.Plot.default_layout(classic)` to get default layouts.
+
 """
 function plot_raw(
     sols::Solutions{M,F,C},
-    bcknd::Symbol=:GLMakie;
+    bcknd::Union{Symbol,Nothing}=find_backend();
     layout::Layout{Symbol}=default_layout(M())
 )::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
@@ -137,15 +151,14 @@ function plot_raw(
 end # function plot_raw
 
 """
-    plot_avg(sols::Solutions{M<:AbstractModel,F,C}, bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
+    plot_avg(sols::Solutions{M<:AbstractModel,F,C}, bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=... -> Makie.Figure
 
 Plot the annual average of solution variables in `sols.annual.avg` using the specified
-Makie backend `bcknd` and `layout`. By default, the layout is set to `miz_layout` if `:phi`
-exists in the solution, otherwise it uses `classic_layout`.
+Makie backend `bcknd` and `layout`.
 """
 function plot_avg(
     sols::Solutions{M,F,C},
-    bcknd::Symbol=:GLMakie;
+    bcknd::Union{Symbol,Nothing}=find_backend();
     layout::Layout{Symbol}=default_layout(M())
 )::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
