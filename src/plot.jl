@@ -100,7 +100,9 @@ GLMakie
 backend()::Union{Module,Missing} = Makie.current_backend()
 backend(bcknd)::Module = init_backend(Val(bcknd))
 
-function contourf_tiles(t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}})::Makie.Figure where T<:Real
+function contourf_tiles(
+    t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}}; inspect::Bool=false
+)::Makie.Figure where T<:Real
     fig = Makie.Figure()
     for row in axes(layout, 1), col in axes(layout, 2)
         subfig = fig[row,col]
@@ -114,37 +116,42 @@ function contourf_tiles(t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}})::
         ctr = Makie.contourf!(ax, t, x, layout[row,col].var)
         Makie.Colorbar(subfig[1,2], ctr)
     end # for row, col
+    if inspect
+        Makie.inspect(fig)
+    end # if inspect
     return fig
 end # function contourf_tiles
 
 matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
 
 """
-    plot_raw(sols::Solutions{F,C},bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=... -> Makie.Figure
+    plot_raw(sols::Solutions{F,C}, bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=..., inspect::Bool=false) -> Makie.Figure
 
 Plot the the solution variables for each time step in `sols.raw` using the specified Makie
 backend `bcknd` and `layout`. The function will find available backend if not specified. By
 default, the layout is set to `miz_layout` if sols is a `Solutions{MIZModel}`, and
 `classic_layout` if sols is a `Solutions{ClassicModel}`. Use
 `EnergyBalanceModel.Plot.default_layout(miz)` or
-`EnergyBalanceModel.Plot.default_layout(classic)` to get default layouts.
+`EnergyBalanceModel.Plot.default_layout(classic)` to get default layouts. Set `inspect=true`
+to enable `Makie.DataInspect` for interactive exploration of the plot.
 
 """
 function plot_raw(
     sols::Solutions{F,C},
     bcknd::Union{Symbol,Nothing}=find_backend();
-    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
+    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout),
+    inspect::Bool=false
 )::Makie.Figure where {F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
         datatitle.vars[inx] = matricify(getproperty(sols.raw, layout[inx].var))
     end # for inx
-    return contourf_tiles(sols.ts, sols.spacetime.x, datatitle)
+    return contourf_tiles(sols.ts, sols.spacetime.x, datatitle; inspect)
 end # function plot_raw
 
 """
-    plot_avg(sols::Solutions{F,C}, bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=... -> Makie.Figure
+    plot_avg(sols::Solutions{F,C}, bcknd::Union{Symbol,Nothing}=...; layout::Layout{Symbol}=..., inspect::Bool=false) -> Makie.Figure
 
 Plot the annual average of solution variables in `sols.seasonal.avg` using the specified
 Makie backend `bcknd` and `layout`.
@@ -152,14 +159,15 @@ Makie backend `bcknd` and `layout`.
 function plot_avg(
     sols::Solutions{F,C},
     bcknd::Union{Symbol,Nothing}=find_backend();
-    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
+    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout),
+    inspect::Bool=false
 )::Makie.Figure where {F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
         datatitle.vars[inx] = matricify(getproperty(sols.seasonal.avg, layout[inx].var))
     end # for inx
-    return contourf_tiles(collect(1:sols.spacetime.dur), sols.spacetime.x, datatitle)
+    return contourf_tiles(collect(1:sols.spacetime.dur), sols.spacetime.x, datatitle; inspect)
 end # function plot_avg
 
 """
@@ -182,6 +190,8 @@ annual average are thick solid.
 - `title::AbstractString`: Title of the plot.
 - `xlabel::AbstractString`: Label for the x-axis.
 - `ylabel::AbstractString`: Label for the y-axis.
+- `inspect::Bool`: If true, enables `Makie.DataInspect` for interactive exploration of the
+    plot.
 """
 function plot_seasonal(
     sols::Solutions{F,false},
@@ -203,7 +213,8 @@ function plot_seasonal(
     ), # ()
     title::AbstractString="Ice covered area",
     xlabel::AbstractString=Makie.L"$\tilde{\mathsf{T}}$ ($\mathrm{\degree\!C}$)",
-    ylabel::AbstractString=Makie.L"A_i$"
+    ylabel::AbstractString=Makie.L"A_i$",
+    inspect::Bool=false
 )::Makie.Figure where F
     backend(bcknd)
     xdata = xfunc.(Ref(sols), sols.spacetime.dur)
@@ -234,6 +245,9 @@ function plot_seasonal(
     Makie.Legend(
         fig[1,2], values(groups), fill(["mean", "winter", "summer"], 2), keys(groups)
     )
+    if inspect
+        Makie.inspect(fig)
+    end # if inspect
     return fig
 end # function plot_seasonal
 
