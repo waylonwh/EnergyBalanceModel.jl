@@ -432,33 +432,35 @@ function Base.show(io::IO, ::MIME"text/plain", sols::Solutions{<:AbstractModel,F
 end # function Base.show
 
 # default parameter values
-const default_parval = Collection{Float64}(
-    :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
-    :A => 193.0, # OLR when T = T_m (W m^-2)
-    :B => 2.1, # OLR temperature dependence (W m^-2 K^-1)
-    :cw => 9.8, # ocean mixed layer heat capacity (W yr m^-2 K^-1)
-    :S0 => 420.0, # insolation at equator  (W m^-2)
-    :S1 => 338.0, # insolation seasonal dependence (W m^-2)
-    :S2 => 240.0, # insolation spatial dependence (W m^-2)
-    :a0 => 0.7, # ice-free co-albedo at equator
-    :a2 => 0.1, # ice-free co-albedo spatial dependence
-    :ai => 0.4, # co-albedo where there is sea ice
-    :Fb => 4.0, # heat flux from ocean below (W m^-2)
-    :k => 2.0, # sea ice thermal conductivity (W m^-2 K^-1)
-    :Lf => 9.5, # sea ice latent heat of fusion (W yr m^-3)
-    :F => 0.0, # radiative forcing (W m^-2)
-    :cg => 1e-3 * 9.8, # ghost layer heat capacity(W yr m^-2 K^-1)
-    :tau => 1e-5 * 9.8, # ghost layer coupling timescale (yr)
-    :Tm => 0.0, # mean temperature (C)
-    :m1 => 1.6e-6 * 31536000, # empirical constants of lateral melt
-    :m2 => 1.36, # empirical constants of lateral melt
-    :alpha => 0.66, # floe geometry constant, Ai = alpha * D^2
-    :rl => 0.5, # lead region width (m)
-    :Dmin => 1.0, # new pancake size (m)
-    :Dmax => 156, # largest floe length (m)
-    :hmin => 0.1, # new pancake thickness (m)
-    :kappa => 0.01 * 31536000 # floe welding parameter
-) # Collection{Float64}
+let cw::Float64 = 9.8
+    global const default_parval = Collection{Float64}(
+        :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
+        :A => 193.0, # OLR when T = T_m (W m^-2)
+        :B => 2.1, # OLR temperature dependence (W m^-2 K^-1)
+        :cw => cw, # ocean mixed layer heat capacity (W yr m^-2 K^-1)
+        :S0 => 420.0, # insolation at equator  (W m^-2)
+        :S1 => 338.0, # insolation seasonal dependence (W m^-2)
+        :S2 => 240.0, # insolation spatial dependence (W m^-2)
+        :a0 => 0.7, # ice-free co-albedo at equator
+        :a2 => 0.1, # ice-free co-albedo spatial dependence
+        :ai => 0.4, # co-albedo where there is sea ice
+        :Fb => 4.0, # heat flux from ocean below (W m^-2)
+        :k => 2.0, # sea ice thermal conductivity (W m^-2 K^-1)
+        :Lf => 9.5, # sea ice latent heat of fusion (W yr m^-3)
+        :F => 0.0, # radiative forcing (W m^-2)
+        :cg => 1e-3 * cw, # ghost layer heat capacity(W yr m^-2 K^-1)
+        :tau => 1e-5 * cw, # ghost layer coupling timescale (yr)
+        :Tm => 0.0, # mean temperature (C)
+        :m1 => 1.6e-6 * 31536000, # empirical constants of lateral melt
+        :m2 => 1.36, # empirical constants of lateral melt
+        :alpha => 0.66, # floe geometry constant, Ai = alpha * D^2
+        :rl => 0.5, # lead region width (m)
+        :Dmin => 1.0, # new pancake size (m)
+        :Dmax => 156, # largest floe length (m)
+        :hmin => 0.1, # new pancake thickness (m)
+        :kappa => 0.01 * 31536000 # floe welding parameter
+    ) # Collection{Float64}
+end # let cw
 
 # parameters used in each model
 const miz_paramset = Set{Symbol}(
