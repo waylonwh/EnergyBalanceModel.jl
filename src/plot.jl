@@ -56,8 +56,8 @@ const classic_layout = Layout(
     AbstractString[Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)" Makie.L"$T$ ($\mathrm{\degree\!C}$)" Makie.L"$h$ ($\mathrm{m}$)"]
 )
 
-default_layout(::MIZModel) = miz_layout
-default_layout(::ClassicModel) = classic_layout
+default_layout(::MIZModel)::Layout{Symbol} = miz_layout
+default_layout(::ClassicModel)::Layout{Symbol} = classic_layout
 
 isloaded(::Val)::Bool = false
 
@@ -124,7 +124,7 @@ function contourf_tiles(
         end # if all; else
     end # for row, col
     if inspect
-        Makie.inspect(fig)
+        Makie.DataInspector(fig)
     end # if inspect
     return fig
 end # function contourf_tiles
@@ -248,7 +248,7 @@ function plot_seasonal(
         string.(collect(keys(groups)))
     )
     if inspect
-        Makie.inspect(fig)
+        Makie.DataInspector(fig)
     end # if inspect
     return fig
 end # function plot_seasonal
