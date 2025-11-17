@@ -142,15 +142,11 @@ function Infrastructure.initialise(
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
     sols = Solutions{MIZModel}(st, forcing, par, init, solvars, lastonly) # final output
     annusol = Solutions{MIZModel}(st, forcing, par, init, solvars, true) # for annual means (internal use)
-    # complete step 0
-    vars.phi = concentration(vars.Ei, vars.h, par)
-    vars.Tw = water_temp(vars.Ew, vars.phi, par)
-    condset!(vars.Tw, 0.0, isnan) # eliminate NaNs for calculations
-    T0 = solveT0(st.x, -st.T[1], vars.h, vars.Tg, vars.Tw, vars.phi, forcing(-st.T[1]), par)
-    vars.Ti = ice_temp(T0, par)
-    condset!(vars.Ti, 0.0, isnan) # eliminate NaNs for calculations
-    vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi)
-    vars.n = num(vars.D, vars.phi, par)
+    # compute phi and Tw
+    vars.nextphi = concentration(vars.Ei, vars.h, par)
+    vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
+    vars.nextT0 = solveT0(st.x, st.T[1], vars.h, vars.Tg, vars.nextTw, vars.nextphi, forcing(st.T[1]), par)
+    condset!(vars.nextTw, 0.0, isnan) # eliminate NaNs for calculations
     return (vars, sols, annusol)
 end # function initialise
 
@@ -159,50 +155,51 @@ forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
 function Infrastructure.step!(
     ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64}
 )::Collection{Vec} where F
-    # eliminate NaNs for calculations
-    condset!(vars.Tw, 0.0, isnan)
-    condset!(vars.Ti, 0.0, isnan)
+    # copy next variables to current
+    vars.phi = copy(vars.nextphi)
+    vars.Tw = copy(vars.nextTw)
+    T0 = copy(vars.nextT0)
+    # compute diagnostic variables
+    vars.Ti = ice_temp(T0, par)
+    condset!(vars.Ti, 0.0, isnan) # eliminate NaNs for calculations
+    vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi)
+    vars.n = num(vars.D, vars.phi, par)
     # calculate fluxes
     Fvi = vert_flux(t, :ice, vars.Tg, vars.T, f, st, par)
     Fvw = vert_flux(t, :water, vars.Tg, vars.T, f, st, par)
     Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
-    # update thickness by vertical fluxes
-    lasth = copy(vars.h)
-    vars.h = forward_euler(vars.h, h_t(Fvi, par), st.dt)
-    clamp!(vars.h, 0.0, Inf) # avoid overshooting to negative thickness
-    zeroref!(vars.h, vars.Ei) # restrict non-existence
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
     rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)
     Epsidt = redistributeE(rEi, rEw)
     vars.Ei = Epsidt.Ei # !
     vars.Ew = Epsidt.Ew # !
+    vars.E = weighted_avg(vars.Ei, vars.Ew, vars.phi) # !
     # update floe size and thickness
     Al = area_lead(vars.D, vars.phi, vars.n, par)
     Qlp = split_psiEw(Epsidt.psiEwdt/st.dt, vars.phi, Al)
     dn = st.dt * psinplus(Qlp.Qp, par) # number of new pancakes
+    lasth = copy(vars.h) # save for D
+    vars.h = forward_euler(
+        average(vars.h, par.hmin, vars.n, dn), # new pancakes
+        h_t(Fvi, par),
+        st.dt
+    ) # !
     vars.D = forward_euler(
         average(vars.D, par.Dmin, vars.n, dn), # new pancakes
         D_t(lasth, vars.D, vars.Tw, vars.phi, Qlp.Ql, par),
         st.dt
     ) # !
-    clamp!(vars.D, 0.0, par.Dmax)
+    clamp!(vars.h, 0.0, Inf) # avoid overshooting to negative thickness
+    zeroref!(vars.h, vars.Ei) # restrict non-existence
+    clamp!(vars.D, par.Dmin, par.Dmax)
     zeroref!(vars.D, vars.Ei) # restrict non-existence
-    vars.h = average(vars.h, par.hmin, vars.n, dn) # !
-    # update concentration
-    vars.phi = concentration(vars.Ei, vars.h, par) # !
-    # update temperature
-    vars.Tw = water_temp(vars.Ew, vars.phi, par) # !
-    condset!(vars.Tw, 0.0, !isfinite) # eliminate NaNs for calculations
-    T0 = solveT0(st.x, t, vars.h, vars.Tg, vars.Tw, vars.phi, f, par)
-    vars.Tg = stepTg!(t, vars.Tg, vars.h, T0, vars.Tw, vars.phi, f, st, par) # !
-    vars.Ti = ice_temp(T0, par) # !
-    condset!(vars.Ti, 0.0, isnan) # eliminate NaNs for calculations
-    # update floe number
-    vars.n = num(vars.D, vars.phi, par) # !
-    # update total energy and temperature
-    vars.E = weighted_avg(vars.Ei, vars.Ew, vars.phi) # !
-    vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi) # !
+    # update variables for Tg
+    vars.nextphi = concentration(vars.Ei, vars.h, par) # !
+    vars.nextTw = water_temp(vars.Ew, vars.nextphi, par) # !
+    condset!(vars.nextTw, 0.0, !isfinite) # eliminate NaNs for calculations
+    vars.nextT0 = solveT0(st.x, t, vars.h, vars.Tg, vars.nextTw, vars.nextphi, f, par)
+    vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.nextT0, vars.nextTw, vars.nextphi, f, st, par) # !
     # set NaNs to no existence
     condset!(vars.Ti, NaN, iszero, vars.Ei)
     condset!(vars.Tw, NaN, >(0.99), vars.phi)
