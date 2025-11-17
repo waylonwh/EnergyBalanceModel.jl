@@ -56,6 +56,9 @@ const classic_layout = Layout(
     AbstractString[Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)" Makie.L"$T$ ($\mathrm{\degree\!C}$)" Makie.L"$h$ ($\mathrm{m}$)"]
 )
 
+default_layout(::MIZModel)::Layout{Symbol} = miz_layout
+default_layout(::ClassicModel)::Layout{Symbol} = classic_layout
+
 isloaded(::Val)::Bool = false
 
 function find_backend()::Union{Symbol,Nothing}
@@ -117,7 +120,7 @@ function contourf_tiles(
         Makie.Colorbar(subfig[1,2], ctr)
     end # for row, col
     if inspect
-        Makie.inspect(fig)
+        Makie.DataInspector(fig)
     end # if inspect
     return fig
 end # function contourf_tiles
@@ -246,7 +249,7 @@ function plot_seasonal(
         fig[1,2], values(groups), fill(["mean", "winter", "summer"], 2), keys(groups)
     )
     if inspect
-        Makie.inspect(fig)
+        Makie.DataInspector(fig)
     end # if inspect
     return fig
 end # function plot_seasonal
