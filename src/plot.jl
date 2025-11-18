@@ -56,6 +56,9 @@ const classic_layout = Layout(
     AbstractString[Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)" Makie.L"$T$ ($\mathrm{\degree\!C}$)" Makie.L"$h$ ($\mathrm{m}$)"]
 )
 
+default_layout(::MIZModel) = miz_layout
+default_layout(::ClassicModel) = classic_layout
+
 function init_backend(val::Val)
     name = typeof(val).parameters[1]
     if val isa Val{:GLMakie} || val isa Val{:CairoMakie}
@@ -99,8 +102,12 @@ function contourf_tiles(t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}})::
             ylabel=(col==1 ? Makie.L"x" : ""),
             limits=(nothing, (0, 1))
         )
-        ctr = Makie.contourf!(ax, t, x, layout[row,col].var)
-        Makie.Colorbar(subfig[1,2], ctr)
+        if all(isnan, layout[row,col].var)
+            @warn "All data are NaN at position ($row, $col). Skipping plot."
+        else # valid data
+            ctr = Makie.contourf!(ax, t, x, layout[row,col].var)
+            Makie.Colorbar(subfig[1,2], ctr)
+        end # if all; else
     end # for row, col
     return fig
 end # function contourf_tiles
@@ -108,7 +115,7 @@ end # function contourf_tiles
 matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
 
 """
-    plot_raw(sols::Solutions{F,C},bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
+    plot_raw(sols::Solutions{M,F,C},bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
 
 Plot the the solution variables for each time step in `sols.raw` using the specified Makie
 backend `bcknd` and `layout`. By default, the layout is set to `miz_layout` if the variable
@@ -117,10 +124,10 @@ backend `bcknd` and `layout`. By default, the layout is set to `miz_layout` if t
 default layouts.
 """
 function plot_raw(
-    sols::Solutions{F,C},
+    sols::Solutions{M,F,C},
     bcknd::Symbol=:GLMakie;
-    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
-)::Makie.Figure where {F, C}
+    layout::Layout{Symbol}=default_layout(M())
+)::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
@@ -130,32 +137,37 @@ function plot_raw(
 end # function plot_raw
 
 """
-    plot_avg(sols::Solutions{F,C}, bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
+    plot_avg(sols::Solutions{M<:AbstractModel,F,C}, bcknd::Symbol=:GLMakie; layout::Layout{Symbol}=... -> Makie.Figure
 
-Plot the annual average of solution variables in `sols.seasonal.avg` using the specified
+Plot the annual average of solution variables in `sols.annual.avg` using the specified
 Makie backend `bcknd` and `layout`. By default, the layout is set to `miz_layout` if `:phi`
 exists in the solution, otherwise it uses `classic_layout`.
 """
 function plot_avg(
-    sols::Solutions{F,C},
+    sols::Solutions{M,F,C},
     bcknd::Symbol=:GLMakie;
-    layout::Layout{Symbol}=(:phi in propertynames(sols.raw) ? miz_layout : classic_layout)
-)::Makie.Figure where {F, C}
+    layout::Layout{Symbol}=default_layout(M())
+)::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
-        datatitle.vars[inx] = matricify(getproperty(sols.seasonal.avg, layout[inx].var))
+        datatitle.vars[inx] = matricify(getproperty(sols.annual.avg, layout[inx].var))
     end # for inx
     return contourf_tiles(collect(1:sols.spacetime.dur), sols.spacetime.x, datatitle)
 end # function plot_avg
 
-"""
-    plot_seasonal(sols::Solutions{F,false}, bcknd::Symbol=:GLMakie; ...) -> Makie.Figure
+(ice_area(sols::Solutions{ClassicModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
+    2.0pi * hemispheric_mean((getproperty(sols.annual, season).E[year].<0.0), sols.spacetime.x)
+(ice_area(sols::Solutions{MIZModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
+    2.0pi * hemispheric_mean(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
 
-Using the data from `sols.seasonal`, plot lines spanned by (`xfunc(sols, year)`,
+"""
+    plot_seasonal(sols::Solutions{<:AbstractModel,F,false}, bcknd::Union{Symbol,Nothing}=...; kwargs...) -> Makie.Figure
+
+Using the data from `sols.annual`, plot lines spanned by (`xfunc(sols, year)`,
 `yfunc(sols, season, year)`) for each year and for the seasons `:avg`, `:winter`, and
 `:summer`. By default, `xfunc` computes the hemispheric mean temperature from
-`sols.seasonal.avg.T`, while `yfunc` computes the ice-covered area using either
+`sols.annual.avg.T`, while `yfunc` computes the ice-covered area using either
 concentration `phi` (if it exists) or enthalpy `E`. Lines during the warming period defined
 in `sols.forcing` are coloured red, and those during the cooling period are coloured blue.
 Lines for the summer peak are dashed, those for winter are thin solid, and those for the
@@ -171,31 +183,18 @@ annual average are thick solid.
 - `ylabel::AbstractString`: Label for the y-axis.
 """
 function plot_seasonal(
-    sols::Solutions{F,false},
-    bcknd::Symbol=:GLMakie;
-    xfunc::Function=(
-        (sols::Solutions{F,false}, year::Int) ->
-            hemispheric_mean(sols.seasonal.avg.T[year], sols.spacetime.x)
-    ),
-    yfunc::Function=(
-        :phi in propertynames(sols.raw) ?
-            (
-                (sols::Solutions{F,false}, season::Symbol, year::Int) ->
-                    2.0*pi * hemispheric_mean(getproperty(sols.seasonal, season).phi[year], sols.spacetime.x)
-            ) :
-            (
-                (sols, season, year) ->
-                    2.0*pi * hemispheric_mean((getproperty(sols.seasonal, season).E[year]<0.0), sols.spacetime.x)
-            ) # ? :
-    ), # ()
+    sols::Solutions{<:AbstractModel,F,false},
+    bcknd::Union{Symbol,Nothing}=find_backend();
+    xfunc::Function=((sols, year) -> hemispheric_mean(sols.annual.avg.T[year], sols.spacetime.x)),
+    yfunc::Function=ice_area,
     title::AbstractString="Ice covered area",
-    xlabel::AbstractString=Makie.L"$\tilde{\mathsf{T}}$ ($\mathrm{\degree\!C}$)",
-    ylabel::AbstractString=Makie.L"A_i$"
+    xlabel::AbstractString=Makie.L"$\tilde{T}$ ($\mathrm{\degree\!C}$)",
+    ylabel::AbstractString=Makie.L"A_i"
 )::Makie.Figure where F
     backend(bcknd)
-    xdata = xfunc.(Ref(sols), sols.spacetime.dur)
+    xdata = xfunc.(Ref(sols), 1:sols.spacetime.dur)
     fig = Makie.Figure()
-    ax = Makie.Axis(fig[1,1]; title=title, xlabel=xlabel, ylabel=ylabel)
+    ax = Makie.Axis(fig[1,1]; title, xlabel, ylabel)
     groups = (
         Warming=Vector{Makie.Lines{Tuple{Vector{Makie.Point{2,Float64}}}}}(),
         Cooling=Vector{Makie.Lines{Tuple{Vector{Makie.Point{2,Float64}}}}}()
@@ -213,13 +212,16 @@ function plot_seasonal(
         push!(
             group,
             Makie.lines!(
-                ax, xdata[inx], yfunc.(Ref(sols), Ref(season), sols.spacetime.dur[inx]);
+                ax, xdata[inx], yfunc.(Ref(sols), Ref(season), inx);
                 color=colour, linewidth=width, linestyle=(season===:summer ? :dash : :solid)
             )
         ) # push!
     end # for domain, inx, colour, season
     Makie.Legend(
-        fig[1,2], values(groups), fill(["mean", "winter", "summer"], 2), keys(groups)
+        fig[1,2],
+        collect(values(groups)),
+        fill(["mean", "winter", "summer"], 2),
+        string.(collect(keys(groups)))
     )
     return fig
 end # function plot_seasonal
