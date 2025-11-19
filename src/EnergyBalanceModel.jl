@@ -150,4 +150,6 @@ function run_example(
     return sols
 end # function run_example
 
+const VER = 191522
+
 end # module EnergyBalanceModel

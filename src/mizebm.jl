@@ -18,15 +18,21 @@ weighted_avg(vi::Vec, vw::Vec, phi::Vec)::Vec = @. vi*phi + (1-phi)vw
 
 # temperatures
 water_temp(Ew::Vec, phi::Vec, par::Collection{Float64})::Vec = @. par.Tm + Ew / ((1-phi)par.cw)
-water_temp_nonan(Ew::Vec, phi::Vec, par::Collection{Float64})::Vec = condset!(
+water_temp_finite(Ew::Vec, phi::Vec, par::Collection{Float64})::Vec = condset!(
     water_temp(Ew, phi, par), 0.0, ==(1.0), phi
 )
 
 ice_temp(T0::Vec, par::Collection{Float64})::Vec = min.(T0, par.Tm)
 
-solveT0(x::Vec, t::Float64, h::Vec, Tg::Vec, Tw::Vec, phi::Vec, f::Float64, par::Collection{Float64})::Vec =
-    @. (par.Tm * (par.B + par.k/h) + par.cg/par.tau * (Tg - (1-phi)Tw) + $(solar(x, t, :ice, par)) - par.A + f) /
-    (par.B + par.k/h + par.cg/par.tau * phi)
+function solveT0(
+    x::Vec, t::Float64, h::Vec, Tg::Vec, Tw::Vec, phi::Vec, f::Float64,
+    par::Collection{Float64}
+)::Vec
+    T0 = @. (par.Tm * (par.B + par.k/h) + par.cg/par.tau * (Tg - (1-phi)Tw) + $(solar(x, t, :ice, par)) - par.A + f) /
+        (par.B + par.k/h + par.cg/par.tau * phi)
+    condset!(T0, 0.0, iszero, h)
+    return T0
+end # function solveT0
 
 function stepTg!(
     t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64}
@@ -63,7 +69,7 @@ function concentration(Ei::Vec, h::Vec, par::Collection{Float64})::Vec
     phi = @. -Ei / (par.Lf * h)
     zeroref!(phi, h)
     condset!(phi, 1.0, >(1.0)) # correct concentration
-    # phi = @. Float64(Ei<0.0) # reproducing WE15
+    phi = @. Float64(Ei<0.0) # reproducing WE15
 end # function concentration
 
 # floe number
@@ -117,7 +123,7 @@ function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
     total = n .+ dn
     avgd = @. (n*f + dn*fn) / total
     zeroref!(avgd, total)
-    # return f # reproducing WE15
+    return f # reproducing WE15
     return avgd
 end # function average
 
@@ -144,9 +150,8 @@ function Infrastructure.initialise(
     annusol = Solutions{MIZModel}(st, forcing, par, init, solvars, true) # for annual means (internal use)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)
-    vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
+    vars.nextTw = water_temp_finite(vars.Ew, vars.nextphi, par)
     vars.nextT0 = solveT0(st.x, st.T[1], vars.h, vars.Tg, vars.nextTw, vars.nextphi, forcing(st.T[1]), par)
-    condset!(vars.nextTw, 0.0, isnan) # eliminate NaNs for calculations
     return (vars, sols, annusol)
 end # function initialise
 
@@ -168,6 +173,10 @@ function Infrastructure.step!(
     Fvi = vert_flux(t, :ice, vars.Tg, vars.T, f, st, par)
     Fvw = vert_flux(t, :water, vars.Tg, vars.T, f, st, par)
     Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
+    @eval Main push!(solari, $(solar(st.x, t, :ice, par)))
+    @eval Main push!(solarw, $(solar(st.x, t, :water, par)))
+    @eval Main push!(olr, $(@. -par.A - par.B * (vars.T-par.Tm)))
+    @eval Main push!(diffusion, $(par.cg/par.tau * (vars.Tg-vars.T)))
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
     rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)
@@ -196,8 +205,7 @@ function Infrastructure.step!(
     zeroref!(vars.D, vars.Ei) # restrict non-existence
     # update variables for Tg
     vars.nextphi = concentration(vars.Ei, vars.h, par) # !
-    vars.nextTw = water_temp(vars.Ew, vars.nextphi, par) # !
-    condset!(vars.nextTw, 0.0, !isfinite) # eliminate NaNs for calculations
+    vars.nextTw = water_temp_finite(vars.Ew, vars.nextphi, par) # !
     vars.nextT0 = solveT0(st.x, t, vars.h, vars.Tg, vars.nextTw, vars.nextphi, f, par)
     vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.nextT0, vars.nextTw, vars.nextphi, f, st, par) # !
     # set NaNs to no existence
