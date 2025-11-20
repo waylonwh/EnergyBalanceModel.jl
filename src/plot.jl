@@ -309,7 +309,7 @@ function precompile(bcnd::Module)::Nothing
     PT.@setup_workload begin
         ints = collect(1:10)
         floats = collect(0.1:0.1:1.0)
-        x = collect(0.1:0.1:10.0)
+        x = collect(0.1:0.1:1.0)
         layout = Layout(
             reshape([rand(10, 10)], 1, 1),
             reshape(AbstractString[Makie.L"title"], 1, 1)
