@@ -310,14 +310,14 @@ function precompile(bcnd::Module)::Nothing
         ints = collect(1:10)
         floats = collect(0.1:0.1:1.0)
         x = collect(0.1:0.1:10.0)
-        layout = EBM.Plot.Layout(
+        layout = Layout(
             reshape([rand(10, 10)], 1, 1),
             reshape(AbstractString[Makie.L"title"], 1, 1)
         )
         bcnd.activate!()
         PT.@compile_workload begin
             for t in (ints, floats)
-                EBM.Plot.contourf_tiles(t, x, layout)
+                contourf_tiles(t, x, layout)
             end # for t
         end # PT.@compile_workload begin
     end # PT.@setup_workload begin
