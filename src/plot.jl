@@ -105,7 +105,7 @@ backend(bcknd)::Module = init_backend(Val(bcknd))
 
 function contourf_tiles(
     t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}}; inspect::Bool=false
-)::Makie.Figure where T<:Real # TODO exclude extreme values
+)::Makie.Figure where T<:Real
     fig = Makie.Figure()
     for row in axes(layout, 1), col in axes(layout, 2)
         subfig = fig[row,col]
@@ -119,7 +119,7 @@ function contourf_tiles(
         if all(isnan, layout[row,col].var)
             @warn "All data are NaN at position ($row, $col). Skipping plot."
         else # valid data
-            ctr = Makie.contourf!(ax, t, x, layout[row,col].var)
+            ctr = Makie.contourf!(ax, t, x, layout[row,col].var; extendlow=:auto, extendhigh=:auto)
             Makie.Colorbar(subfig[1,2], ctr)
         end # if all; else
     end # for row, col
