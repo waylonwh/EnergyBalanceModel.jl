@@ -141,11 +141,9 @@ function run_example(
     try # plot results
         plot_raw(sols, plotbackend)
     catch e
-        if startswith(e.msg, "Backend not loaded.") # backend error
-            @warn string(e.msg, " Skipping plotting of results.")
-        else # other error
-            rethrow(e)
-        end # if startswith; else
+        startswith(e.msg, "Backend not loaded.") ?
+            @warn(string(e.msg, " Skipping plotting of results.")) : # backend error
+            rethrow(e) # backend error
     end # try; catch
     return sols
 end # function run_example
