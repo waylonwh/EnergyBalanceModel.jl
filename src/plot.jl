@@ -29,8 +29,8 @@ struct Layout{T}
         end # if !=
         return new{T}(vars, titles)
     end # function Layout
-    Layout(vars::Matrix{T}, titles::Matrix{AbstractString}) where T = Layout{T}(vars, titles)
-end
+end # struct Layout
+Layout(vars::Matrix{T}, titles::Matrix{AbstractString}=string.(vars)) where T = Layout{T}(vars, titles)
 
 (Base.size(layout::Layout{T})::NTuple{2,Int}) where T = size(layout.vars)
 (Base.axes(layout::Layout{T}, dim::Int)::Base.OneTo{Int64}) where T = axes(layout.vars, dim)
@@ -105,7 +105,7 @@ backend(bcknd)::Module = init_backend(Val(bcknd))
 
 function contourf_tiles(
     t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}}; inspect::Bool=false
-)::Makie.Figure where T<:Real
+)::Makie.Figure where T<:Real # TODO exclude extreme values
     fig = Makie.Figure()
     for row in axes(layout, 1), col in axes(layout, 2)
         subfig = fig[row,col]
@@ -148,7 +148,7 @@ function plot_raw(
     bcknd::Union{Symbol,Nothing}=find_backend();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false
-)::Makie.Figure where {M<:AbstractModel, F, C}
+)::Makie.Figure where {M<:AbstractModel, F, C} # TODO limit size; select time frame
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
@@ -168,7 +168,7 @@ function plot_avg(
     bcknd::Union{Symbol,Nothing}=find_backend();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false
-)::Makie.Figure where {M<:AbstractModel, F, C}
+)::Makie.Figure where {M<:AbstractModel, F, C} # TODO limit size; select time frame
     backend(bcknd)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for inx in eachindex(layout)
