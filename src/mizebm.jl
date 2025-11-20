@@ -196,8 +196,7 @@ function Infrastructure.step!(
     zeroref!(vars.D, vars.Ei) # restrict non-existence
     # update variables for Tg
     vars.nextphi = concentration(vars.Ei, vars.h, par) # !
-    vars.nextTw = water_temp(vars.Ew, vars.nextphi, par) # !
-    condset!(vars.nextTw, 0.0, !isfinite) # eliminate NaNs for calculations
+    vars.nextTw = water_temp_nonan(vars.Ew, vars.nextphi, par) # !
     vars.nextT0 = solveT0(st.x, t, vars.h, vars.Tg, vars.nextTw, vars.nextphi, f, par)
     vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.nextT0, vars.nextTw, vars.nextphi, f, st, par) # !
     # set NaNs to no existence

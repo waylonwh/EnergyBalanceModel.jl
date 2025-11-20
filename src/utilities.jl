@@ -141,13 +141,8 @@ macro persistent(exprs...)
         end # if ==
     end # function findexpr
     sign2call(expr::Symbol)::Symbol = expr
-    function sign2call(expr::Expr)::Union{Symbol,Expr}
-        if expr.head === :(::) || expr.head === :kw
-            return sign2call(expr.args[1])
-        else # :parameters
-            return Expr(expr.head, map(sign2call, expr.args)...)
-        end # if ||
-    end # function sign2call
+    sign2call(expr::Expr)::Union{Symbol,Expr} = (expr.head===:(::) || expr.head===:kw) ?
+        sign2call(expr.args[1]) : Expr(expr.head, map(sign2call, expr.args)...)
     # find function definition
     funcdef = exprs[end]
     funcnode = findexpr(funcdef, :function)
