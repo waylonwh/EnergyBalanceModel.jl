@@ -135,7 +135,7 @@ function run_example(
     elseif model isa ClassicModel
         init.E = par.cg .* T
     # no else since default_parameters would error earlier
-    end # if isa
+    end # if isa; elseif
     sols = integrate(model, st, forcing, par, init)
     save(sols, saveto)
     try # plot results
@@ -147,5 +147,32 @@ function run_example(
     end # try; catch
     return sols
 end # function run_example
+
+import PrecompileTools as PT
+
+PT.@setup_workload begin
+    ms = (miz, classic)
+    Fs = (identity, sin)
+    fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
+    redirect_stdout(devnull)
+    PT.@compile_workload begin
+        for m in ms, F in Fs, farg in fs_args
+            st = SpaceTime{F}(10, 10, 1)
+            forcing = Forcing(farg...)
+            par = default_parameters(m)
+            T = fill(0.0, st.nx)
+            init = Collection{Vec}(:Tg => T)
+            if m isa MIZModel
+                init.Ei = zeros(st.nx)
+                init.Ew = T .* par.cw
+                init.h = zeros(st.nx)
+                init.D = zeros(st.nx)
+            elseif m isa ClassicModel
+                init.E = par.cg .* T
+            end # if isa; elseif
+            sols = integrate(m, st, forcing, par, init)
+        end # for m, F, farg
+    end # PT.@compile_workload begin
+end # PT.@setup_workload begin
 
 end # module EnergyBalanceModel

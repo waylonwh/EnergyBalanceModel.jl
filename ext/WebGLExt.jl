@@ -13,4 +13,6 @@ function EBM.Plot.init_backend(::Val{:WGLMakie})::Module
     return WGLMakie
 end # function EBM.Plot.init_backend
 
+EBM.Plot.precompile(WGLMakie)
+
 end # module WebGLExt

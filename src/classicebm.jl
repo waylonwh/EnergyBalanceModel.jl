@@ -48,7 +48,7 @@ end # function initialise
 
 function Infrastructure.step!(
     ::ClassicModel,
-    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64};
+    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64}
 )::Collection{Vec} where F
     # get static variables
     stat = get_statics(st, par)
@@ -76,10 +76,5 @@ function Infrastructure.step!(
     vars.h = @. -vars.E / par.Lf * (vars.E<0.0)
     return vars
 end # function Infrastructure.step!
-
-precompile(
-    Infrastructure.step!,
-    (ClassicModel, Float64, Float64, Collection{Vec}, SpaceTime{identity}, Collection{Float64})
-)
 
 end # module ClassicEBM

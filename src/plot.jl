@@ -303,4 +303,25 @@ function unsafesave(plt::Makie.Figure, path::String; spwarn::Bool=false, kwargs.
     return path
 end
 
+import PrecompileTools as PT
+
+function precompile(bcnd::Module)::Nothing
+    PT.@setup_workload begin
+        ints = collect(1:10)
+        floats = collect(0.1:0.1:1.0)
+        x = collect(0.1:0.1:10.0)
+        layout = EBM.Plot.Layout(
+            reshape([rand(10, 10)], 1, 1),
+            reshape(AbstractString[Makie.L"title"], 1, 1)
+        )
+        bcnd.activate!()
+        PT.@compile_workload begin
+            for t in (ints, floats)
+                EBM.Plot.contourf_tiles(t, x, layout)
+            end # for t
+        end # PT.@compile_workload begin
+    end # PT.@setup_workload begin
+    return nothing
+end
+
 end # module Plot
