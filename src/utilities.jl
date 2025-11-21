@@ -5,8 +5,7 @@ import UUIDs, StyledStrings as SS, Statistics as Stats, TimeZones as TZ
 export Progress, update!
 export safehouse, house!, retrieve
 export @persistent, iobuffer, unique_id, reprhex
-export crossmean, hemispheric_mean
-export condset!, condset, zeroref!
+export crossmean, condset!, condset, zeroref!
 
 # add new function introduced in Julia 1.12
 if VERSION < v"1.12"
@@ -131,31 +130,26 @@ macro persistent(exprs...)
             return expr
         elseif isempty(expr.args)
             return nothing
-        else
+        else # recursively search args
             for arg in expr.args
                 funcexpr = findexpr(arg, head)
                 if !isnothing(funcexpr)
                     return funcexpr
-                end
-            end
+                end # if !
+            end # for arg
             return nothing
         end # if ==
     end # function findexpr
     sign2call(expr::Symbol)::Symbol = expr
-    function sign2call(expr::Expr)::Union{Symbol,Expr}
-        if expr.head === :(::) || expr.head === :kw
-            return sign2call(expr.args[1])
-        else # :parameters
-            return Expr(expr.head, map(sign2call, expr.args)...)
-        end # if ||
-    end # function sign2call
+    sign2call(expr::Expr)::Union{Symbol,Expr} = (expr.head===:(::) || expr.head===:kw) ?
+        sign2call(expr.args[1]) : Expr(expr.head, map(sign2call, expr.args)...)
     # find function definition
     funcdef = exprs[end]
     funcnode = findexpr(funcdef, :function)
     funcsign = findexpr(funcnode, :call)
     funcname = funcsign.args[1]
     hyfuncvar = gensym(funcname)
-    callexpr::Expr = sign2call(funcsign)
+    callexpr = sign2call(funcsign)
     callexpr.args[1] = hyfuncvar
     # generate code
     return esc(
@@ -184,10 +178,6 @@ end # function display_time
 function output!(prog::Progress, feedargs::Tuple=())::Nothing
     now = time()
     isdone = false
-    # avoid over-updating
-    if prog.current > prog.total
-        return nothing
-    end # if >
     # clear previous lines
     while prog.lines > 0
         print("\033[A\033[2K") # move up one line and clear the line
@@ -272,7 +262,7 @@ function update!(prog::Progress, current::Int=prog.current+1; feedargs::Tuple=()
         prog.updated = time() - prog.freq # force immediate external update # !
     end # if isnan
     # external update
-    if (prog.current >= prog.total) || (time() - prog.updated >= prog.freq)
+    if (time() - prog.updated >= prog.freq) || (prog.current == prog.total)
         output!(prog, feedargs)
     end # if ||
     return nothing
@@ -393,14 +383,6 @@ iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
     end # if !
     return map((xi -> Stats.mean([vecvec[ti][xi] for ti in eachindex(vecvec)])), eachindex(vecvec[1]))
 end # function crossmean
-
-function hemispheric_mean(vec::Vector{T}, x::Vector{T})::T where T<:Number
-    int = zero(T)
-    for i in 1:length(x)-1
-        @inbounds int += (vec[i]+vec[i+1]) * (x[i+1]-x[i]) / 2.0
-    end # for i
-    return int
-end # function hemispheric_mean
 
 # conditional copy in place
 @inline function condset!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where T
