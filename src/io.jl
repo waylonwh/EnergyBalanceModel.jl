@@ -13,7 +13,7 @@ function unsafesave(sols, path::String; spwarn::Bool=false)::String
     end # if !
     JLD2.save_object(path, sols)
     return path
-end
+end # function unsafesave
 
 """
     save(obj, path::String=joinpath(pwd(), string(reprhex(unique_id()), ".dat"))) -> String
