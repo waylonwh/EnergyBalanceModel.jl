@@ -141,13 +141,8 @@ macro persistent(exprs...)
         end # if ==
     end # function findexpr
     sign2call(expr::Symbol)::Symbol = expr
-    function sign2call(expr::Expr)::Union{Symbol,Expr}
-        if expr.head === :(::) || expr.head === :kw
-            return sign2call(expr.args[1])
-        else # :parameters
-            return Expr(expr.head, map(sign2call, expr.args)...)
-        end # if ||
-    end # function sign2call
+    sign2call(expr::Expr)::Union{Symbol,Expr} = (expr.head===:(::) || expr.head===:kw) ?
+        sign2call(expr.args[1]) : Expr(expr.head, map(sign2call, expr.args)...)
     # find function definition
     funcdef = exprs[end]
     funcnode = findexpr(funcdef, :function)
@@ -386,7 +381,7 @@ iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
     @boundscheck if !all(length.(vecvec) .== length(vecvec[1]))
         throw(BoundsError("All vectors must be the same length."))
     end # if !
-    return map((xi -> Stats.mean([vecvec[ti][xi] for ti in eachindex(vecvec)])), eachindex(vecvec[1]))
+    return map((xi -> Stats.mean(vecvec[ti][xi] for ti in eachindex(vecvec))), eachindex(vecvec[1]))
 end # function crossmean
 
 # conditional copy in place

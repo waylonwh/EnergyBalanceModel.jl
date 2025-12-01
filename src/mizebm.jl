@@ -1,4 +1,3 @@
-
 module MIZEBM # EnergyBalanceModel.
 
 using ..Infrastructure, ..Utilities
@@ -33,23 +32,25 @@ function stepTg!(
 )::Vec where F
     frez = @. (T0<par.Tm) & (h>0.0)
     watr = .~frez
-    M = par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h)) + par.cg/par.tau * SA.spdiagm(phi)
+    diagphi = SA.spdiagm(phi)
+    b_ainvh = par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h))
+    invM = SA.spdiagm(ones(st.nx)) / (b_ainvh + par.cg/par.tau * diagphi)
     Tg .= (
             (1+st.dt/par.tau)LA.I -
             st.dt*par.D/par.cg * get_diffop(st) -
-            (st.dt*par.cg/par.tau^2.0 * SA.spdiagm(phi) / M)SA.spdiagm(frez)
+            (st.dt*par.cg/par.tau^2.0 * diagphi * invM)SA.spdiagm(frez)
         ) \ (
             Tg +
             st.dt/par.tau * (
-                (LA.I-SA.spdiagm(phi))Tw +
+                (LA.I-diagphi)Tw +
                 (
-                    SA.spdiagm(phi) * (
-                        par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h))) -
-                        par.cg/par.tau * (LA.I-SA.spdiagm(phi))SA.spdiagm(Tw) +
+                    diagphi * (
+                        par.Tm * b_ainvh -
+                        par.cg/par.tau * (LA.I-diagphi)SA.spdiagm(Tw) +
                         SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
-                    ) / M
+                    ) * invM
                 )frez +
-                par.Tm * SA.spdiagm(phi)*watr
+                par.Tm * diagphi*watr
             )
         )
     return Tg
@@ -134,7 +135,8 @@ function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64
 end # function D_t
 
 function Infrastructure.initialise(
-    ::MIZModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+    ::MIZModel,
+    st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
     lastonly::Bool=true
 )::Tuple{Collection{Vec}, Solutions{MIZModel,F,C}, Solutions{MIZModel,F,C}} where {F, C}
     # create storages
@@ -153,7 +155,8 @@ end # function initialise
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
 
 function Infrastructure.step!(
-    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64}
+    ::MIZModel,
+    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64}
 )::Collection{Vec} where F
     # copy next variables to current
     vars.phi = copy(vars.nextphi)
@@ -196,8 +199,7 @@ function Infrastructure.step!(
     zeroref!(vars.D, vars.Ei) # restrict non-existence
     # update variables for Tg
     vars.nextphi = concentration(vars.Ei, vars.h, par) # !
-    vars.nextTw = water_temp(vars.Ew, vars.nextphi, par) # !
-    condset!(vars.nextTw, 0.0, !isfinite) # eliminate NaNs for calculations
+    vars.nextTw = water_temp_nonan(vars.Ew, vars.nextphi, par) # !
     vars.nextT0 = solveT0(st.x, t, vars.h, vars.Tg, vars.nextTw, vars.nextphi, f, par)
     vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.nextT0, vars.nextTw, vars.nextphi, f, st, par) # !
     # set NaNs to no existence
@@ -205,14 +207,5 @@ function Infrastructure.step!(
     condset!(vars.Tw, NaN, >(0.99), vars.phi)
     return vars
 end # function Infrastructure.step!
-
-precompile(solveT0, (Vec, Float64, Vec, Vec, Vec, Vec, Float64, Collection{Float64}))
-for xfunc in (identity, sin)
-    precompile(stepTg!, (Float64, Vec, Vec, Vec, Vec, Vec, Float64, SpaceTime{xfunc}, Collection{Float64}))
-    precompile(
-        Infrastructure.step!,
-        (MIZModel, Float64, Float64, Collection{Vec}, SpaceTime{xfunc}, Collection{Float64})
-    )
-end # for xfunc
 
 end # module MIZEBM

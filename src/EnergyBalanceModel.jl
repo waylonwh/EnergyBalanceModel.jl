@@ -78,12 +78,11 @@ using .Plot
 using .IO
 
 """
-    run_example(model<:AbstractModel=miz; saveto::String="./example.jld2", plotbackend::Symbol=:GLMakie)
+    run_example(model<:AbstractModel=miz; plotbackend::Symbol=:GLMakie)
 
 Run a standard example simulation for the specified `model` (either `miz` or `classic`).
-The results are saved to the file path given by `saveto`. The results of the last year
-(year 50) are plotted using the specified Makie backend `plotbackend`. The backend package
-must be loaded beforehand (e.g., `import GLMakie`).
+The results of the last year (year 50) are plotted using the specified Makie backend
+`plotbackend`. The backend package must be loaded beforehand (e.g., `import GLMakie`).
 
 The model is run on a 180-point latitudinal grid equally spaced in sine latitude, with 2000
 timesteps per year for 50 years and a constant forcing of 0.0. The initial conditions are
@@ -109,8 +108,6 @@ Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  0:17/-0:00 6008.36/sec                     Done ✓
  t = 50.0
-┌ Warning: File ./example.jld2 already exists. Last modified on 7 Nov 2025 at 15:38:39. The EXISTING file has been renamed to ./example_ce5a453c.jld2.
-└ @ EnergyBalanceModel.IO EnergyBalanceModel.jl/src/io.jl:48
 Solutions{EnergyBalanceModel.Infrastructure.ClassicModel, identity, true} with:
   3 solution variables: Set([:T, :h, :E])
   on 180 latitudinal gridboxes: [0.00277778, 0.0083333 … , 0.991667, 0.997222]
@@ -118,10 +115,7 @@ Solutions{EnergyBalanceModel.Infrastructure.ClassicModel, identity, true} with:
   with forcing Forcing{true}(0.0) (constant forcing)
 ```
 """
-function run_example(
-    model::M=miz;
-    saveto::String="./example.jld2", plotbackend::Symbol=:GLMakie
-) where M<:AbstractModel
+function run_example(model::M=miz; plotbackend::Symbol=Plot.find_backend()) where M<:AbstractModel
     st = SpaceTime(180, 2000, 50)
     forcing = Forcing(0.0)
     par = default_parameters(model)
@@ -135,19 +129,49 @@ function run_example(
     elseif model isa ClassicModel
         init.E = par.cg .* T
     # no else since default_parameters would error earlier
-    end # if isa
+    end # if isa; elseif
     sols = integrate(model, st, forcing, par, init)
-    save(sols, saveto)
     try # plot results
-        plot_raw(sols, plotbackend)
-    catch e
-        if startswith(e.msg, "Backend not loaded.") # backend error
-            @warn string(e.msg, " Skipping plotting of results.")
+        fig = plot_raw(sols, plotbackend)
+        display(fig)
+    catch err
+        if err isa Plot.BackendError
+            msgbuffer = IOBuffer()
+            showerror(msgbuffer, err)
+            write(msgbuffer, "Skipping plotting.")
+            @warn String(take!(msgbuffer))
         else # other error
-            rethrow(e)
-        end # if startswith; else
+            rethrow(err)
+        end # if isa; else
     end # try; catch
     return sols
 end # function run_example
+
+import PrecompileTools as PT
+
+PT.@setup_workload begin
+    ms = (miz, classic)
+    Fs = (identity, sin)
+    fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
+    redirect_stdout(devnull)
+    PT.@compile_workload begin
+        for m in ms, F in Fs, farg in fs_args
+            st = SpaceTime{F}(10, 10, 1)
+            forcing = Forcing(farg...)
+            par = default_parameters(m)
+            T = fill(0.0, st.nx)
+            init = Collection{Vec}(:Tg => T)
+            if m isa MIZModel
+                init.Ei = zeros(st.nx)
+                init.Ew = T .* par.cw
+                init.h = zeros(st.nx)
+                init.D = zeros(st.nx)
+            elseif m isa ClassicModel
+                init.E = par.cg .* T
+            end # if isa; elseif
+            integrate(m, st, forcing, par, init)
+        end # for m, F, farg
+    end # PT.@compile_workload begin
+end # PT.@setup_workload begin
 
 end # module EnergyBalanceModel
