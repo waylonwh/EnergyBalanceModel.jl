@@ -78,7 +78,7 @@ using .Plot
 using .IO
 
 """
-    run_example(model<:AbstractModel=miz; saveto::String="./example.jld2", plotbackend::Symbol=:GLMakie)
+    run_example(model<:AbstractModel=miz; plotbackend::Symbol=:GLMakie)
 
 Run a standard example simulation for the specified `model` (either `miz` or `classic`).
 The results of the last year (year 50) are plotted using the specified Makie backend
