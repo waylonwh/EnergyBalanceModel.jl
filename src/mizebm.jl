@@ -32,23 +32,25 @@ function stepTg!(
 )::Vec where F
     frez = @. (T0<par.Tm) & (h>0.0)
     watr = .~frez
-    M = par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h)) + par.cg/par.tau * SA.spdiagm(phi)
+    diagphi = SA.spdiagm(phi)
+    b_ainvh = par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h))
+    invM = SA.spdiagm(ones(st.nx)) / (b_ainvh + par.cg/par.tau * diagphi)
     Tg .= (
             (1+st.dt/par.tau)LA.I -
             st.dt*par.D/par.cg * get_diffop(st) -
-            (st.dt*par.cg/par.tau^2.0 * SA.spdiagm(phi) / M)SA.spdiagm(frez)
+            (st.dt*par.cg/par.tau^2.0 * diagphi * invM)SA.spdiagm(frez)
         ) \ (
             Tg +
             st.dt/par.tau * (
-                (LA.I-SA.spdiagm(phi))Tw +
+                (LA.I-diagphi)Tw +
                 (
-                    SA.spdiagm(phi) * (
-                        par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h))) -
-                        par.cg/par.tau * (LA.I-SA.spdiagm(phi))SA.spdiagm(Tw) +
+                    diagphi * (
+                        par.Tm * b_ainvh -
+                        par.cg/par.tau * (LA.I-diagphi)SA.spdiagm(Tw) +
                         SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
-                    ) / M
+                    ) * invM
                 )frez +
-                par.Tm * SA.spdiagm(phi)*watr
+                par.Tm * diagphi*watr
             )
         )
     return Tg

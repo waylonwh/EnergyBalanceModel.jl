@@ -381,7 +381,7 @@ iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
     @boundscheck if !all(length.(vecvec) .== length(vecvec[1]))
         throw(BoundsError("All vectors must be the same length."))
     end # if !
-    return map((xi -> Stats.mean([vecvec[ti][xi] for ti in eachindex(vecvec)])), eachindex(vecvec[1]))
+    return map((xi -> Stats.mean(vecvec[ti][xi] for ti in eachindex(vecvec))), eachindex(vecvec[1]))
 end # function crossmean
 
 # conditional copy in place

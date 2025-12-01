@@ -132,7 +132,8 @@ function run_example(model::M=miz, plotbackend::Symbol=Plot.find_backend()) wher
     end # if isa; elseif
     sols = integrate(model, st, forcing, par, init)
     try # plot results
-        plot_raw(sols, plotbackend)
+        fig = plot_raw(sols, plotbackend)
+        display(fig)
     catch err
         if err isa Plot.BackendError
             msgbuffer = IOBuffer()
