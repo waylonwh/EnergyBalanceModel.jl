@@ -115,7 +115,7 @@ Solutions{EnergyBalanceModel.Infrastructure.ClassicModel, identity, true} with:
   with forcing Forcing{true}(0.0) (constant forcing)
 ```
 """
-function run_example(model::M=miz, plotbackend::Symbol=Plot.find_backend()) where M<:AbstractModel
+function run_example(model::M=miz; plotbackend::Symbol=Plot.find_backend()) where M<:AbstractModel
     st = SpaceTime(180, 2000, 50)
     forcing = Forcing(0.0)
     par = default_parameters(model)
