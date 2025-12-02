@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, ww/latest ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, ww/latest ]
 
 jobs:
   test:
@@ -22,14 +22,12 @@ jobs:
           - macos-latest
         arch:
           - x64
-
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v1
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
-
       - uses: actions/cache@v3
         env:
           cache-name: cache-artifacts
@@ -40,7 +38,31 @@ jobs:
             ${{ runner.os }}-test-${{ env.cache-name }}-
             ${{ runner.os }}-test-
             ${{ runner.os }}-
-
       - uses: julia-actions/julia-buildpkg@v1
-
       - uses: julia-actions/julia-runtest@v1
+
+  pr_automation:
+    name: PR Automation
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: write
+    if: github.event.pull_request.base.ref == 'ww/latest'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Merge to ww/latest
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          PR="${{ github.event.pull_request.number }}"
+          gh pr merge --merge --admin "$PR"
+      - name: Create draft PR to main
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          head="${{ github.event.pull_request.head.ref }}"
+          title="${{ github.event.pull_request.title }}"
+          body="${{ github.event.pull_request.body }}"
+          gh pr create --base main --head "$head" --title "$title" --body "$body" --draft
