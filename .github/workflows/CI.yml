@@ -62,7 +62,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
-          head='${{ github.event.pull_request.head.ref }}
+          head='${{ github.event.pull_request.head.ref }}'
           title='${{ github.event.pull_request.title }}'
           body='${{ github.event.pull_request.body }}'
           gh pr create --base main --head "$head" --title "$title" --body "$body" --draft
