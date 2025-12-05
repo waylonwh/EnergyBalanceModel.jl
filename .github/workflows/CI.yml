@@ -46,7 +46,7 @@ jobs:
     permissions:
       pull-requests: write
       contents: write
-    if: github.event.pull_request.base.ref == 'main' && github.event.pull_request.author_association == 'OWNER'
+    if: github.event.pull_request.base.ref == 'ww/latest' && github.event.pull_request.author_association == 'OWNER'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
