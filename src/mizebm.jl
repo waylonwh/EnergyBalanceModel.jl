@@ -33,9 +33,7 @@ function stepTg!(
     frez = @. (T0<par.Tm) & (h>0.0)
     watr = .~frez
     diagphi = SA.spdiagm(phi)
-    b_kinvh = par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h))
-    invM = SA.spdiagm(ones(st.nx)) / (b_kinvh + par.cg/par.tau * diagphi)
-    invM = SA.spdiagm(inv.(par.B .+ par.k ))
+    invM = SA.spdiagm(inv.(par.B .+ par.k./h + par.cg/par.tau * phi))
     Tg .= (
             (1.0+st.dt/par.tau)LA.I -
             st.dt*par.D/par.cg * get_diffop(st) -
@@ -46,7 +44,7 @@ function stepTg!(
                 (LA.I-diagphi)Tw +
                 (
                     diagphi * (
-                        par.Tm * b_kinvh -
+                        par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h))) -
                         par.cg/par.tau * (LA.I-diagphi)SA.spdiagm(Tw) +
                         SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
                     ) * invM
