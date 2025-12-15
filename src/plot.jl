@@ -330,14 +330,6 @@ function plot_seasonal(
     return fig
 end # function plot_seasonal
 
-function unsafesave(plt::Makie.Figure, path::String; spwarn::Bool=false, kwargs...)::String
-    if !spwarn
-        @warn "`unsafesave` may overwrite existing files. Use `save` instead."
-    end # if !
-    Makie.save(path, plt; kwargs...)
-    return path
-end # function unsafesave
-
 import PrecompileTools as PT
 
 function precompile(bcnd::Module)::Nothing
