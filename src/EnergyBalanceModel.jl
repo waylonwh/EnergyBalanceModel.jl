@@ -59,7 +59,6 @@ export miz, classic
 export Vec, Collection, SpaceTime, Forcing, Solutions
 export integrate, default_parameters
 export annual_mean, hemispheric_mean
-export safehouse, house!, retrieve, save, load!
 export Layout, backend, plot_raw, plot_avg, plot_seasonal
 export run_example
 
@@ -68,14 +67,12 @@ include("infrastructure.jl")
 include("mizebm.jl")
 include("classicebm.jl")
 include("plot.jl")
-include("io.jl")
 
 using .Utilities
 using .Infrastructure
 using .MIZEBM
 using .ClassicEBM
 using .Plot
-using .IO
 
 """
     run_example(model<:AbstractModel=miz; plotbackend::Symbol=:GLMakie)
