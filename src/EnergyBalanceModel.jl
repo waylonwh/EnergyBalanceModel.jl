@@ -120,11 +120,11 @@ function run_example(model::M=miz; plotbackend::Symbol=Plot.find_backend()) wher
     init = Collection{Vec}(:Tg => T)
     if model isa MIZModel
         init.Ei = zeros(st.nx)
-        init.Ew = T .* par.cw
+        init.Ew = par.cw * T
         init.h = zeros(st.nx)
         init.D = zeros(st.nx)
     elseif model isa ClassicModel
-        init.E = par.cg .* T
+        init.E = par.cw * T
     # no else since default_parameters would error earlier
     end # if isa; elseif
     sols = integrate(model, st, forcing, par, init)
