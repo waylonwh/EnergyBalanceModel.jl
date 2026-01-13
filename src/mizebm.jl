@@ -111,15 +111,17 @@ function split_psiEw(psiEw::Vec, phi::Vec, Al::Vec)::@NamedTuple{Ql::Vec, Qp::Ve
     return (; Ql, Qp)
 end # function split_psiEw
 
-psinplus(Qp::Vec, par::Collection{Float64})::Vec = -Qp / (par.Lf * par.alpha * par.Dmin^2.0 * par.hmin)
+# psinplus(Qp::Vec, par::Collection{Float64})::Vec = -Qp / (par.Lf * par.alpha * par.Dmin^2.0 * par.hmin)
 
-function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
-    total = n .+ dn
-    avgd = @. (n*f + dn*fn) / total
-    zeroref!(avgd, total)
-    # return f # reproducing WE15
-    return avgd
-end # function average
+# function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
+#     total = n .+ dn
+#     avgd = @. (n*f + dn*fn) / total
+#     zeroref!(avgd, total)
+#     # return f # reproducing WE15
+#     return avgd
+# end # function average
+
+phip(Qp::Vec, par::Collection{Float64})::Vec = @. -Qp / (par.Lf * par.hmin) # change rate of φ due to pancakes
 
 # differential equations
 Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
