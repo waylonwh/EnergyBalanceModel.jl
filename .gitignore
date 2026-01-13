@@ -23,8 +23,9 @@ docs/site/
 # environment.
 Manifest.toml
 
-# VSCode settings folder
+# IDE folders
 .vscode/
+.idea/
 
 # macOS system files
 .DS_Store
