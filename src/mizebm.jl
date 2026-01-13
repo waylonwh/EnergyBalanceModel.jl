@@ -62,7 +62,7 @@ wlat(Tw::Vec, par::Collection{Float64})::Vec = @. par.m1 * (Tw - par.Tm^par.m2)
 function concentration(Ei::Vec, h::Vec, par::Collection{Float64})::Vec
     phi = @. -Ei / (par.Lf * h)
     zeroref!(phi, h)
-    if any(>(1.0), phi); @warn "φ>1!"; end # TODO remove me
+    if any(>(1.0), phi); @warn "φ: $(filter(>(1.0), phi)) > 1"; end # TODO remove me
     condset!(phi, 1.0, >(1.0)) # correct concentration
     # phi = @. Float64(Ei<0.0) # reproducing WE15
 end # function concentration
