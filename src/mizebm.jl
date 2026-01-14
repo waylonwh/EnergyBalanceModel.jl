@@ -204,7 +204,7 @@ function Infrastructure.step!(
     vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.nextT0, vars.nextTw, vars.nextphi, f, st, par) # !
     # set NaNs to no existence
     condset!(vars.Ti, NaN, iszero, vars.Ei)
-    condset!(vars.Tw, NaN, >(0.98), vars.phi)
+    condset!(vars.Tw, NaN, >(0.95), vars.phi)
     return vars
 end # function Infrastructure.step!
 
