@@ -14,9 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.10' # LTS
-          - '1' # latest stable
-          - '1.12-nightly' # upcoming stable
+          - 'lts' # 1.10
+          - '1' # latest stable (1.12)
+          - 'pre' # prerelease build (1.13)
           - 'nightly' # dev
         os:
           - ubuntu-latest
