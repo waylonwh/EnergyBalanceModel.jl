@@ -40,7 +40,7 @@ function Infrastructure.initialise(
     lastonly::Bool=true
 )::Tuple{Collection{Vec},Solutions{ClassicModel,F,C},Solutions{ClassicModel,F,C}} where {F, C}
     vars = deepcopy(init)
-    solvars = Set{Symbol}((:E, :T, :h))
+    solvars = Set{Symbol}((:E, :T, :h, :T0))
     sols = Solutions{ClassicModel}(st, forcing, par, init, solvars, lastonly)
     annusol = Solutions{ClassicModel}(st, forcing, par, init, solvars, true) # for calculating annual means
     return (vars, sols, annusol)
@@ -74,6 +74,7 @@ function Infrastructure.step!(
         ) # () # vars.Tg # WE15 Eq. (A1)
     # Infer ice thickness
     vars.h = @. -vars.E / par.Lf * (vars.E<0.0)
+    vars.T0 = T0
     return vars
 end # function Infrastructure.step!
 
