@@ -62,6 +62,7 @@ wlat(Tw::Vec, par::Collection{Float64})::Vec = @. par.m1 * (Tw - par.Tm^par.m2)
 function concentration(Ei::Vec, h::Vec, par::Collection{Float64})::Vec
     phi = @. -Ei / (par.Lf * h)
     zeroref!(phi, h)
+    if any(>(1.0), phi); @warn "φ: $(filter(>(1.0), phi)) > 1"; end # TODO remove me
     condset!(phi, 1.0, >(1.0)) # correct concentration
     # phi = @. Float64(Ei<0.0) # reproducing WE15
 end # function concentration
@@ -111,7 +112,7 @@ function split_psiEw(psiEw::Vec, phi::Vec, Al::Vec)::@NamedTuple{Ql::Vec, Qp::Ve
     return (; Ql, Qp)
 end # function split_psiEw
 
-psinplus(Qp::Vec, par::Collection{Float64})::Vec = -Qp / (par.Lf * par.alpha * par.Dmin^2.0 * par.hmin)
+dphip(Qp::Vec, par::Collection{Float64})::Vec = @. -Qp / (par.Lf * par.hmin) # change rate of φ due to pancakes
 
 function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
     total = n .+ dn
@@ -180,15 +181,15 @@ function Infrastructure.step!(
     # update floe size and thickness
     Al = area_lead(vars.D, vars.phi, vars.n, par)
     Qlp = split_psiEw(Epsidt.psiEwdt/st.dt, vars.phi, Al)
-    dn = st.dt * psinplus(Qlp.Qp, par) # number of new pancakes
+    phip = st.dt * dphip(Qlp.Qp, par)
     lasth = copy(vars.h) # save for D
     vars.h = forward_euler(
-        average(vars.h, par.hmin, vars.n, dn), # new pancakes
+        average(vars.h, par.hmin, vars.phi, phip), # new pancakes
         h_t(Fvi, par),
         st.dt
     ) # !
     vars.D = forward_euler(
-        average(vars.D, par.Dmin, vars.n, dn), # new pancakes
+        average(vars.D, par.Dmin, vars.phi, phip), # new pancakes
         D_t(lasth, vars.D, vars.Tw, vars.phi, Qlp.Ql, par),
         st.dt
     ) # !
@@ -203,7 +204,7 @@ function Infrastructure.step!(
     vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.nextT0, vars.nextTw, vars.nextphi, f, st, par) # !
     # set NaNs to no existence
     condset!(vars.Ti, NaN, iszero, vars.Ei)
-    condset!(vars.Tw, NaN, >(0.99), vars.phi)
+    condset!(vars.Tw, NaN, >(0.95), vars.phi)
     return vars
 end # function Infrastructure.step!
 
