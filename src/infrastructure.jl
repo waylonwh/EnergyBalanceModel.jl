@@ -5,9 +5,9 @@ using ..Utilities
 import EnergyBalanceModel
 import SparseArrays as SA, Statistics as Stats
 
-export AbstractModel, MIZModel, ClassicModel, miz, classic
-export Vec, Collection, SpaceTime, Solutions, Forcing
-export default_parval, miz_paramset, classic_paramset, default_parameters
+export AbstractModel, ClassicModel, MIZModel
+export Collection, Forcing, Solutions, SpaceTime, Vec
+export classic_paramset, default_parameters, default_parval, miz_paramset
 export get_diffop
 export annual_mean, hemispheric_mean
 export integrate
@@ -25,25 +25,11 @@ Singleton type representing the extended idealised climate model with a marginal
 struct MIZModel <: AbstractModel end
 
 """
-    miz
-
-A singleton instance of `MIZModel`.
-"""
-const miz = MIZModel()
-
-"""
     ClassicModel <: AbstractModel
 
 Singleton type representing the classic idealised climate model by Wagner & Eisenman (2015).
 """
 struct ClassicModel <: AbstractModel end
-
-"""
-    classic
-
-A singleton instance of `ClassicModel`.
-"""
-const classic = ClassicModel()
 
 """
     Collection{V}(args...)

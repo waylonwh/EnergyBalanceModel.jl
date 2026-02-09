@@ -1,11 +1,11 @@
 module Plot
 
-using ..Utilities, ..Infrastructure
+using ..Infrastructure, ..Utilities
 
 import Makie
 
 export Layout, backend
-export plot_raw, plot_avg, plot_seasonal
+export plot_avg, plot_raw, plot_seasonal
 
 """
     Layout(vars::Matrix{T}, titles::Matrix{AbstractString})

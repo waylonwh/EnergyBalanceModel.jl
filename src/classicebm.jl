@@ -1,6 +1,6 @@
 module ClassicEBM # EnergyBalanceModel.
 
-using ..Utilities, ..Infrastructure
+using ..Infrastructure, ..Utilities
 
 import LinearAlgebra as LA, SparseArrays as SA
 

@@ -1,10 +1,10 @@
 module Utilities # EnergyBalanceModel.
 
-import StyledStrings as SS, Statistics as Stats
+import Statistics as Stats, StyledStrings as SS
 
 export Progress, update!
 export @persistent, iobuffer
-export crossmean, condset!, condset, zeroref!
+export condset, condset!, crossmean, zeroref!
 
 # add new function introduced in Julia 1.12
 if VERSION < v"1.12"
@@ -12,7 +12,7 @@ if VERSION < v"1.12"
     ctruncate(x, _...) = x
 end # if <
 
-# progress bar
+# progress bar # TODO asynchronous progress bar
 mutable struct Progress
     title::String
     total::Int
