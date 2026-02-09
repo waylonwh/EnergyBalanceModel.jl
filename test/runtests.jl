@@ -28,6 +28,6 @@ import EnergyBalanceModel.Infrastructure:AbstractModel
     (lastyear_hemi_mean(sols::Solutions{<:AbstractModel,F,C}, var::Symbol)::Float64) where {F, C} =
         hemispheric_mean(getproperty(sols.annual.avg, var)[sols.spacetime.dur], sols.spacetime.x)
 
-    @test lastyear_hemi_mean(mizsols, :T) - lastyear_hemi_mean(clasols, :T) < 1
-    @test lastyear_hemi_mean(mizsols, :E) - lastyear_hemi_mean(clasols, :E) < 10
+    @test lastyear_hemi_mean(mizsols, :T) ≈ lastyear_hemi_mean(clasols, :T) atol=1
+    @test lastyear_hemi_mean(mizsols, :E) ≈ lastyear_hemi_mean(clasols, :E) atol=10
 end # @testset begin

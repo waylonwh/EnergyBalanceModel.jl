@@ -88,27 +88,27 @@ uniform temperature of 17°C with no ice.
 
 # Examples
 ```julia-repl
-julia> using EnergyBalanceModel
+julia> using EnergyBalanceModel, GLMakie
 
-julia> import GLMakie; run_example()
+julia> run_example()
 Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
- 1:15/-0:00 1335.34/sec                     Done ✓
+ 0:15/-0:00 6456.44/sec                     Done ✓
  t = 50.0
-Solutions{EnergyBalanceModel.Infrastructure.MIZModel, identity, true} with:
+Solutions{MIZModel, sin, true} with:
   10 solution variables: Set([:T, :Ei, :Ti, :D, :n, :h, :phi, :Ew, :E, :Tw])
-  on 180 latitudinal gridboxes: [0.00277778, 0.0083333 … , 0.991667, 0.997222]
+  on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
   and 2000 timesteps: 49.00025:0.0005:49.99975
   with forcing Forcing{true}(0.0) (constant forcing)
 
 julia> run_example(ClassicModel())
 Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
- 0:17/-0:00 6008.36/sec                     Done ✓
+ 0:18/-0:00 5702.05/sec                     Done ✓
  t = 50.0
-Solutions{EnergyBalanceModel.Infrastructure.ClassicModel, identity, true} with:
+Solutions{ClassicModel, sin, true} with:
   3 solution variables: Set([:T, :h, :E])
-  on 180 latitudinal gridboxes: [0.00277778, 0.0083333 … , 0.991667, 0.997222]
+  on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
   and 2000 timesteps: 49.00025:0.0005:49.99975
   with forcing Forcing{true}(0.0) (constant forcing)
 ```
