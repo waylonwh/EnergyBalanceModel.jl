@@ -77,7 +77,7 @@ using .Plot
 """
     run_example(model<:AbstractModel=MIZModel(); plotbackend::Symbol=:GLMakie)
 
-Run a standard example simulation for the specified `model` (either a instance of
+Run a standard example simulation for the specified `model` (either an instance of
 `MIZModel` or `ClassicModel`). The results of the last year (year 50) are plotted using the
 specified Makie backend `plotbackend`. The backend package must be loaded beforehand
 (e.g., `import GLMakie`).
