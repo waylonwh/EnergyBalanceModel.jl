@@ -152,7 +152,6 @@ PT.@setup_workload begin
     Fs = (identity, sin)
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
     redirect_stdout(devnull)
-    redirect_stderr(devnull)
     PT.@compile_workload begin
         for m in ms, F in Fs, farg in fs_args
             st = SpaceTime{F}(10, 10, 1)
@@ -162,11 +161,11 @@ PT.@setup_workload begin
             init = Collection{Vec}(:Tg => T)
             if m isa MIZModel
                 init.Ei = zeros(st.nx)
-                init.Ew = T .* par.cw
+                init.Ew = par.cw * T
                 init.h = zeros(st.nx)
                 init.D = zeros(st.nx)
             elseif m isa ClassicModel
-                init.E = par.cg .* T
+                init.E = par.cw * T
             end # if isa; elseif
             integrate(m, st, forcing, par, init)
         end # for m, F, farg

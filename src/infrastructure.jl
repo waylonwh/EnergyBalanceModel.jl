@@ -139,7 +139,7 @@ struct SpaceTime{F}
 
     function SpaceTime{F}(
         urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int;
-        winter::Float64=0.26125, summer::Float64=0.77375
+        winter::Float64=0.26125, summer::Float64=0.77375 # TODO definition of "winter" and "summer"
     ) where F
         du = (urange[2]-urange[1]) / nx
         u = range(urange[1] + du/2, urange[2] - du/2, nx)
@@ -533,7 +533,7 @@ default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(cla
             A2 = @. 2 / (b * (b-f))
             B2 = @. 2 / (b*f)
             C2 = @. 2 / (f * (f-b))
-            second = (1 .- st.x.^2) .* SA.spdiagm(
+            second::SA.SparseMatrixCSC{Float64,Int64} = (1 .- st.x.^2) .* SA.spdiagm( # TODO bug on 1.10 LTS?
                 -1 => A2[l],
                 0 => B2 + [A2[1]; zeros(Float64, st.nx-2); C2[st.nx]],
                 1 => C2[u]
