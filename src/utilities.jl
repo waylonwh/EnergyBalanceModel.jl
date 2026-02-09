@@ -1,10 +1,10 @@
 module Utilities # EnergyBalanceModel.
 
-import StyledStrings as SS, Statistics as Stats
+import Statistics as Stats, StyledStrings as SS
 
 export Progress, update!
 export @persistent, iobuffer
-export crossmean, condset!, condset, zeroref!
+export condset, condset!, crossmean, zeroref!
 
 # add new function introduced in Julia 1.12
 if VERSION < v"1.12"
@@ -12,7 +12,7 @@ if VERSION < v"1.12"
     ctruncate(x, _...) = x
 end # if <
 
-# progress bar
+# progress bar # TODO asynchronous progress bar
 mutable struct Progress
     title::String
     total::Int
@@ -157,10 +157,10 @@ function output!(prog::Progress, feedargs::Tuple=())::Nothing
     prog.updates += 1 # !
     if !isfinite(speed) # no speed info
         spdstr = "-/sec"
-    elseif (speed >= 1.0) || (iszero(speed)) # speed > 1.0
+    elseif (speed >= 1) || (iszero(speed)) # speed > 1
         spdstr = string(round(speed; digits=2), "/sec")
-    else # speed < 1.0
-        spdstr = string(round(1.0/speed; digits=2), "sec/1")
+    else # speed < 1
+        spdstr = string(round(1/speed; digits=2), "sec/1")
     end # if >, elseif, else
     timespeed = SS.annotatedstring(
         ' ',

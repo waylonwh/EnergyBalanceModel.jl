@@ -7,9 +7,9 @@ import SparseArrays as SA
 
 # solar radiation absorbed on ice and water
 solar(x::Vec, t::Float64, ::Val{:ice}, par::Collection{Float64})::Vec =
-    @. par.ai * (par.S0 - par.S1 * x * cos(2.0pi * t) - par.S2 * x^2.0)
+    @. par.ai * (par.S0 - par.S1 * x * cos(2pi * t) - par.S2 * x^2)
 solar(x::Vec, t::Float64, ::Val{:water}, par::Collection{Float64})::Vec =
-    @. (par.a0 - par.a2 * x^2.0) * (par.S0 - par.S1 * x * cos(2.0pi * t) - par.S2 * x^2.0)
+    @. (par.a0 - par.a2 * x^2) * (par.S0 - par.S1 * x * cos(2pi * t) - par.S2 * x^2)
 solar(x::Vec, t::Float64, surface::Symbol, par::Collection{Float64})::Vec = solar(x, t, Val(surface), par)
 
 # phi-weighted average
@@ -18,7 +18,7 @@ weighted_avg(vi::Vec, vw::Vec, phi::Vec)::Vec = @. vi*phi + (1-phi)vw
 # temperatures
 water_temp(Ew::Vec, phi::Vec, par::Collection{Float64})::Vec = @. par.Tm + Ew / ((1-phi)par.cw)
 water_temp_nonan(Ew::Vec, phi::Vec, par::Collection{Float64})::Vec = condset!(
-    water_temp(Ew, phi, par), 0.0, ==(1.0), phi
+    water_temp(Ew, phi, par), 0.0, isone, phi
 )
 
 ice_temp(T0::Vec, par::Collection{Float64})::Vec = min.(T0, par.Tm)
@@ -30,14 +30,14 @@ solveT0(x::Vec, t::Float64, h::Vec, Tg::Vec, Tw::Vec, phi::Vec, f::Float64, par:
 function stepTg!(
     t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64}
 )::Vec where F
-    frez = @. (T0<par.Tm) & (h>0.0)
+    frez = @. (T0<par.Tm) & (h>0)
     watr = .~frez
     diagphi = SA.spdiagm(phi)
     invM = SA.spdiagm(inv.(par.B .+ par.k./h + par.cg/par.tau * phi))
     Tg .= (
-            (1.0+st.dt/par.tau)LA.I -
+            (1+st.dt/par.tau)LA.I -
             st.dt*par.D/par.cg * get_diffop(st) -
-            (st.dt*par.cg/par.tau^2.0 * diagphi * invM)SA.spdiagm(frez)
+            (st.dt*par.cg/par.tau^2 * diagphi * invM)SA.spdiagm(frez)
         ) \ (
             Tg +
             st.dt/par.tau * (
@@ -62,22 +62,21 @@ wlat(Tw::Vec, par::Collection{Float64})::Vec = @. par.m1 * (Tw - par.Tm^par.m2)
 function concentration(Ei::Vec, h::Vec, par::Collection{Float64})::Vec
     phi = @. -Ei / (par.Lf * h)
     zeroref!(phi, h)
-    if any(>(1.0), phi); @warn "φ: $(filter(>(1.0), phi)) > 1"; end # TODO remove me
-    condset!(phi, 1.0, >(1.0)) # correct concentration
-    # phi = @. Float64(Ei<0.0) # reproducing WE15
+    condset!(phi, 1.0, >(1)) # correct concentration
+    # phi = @. Float64(Ei<0) # reproducing WE15
 end # function concentration
 
 # floe number
 function num(D::Vec, phi::Vec, par::Collection{Float64})::Vec
-    n = @. phi / (par.alpha * D^2.0)
+    n = @. phi / (par.alpha * D^2)
     zeroref!(n, D)
     return n
 end # function num
 
 # lead region area
 function area_lead(D::Vec, phi::Vec, n::Vec, par::Collection{Float64})::Vec
-    ring = @. par.alpha * n * ((D + 2.0par.rl)^2.0 - D^2.0)
-    return min.(ring, 1.0 .- phi)
+    ring = @. par.alpha * n * ((D + 2par.rl)^2 - D^2)
+    return min.(ring, 1 .- phi)
 end # function area_lead
 
 # fluxes
@@ -95,8 +94,8 @@ function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Collection{Float64})::
 end # function lat_flux
 
 function redistributeE(rEi::Vec, rEw::Vec)::@NamedTuple{Ei::Vec, Ew::Vec, psiEidt::Vec, psiEwdt::Vec}
-    cEi = clamp.(rEi, -Inf, 0.0)
-    cEw = clamp.(rEw, 0.0, Inf)
+    cEi = clamp.(rEi, -Inf, 0)
+    cEw = clamp.(rEw, 0, Inf)
     psiEidt = rEi .- cEi # +
     psiEwdt = rEw .- cEw # -
     Ei = cEi .+ psiEwdt # -
@@ -106,7 +105,7 @@ end # function redistributeE
 
 # redistribution functions
 function split_psiEw(psiEw::Vec, phi::Vec, Al::Vec)::@NamedTuple{Ql::Vec, Qp::Vec}
-    Ql = @. Al / (1.0-phi) * psiEw
+    Ql = @. Al / (1-phi) * psiEw
     condset!(Ql, 0.0, isone, phi) # fix rounding errors
     Qp = psiEw - Ql
     return (; Ql, Qp)
@@ -124,12 +123,12 @@ end # function average
 
 # differential equations
 Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
-Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1.0-phi)Fvw - Flat
-h_t(Fvi::Vec, par::Collection{Float64})::Vec = -1.0/par.Lf * Fvi
+Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1-phi)Fvw - Flat
+h_t(Fvi::Vec, par::Collection{Float64})::Vec = -1/par.Lf * Fvi
 function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64})::Vec
-    lat_melt = -pi / 2.0 * par.alpha * wlat(Tw, par)
-    lat_grow = @. -D / (2.0 * par.Lf * h * phi) * Ql
-    weld = @. par.kappa * par.alpha / 4.0 * phi * D^3.0
+    lat_melt = -pi / 2 * par.alpha * wlat(Tw, par)
+    lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
+    weld = @. par.kappa * par.alpha / 4 * phi * D^3
     zeroref!(lat_grow, h)
     return @. lat_melt + lat_grow + weld
 end # function D_t
@@ -193,7 +192,7 @@ function Infrastructure.step!(
         D_t(lasth, vars.D, vars.Tw, vars.phi, Qlp.Ql, par),
         st.dt
     ) # !
-    clamp!(vars.h, 0.0, Inf) # avoid overshooting to negative thickness
+    clamp!(vars.h, 0, Inf) # avoid overshooting to negative thickness
     zeroref!(vars.h, vars.Ei) # restrict non-existence
     clamp!(vars.D, par.Dmin, par.Dmax)
     zeroref!(vars.D, vars.Ei) # restrict non-existence

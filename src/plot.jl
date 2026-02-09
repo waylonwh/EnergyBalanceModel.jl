@@ -1,11 +1,11 @@
 module Plot
 
-using ..Utilities, ..Infrastructure
+using ..Infrastructure, ..Utilities
 
 import Makie
 
 export Layout, backend
-export plot_raw, plot_avg, plot_seasonal
+export plot_avg, plot_raw, plot_seasonal
 
 """
     Layout(vars::Matrix{T}, titles::Matrix{AbstractString})
@@ -255,9 +255,9 @@ function plot_avg(
 end # function plot_avg
 
 (ice_area(sols::Solutions{ClassicModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
-    2.0pi * hemispheric_mean((getproperty(sols.annual, season).E[year].<0.0), sols.spacetime.x)
+    2pi * hemispheric_mean((getproperty(sols.annual, season).E[year].<0), sols.spacetime.x)
 (ice_area(sols::Solutions{MIZModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
-    2.0pi * hemispheric_mean(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
+    2pi * hemispheric_mean(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
 
 """
     plot_seasonal(sols::Solutions{<:AbstractModel,F,false}, bcknd::Symbol=...; kwargs...) -> Makie.Figure
@@ -306,9 +306,9 @@ function plot_seasonal(
         (sols.forcing.domain[2]:sols.forcing.domain[3], sols.forcing.domain[4]:sols.forcing.domain[5]),
         (Makie.Cycled(6), Makie.Cycled(1))
     ), season in (:avg, :winter, :summer)
-        width = 1.0
+        width = 1 # TODO Float64?
         if season === :avg
-            width += (domain===:Warming ? 2.0 : 1.0)
+            width += (domain===:Warming ? 2 : 1) # TODO Float64?
         end # if ===
         push!(
             group,

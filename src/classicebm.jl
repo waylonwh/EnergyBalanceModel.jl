@@ -1,6 +1,6 @@
 module ClassicEBM # EnergyBalanceModel.
 
-using ..Utilities, ..Infrastructure
+using ..Infrastructure, ..Utilities
 
 import LinearAlgebra as LA, SparseArrays as SA
 
@@ -21,7 +21,7 @@ import LinearAlgebra as LA, SparseArrays as SA
             kappa = (1+dt_tau) * LA.I(st.nx) - st.dt * par.D * get_diffop(st) / par.cg
             # Seasonal forcing [WE15 Eq. (3)]
             S = repeat(par.S0 .- par.S2 * st.x.^2, 1, st.nt) -
-                repeat(par.S1 * cos.(2.0pi*st.t'), st.nx, 1) .* repeat(st.x, 1, st.nt)
+                repeat(par.S1 * cos.(2pi*st.t'), st.nx, 1) .* repeat(st.x, 1, st.nt)
             S = hcat(S, S[:,1])
             # Further definitions
             M = par.B + cg_tau
@@ -53,27 +53,27 @@ function Infrastructure.step!(
     # get static variables
     stat = get_statics(st, par)
     # get time index
-    i = round(Int, mod1((t + st.dt/2.0) * st.nt, st.nt))
+    i = round(Int, mod1((t + st.dt/2) * st.nt, st.nt))
     # forcing
-    alpha = @. stat.aw * (vars.E>=0.0) + par.ai * (vars.E<0.0) # WE15 Eq. (4)
+    alpha = @. stat.aw * (vars.E>=0) + par.ai * (vars.E<0) # WE15 Eq. (4)
     C = @. alpha*stat.S[:,i] + stat.cg_tau*vars.Tg - par.A + f
     # surface temperature
     T0 = @. C / (stat.M - stat.kLf/vars.E) # WE15 Eq. (A3)
-    vars.T = @. vars.E/par.cw * (vars.E>=0) + T0 * (vars.E<0.0)*(T0<0.0) # WE15 Eq. (9)
+    vars.T = @. vars.E/par.cw * (vars.E>=0) + T0 * (vars.E<0)*(T0<0) # WE15 Eq. (9)
     # Forward Euler for E
     @. vars.E += st.dt * (C - stat.M*vars.T + par.Fb) # WE15 Eq. (A2)
     # Implicit Euler for Tg
     vars.Tg =
-        (stat.kappa - SA.spdiagm(stat.dc ./ (stat.M .- stat.kLf./vars.E) .* (T0.<0.0).*(vars.E.<0.0))) \
+        (stat.kappa - SA.spdiagm(stat.dc ./ (stat.M .- stat.kLf./vars.E) .* (T0.<0).*(vars.E.<0))) \
         (
             vars.Tg +
             (
                 stat.dt_tau * (vars.E/par.cw.*(vars.E.>=0) +
-                (par.ai*view(stat.S, :, i+1) .- par.A .+ f) ./ (stat.M .- stat.kLf./vars.E) .* (T0.<0.0).*(vars.E.<0.0))
+                (par.ai*view(stat.S, :, i+1) .- par.A .+ f) ./ (stat.M .- stat.kLf./vars.E) .* (T0.<0).*(vars.E.<0))
             )
         ) # () # vars.Tg # WE15 Eq. (A1)
     # Infer ice thickness
-    vars.h = @. -vars.E / par.Lf * (vars.E<0.0)
+    vars.h = @. -vars.E / par.Lf * (vars.E<0)
     return vars
 end # function Infrastructure.step!
 
