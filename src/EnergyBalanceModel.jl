@@ -19,7 +19,7 @@ julia> st = SpaceTime{sin}(180, 2000, 50);
 
 julia> forcing = Forcing(0.0);
 
-julia> par = default_parameters(miz);
+julia> par = default_parameters(MIZModel());
 
 julia> T = fill(17.0, st.nx);
 
@@ -31,7 +31,7 @@ julia> init = Collection{Vec}(
            :Tg => T,
        );
 
-julia> sols = integrate(miz, st, forcing, par, init)
+julia> sols = integrate(MIZModel(), st, forcing, par, init)
 Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  1:21/-0:00 1231.41/sec                     Done ✓

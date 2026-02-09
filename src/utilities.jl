@@ -157,10 +157,10 @@ function output!(prog::Progress, feedargs::Tuple=())::Nothing
     prog.updates += 1 # !
     if !isfinite(speed) # no speed info
         spdstr = "-/sec"
-    elseif (speed >= 1.0) || (iszero(speed)) # speed > 1.0
+    elseif (speed >= 1) || (iszero(speed)) # speed > 1
         spdstr = string(round(speed; digits=2), "/sec")
-    else # speed < 1.0
-        spdstr = string(round(1.0/speed; digits=2), "sec/1")
+    else # speed < 1
+        spdstr = string(round(1/speed; digits=2), "sec/1")
     end # if >, elseif, else
     timespeed = SS.annotatedstring(
         ' ',

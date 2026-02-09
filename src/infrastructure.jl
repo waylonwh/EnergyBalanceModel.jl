@@ -142,11 +142,11 @@ struct SpaceTime{F}
         winter::Float64=0.26125, summer::Float64=0.77375
     ) where F
         du = (urange[2]-urange[1]) / nx
-        u = range(urange[1] + du/2.0, urange[2] - du/2.0, nx)
+        u = range(urange[1] + du/2, urange[2] - du/2, nx)
         x = F.(u)
-        dt = 1.0 / nt
-        t = collect(range(dt/2.0, 1.0 - dt/2.0, nt))
-        T = dt/2.0 : dt : dur - dt/2.0
+        dt = 1 / nt
+        t = collect(range(dt/2, 1 - dt/2, nt))
+        T = dt/2 : dt : dur - dt/2
         winterinx = round(Int, nt*winter)
         summerinx = round(Int, nt*summer)
         return new{F}(
@@ -156,7 +156,7 @@ struct SpaceTime{F}
 end # struct SpaceTime{F}
 
 SpaceTime{identity}(nx::Int, nt::Int, dur::Int; kwargs...) = SpaceTime{identity}((0.0, 1.0), nx, nt, dur; kwargs...)
-SpaceTime{sin}(nx::Int, nt::Int, dur::Int; kwargs...) = SpaceTime{sin}((0.0, pi/2.0), nx, nt, dur; kwargs...)
+SpaceTime{sin}(nx::Int, nt::Int, dur::Int; kwargs...) = SpaceTime{sin}((0.0, pi/2), nx, nt, dur; kwargs...)
 SpaceTime(args...; kwargs...) = SpaceTime{identity}(args...; kwargs...)
 
 (Base.show(io::IO, st::SpaceTime{F})::Nothing) where F = print(
@@ -291,7 +291,7 @@ function Base.show(io::IO, ::MIME"text/plain", forcing::Forcing{false})::Nothing
     )
     varyline(bias::Float64, rate::Float64, start::Int)::String = string(
         lpad(bias, biaslen),
-        ' ', rate>0.0 ? '+' : '-', ' ',
+        ' ', rate>0 ? '+' : '-', ' ',
         lpad(abs(rate), ratelen), "(t-", lpad(start, domainlen), ")"
     )
     domainstr(i::Int, nextdomain::String=string(forcing.domain[i+1]))::String = string(
@@ -369,10 +369,10 @@ struct Solutions{M<:AbstractModel,F,C}
     ) where {M<:AbstractModel, F, C} # Solutions
         if lastonly
             dur_store = 1
-            ts::Vec = st.dur-1.0 + st.dt/2.0 : st.dt : st.dur - st.dt/2.0
+            ts::Vec = st.dur-1 + st.dt/2 : st.dt : st.dur - st.dt/2
         else # !lastonly
             dur_store = st.dur
-            ts = st.dt/2.0 : st.dt : st.dur - st.dt/2.0
+            ts = st.dt/2 : st.dt : st.dur - st.dt/2
         end # if lastonly, else
         # construct raw solution storage
         solraw = Collection{Vector{Vec}}()
@@ -498,8 +498,8 @@ default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(cla
 
     @inline function get_diffop(st::SpaceTime{identity})::SA.SparseMatrixCSC{Float64,Int64}
         if size(diffop) != (st.nx, st.nx) # recalculate diffusion operator
-            dx = 1.0 / st.nx
-            xb = dx:dx:1.0-dx
+            dx = 1 / st.nx
+            xb = dx:dx:1-dx
             lambda = @. (1 - xb^2) / dx^2
             l1 = pushfirst!(-copy(lambda), 0.0)
             l2 = push!(-copy(lambda), 0.0)
@@ -516,7 +516,7 @@ default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(cla
 
     @inline function get_diffop(st::SpaceTime{F})::SA.SparseMatrixCSC{Float64,Int64} where F
         if xid != objectid(st.x) # recalculate diffusion operator
-            x = [-st.x[1]; st.x; 2.0 - st.x[end]] # include ghost points
+            x = [-st.x[1]; st.x; 2 - st.x[end]] # include ghost points
             diffx = diff(x)
             f = diffx[2:st.nx+1] # (xⱼ₊₁ - xⱼ) or Δⱼ
             b = -diffx[1:st.nx] # (xⱼ₋₁ - xⱼ) or ∇ⱼ
@@ -525,15 +525,15 @@ default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(cla
             A1 = @. f / (b * (f-b))
             B1 = @. -(b+f) / (b*f)
             C1 = @. b / (f * (b-f))
-            first = -2.0st.x .* SA.spdiagm(
+            first = -2st.x .* SA.spdiagm(
                 -1 => A1[l],
                 0 => B1 + [A1[1]; zeros(Float64, st.nx-2); C1[st.nx]],
                 1 => C1[u]
             ) # -2x ∂/∂x
-            A2 = @. 2.0 / (b * (b-f))
-            B2 = @. 2.0 / (b*f)
-            C2 = @. 2.0 / (f * (f-b))
-            second = (1.0 .- st.x.^2.0) .* SA.spdiagm(
+            A2 = @. 2 / (b * (b-f))
+            B2 = @. 2 / (b*f)
+            C2 = @. 2 / (f * (f-b))
+            second = (1 .- st.x.^2) .* SA.spdiagm(
                 -1 => A2[l],
                 0 => B2 + [A2[1]; zeros(Float64, st.nx-2); C2[st.nx]],
                 1 => C2[u]
@@ -636,7 +636,7 @@ julia> hemispheric_mean(vec, x)
 function hemispheric_mean(vec::Vec, x::Vec)::Float64
     int = zero(Float64)
     for i in 1:length(x)-1
-        @inbounds int += (vec[i] + vec[i+1]) * (x[i+1] - x[i]) / 2.0
+        @inbounds int += (vec[i] + vec[i+1]) * (x[i+1] - x[i]) / 2
     end # for i
     return int
 end # function hemispheric_mean
