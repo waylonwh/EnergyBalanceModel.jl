@@ -121,7 +121,8 @@ backend()::Union{Module,Missing} = Makie.current_backend()
 backend(bcknd::Symbol)::Module = init_backend(Val(bcknd))
 
 function contourf_tiles(
-    t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}}; inspect::Bool=false
+    t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}};
+    xlim::Union{NTuple{2,Real},Nothing}=nothing, tlim::Union{NTuple{2,Real}, Nothing}=nothing, inspect::Bool=false
 )::Makie.Figure where T<:Real
     fig = Makie.Figure()
     for row in axes(layout, 1), col in axes(layout, 2)
@@ -131,7 +132,7 @@ function contourf_tiles(
             title=layout[row,col].title,
             xlabel=(row==lastindex(layout, 1) ? Makie.L"$t$ ($\mathrm{y}$)" : ""),
             ylabel=(col==1 ? Makie.L"x" : ""),
-            limits=(nothing, (0, 1))
+            limits=(tlim, xlim)
         )
         if all(isnan, layout[row,col].var)
             @warn "All data are NaN at position ($row, $col). Skipping plot."
@@ -151,7 +152,7 @@ matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecve
 function limit_size(
     xs::Vec, ts::Vector{T},
     xsizelim::Int=1000, tsizelim::Int=1000,
-    xrange::NTuple{2,Float64}=extrema(xs), trange::NTuple{2,<:Real}=extrema(ts)
+    xrange::NTuple{2,Real}=extrema(xs), trange::NTuple{2,Real}=extrema(ts)
 )::@NamedTuple{xinx::Vector{Int}, tinx::Vector{Int}} where T<:Real
     # find range indices
     tiran = (findfirst(>=(trange[1]), ts), findlast(<=(trange[2]), ts))
@@ -160,13 +161,16 @@ function limit_size(
         if any(isnothing, iran) || iran[2]<iran[1] # range ⊄ s
             throw(
                 ArgumentError(
-                    "No $(name)s stored in the Solutions within the specified range. The range should be a subinterval of $(extrema(s))."
+                    "No $(name)s stored in the Solutions within the specified range. The range should intersect with $(extrema(s))."
                 )
             )
-        elseif tiran[1] == tiran[2] # only one point in range
+        elseif (iran[1] == iran[2])# only one point in range
             @warn "Only one $name found in the specified range. Nothing will be shown on the contourf plot."
         end # if ||, elseif
     end # for (iran, name, s)
+    if xsizelim <= 1 || tsizelim <= 1
+        throw(ArgumentError("Number of points limits must be greater than 1."))
+    end # if <=
     # limit sizes
     xinx = (xiran[2]-xiran[1]+1) > xsizelim ?
            round.(Int, range(xiran[1], xiran[2], xsizelim)) : # reduce x size
@@ -195,8 +199,8 @@ backend `bcknd`. The function will find available backend if not specified.
     points in `sols` exceeds this limit, the points will be downsampled uniformly to meet
     the limit.
 - `tsizelim::Int`: Maximum number of time steps to plot.
-- `xrange::NTuple{2,Float64}`: Range of spatial points to plot.
-- `trange::NTuple{2,<:Real}`: Range of time steps to plot.
+- `xrange::NTuple{2,Real}`: Range of spatial points to plot.
+- `trange::NTuple{2,Real}`: Range of time steps to plot.
 """
 function plot_raw(
     sols::Solutions{M,F,C},
@@ -205,8 +209,8 @@ function plot_raw(
     inspect::Bool=false,
     xsizelim::Int=1000,
     tsizelim::Int=1000,
-    xrange::NTuple{2,Float64}=extrema(sols.spacetime.x),
-    trange::NTuple{2,<:Real}=extrema(sols.ts)
+    xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
+    trange::NTuple{2,Real}=extrema(sols.ts)
 )::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, sols.ts, xsizelim, tsizelim, xrange, trange)
@@ -214,7 +218,10 @@ function plot_raw(
     @simd for linx in eachindex(layout)
         datatitle.vars[linx] = matricify(getindex.(getproperty(sols.raw, layout[linx].var)[tinx], Ref(xinx)))
     end # for inx
-    return contourf_tiles(sols.ts[tinx], sols.spacetime.x[xinx], datatitle; inspect)
+    return contourf_tiles(
+        sols.ts[tinx], sols.spacetime.x[xinx], datatitle;
+        xlim=xrange, tlim=trange, inspect
+    )
 end # function plot_raw
 
 """
@@ -232,8 +239,8 @@ Makie backend `bcknd`. The function will find available backend if not specified
     points in `sols` exceeds this limit, the points will be downsampled uniformly to meet
     the limit.
 - `tsizelim::Int`: Maximum number of time steps to plot.
-- `xrange::NTuple{2,Float64}`: Range of spatial points to plot.
-- `trange::NTuple{2,<:Real}`: Range of time steps to plot.
+- `xrange::NTuple{2,Real}`: Range of spatial points to plot.
+- `trange::NTuple{2,Real}`: Range of time steps to plot.
 """
 function plot_avg(
     sols::Solutions{M,F,C},
@@ -242,8 +249,8 @@ function plot_avg(
     inspect::Bool=false,
     xsizelim::Int=1000,
     tsizelim::Int=1000,
-    xrange::NTuple{2,Float64}=extrema(sols.spacetime.x),
-    trange::NTuple{2,<:Real}=(1, sols.spacetime.dur)
+    xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
+    trange::NTuple{2,Real}=(1, sols.spacetime.dur)
 )::Makie.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, collect(1:sols.spacetime.dur), xsizelim, tsizelim, xrange, trange)
@@ -251,7 +258,10 @@ function plot_avg(
     @simd for linx in eachindex(layout)
         datatitle.vars[linx] = matricify(getindex.(getproperty(sols.annual.avg, layout[linx].var)[tinx], Ref(xinx)))
     end # for inx
-    return contourf_tiles(collect(tinx), sols.spacetime.x[xinx], datatitle; inspect)
+    return contourf_tiles(
+        collect(tinx), sols.spacetime.x[xinx], datatitle;
+        xlim=xrange, tlim=trange, inspect
+    )
 end # function plot_avg
 
 (ice_area(sols::Solutions{ClassicModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
@@ -344,7 +354,7 @@ function precompile(bcnd::Module)::Nothing
         bcnd.activate!()
         PT.@compile_workload begin
             for t in (ints, floats)
-                contourf_tiles(t, x, layout)
+                contourf_tiles(t, x, layout; inspect=true)
             end # for t
         end # PT.@compile_workload begin
     end # PT.@setup_workload begin
