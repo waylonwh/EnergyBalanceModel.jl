@@ -55,7 +55,7 @@ details on data handling and visualisation.
 """
 module EnergyBalanceModel
 
-export ClassicModel, MIZModel
+export ClassicModel, MIZModel, WIModel
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export default_parameters, integrate
 export annual_mean, hemispheric_mean
@@ -75,8 +75,8 @@ using .ClassicEBM, .Infrastructure, .MIZEBM, .Plot, .Utilities, .WIMEBM
     run_example(model<:AbstractModel=MIZModel(); plotbackend::Symbol=:GLMakie)
 
 Run a standard example simulation for the specified `model` (either an instance of
-`MIZModel` or `ClassicModel`). The results of the last year (year 50) are plotted using the
-specified Makie backend `plotbackend`. The backend package must be loaded beforehand
+`MIZModel`, `WIModel`, or `ClassicModel`). The results of the last year (year 50) are
+plotted using the specified Makie backend `plotbackend`. The backend package must be loaded beforehand
 (e.g., `import GLMakie`).
 
 The model is run on a 180-point latitudinal grid equally spaced in latitude, with 2000
@@ -116,14 +116,13 @@ function run_example(model::M=MIZModel(); plotbackend::Symbol=Plot.find_backend(
     par = default_parameters(model)
     T = fill(17.0, st.nx)
     init = Collection{Vec}(:Tg => T)
-    if model isa MIZModel
+    if model isa ClassicModel
+        init.E = par.cw * T
+    else # MIZModel or WIModel
         init.Ei = zeros(st.nx)
         init.Ew = par.cw * T
         init.h = zeros(st.nx)
         init.D = zeros(st.nx)
-    elseif model isa ClassicModel
-        init.E = par.cw * T
-    # no else since default_parameters would error earlier
     end # if isa; elseif
     sols = integrate(model, st, forcing, par, init)
     try # plot results
@@ -142,31 +141,31 @@ function run_example(model::M=MIZModel(); plotbackend::Symbol=Plot.find_backend(
     return sols
 end # function run_example
 
-import PrecompileTools as PT
+# import PrecompileTools as PT
 
-PT.@setup_workload begin
-    ms = (MIZModel(), ClassicModel())
-    Fs = (identity, sin)
-    fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
-    redirect_stdout(devnull)
-    PT.@compile_workload begin
-        for m in ms, F in Fs, farg in fs_args
-            st = SpaceTime{F}(10, 10, 1)
-            forcing = Forcing(farg...)
-            par = default_parameters(m)
-            T = fill(0.0, st.nx)
-            init = Collection{Vec}(:Tg => T)
-            if m isa MIZModel
-                init.Ei = zeros(st.nx)
-                init.Ew = par.cw * T
-                init.h = zeros(st.nx)
-                init.D = zeros(st.nx)
-            elseif m isa ClassicModel
-                init.E = par.cw * T
-            end # if isa; elseif
-            integrate(m, st, forcing, par, init)
-        end # for m, F, farg
-    end # PT.@compile_workload begin
-end # PT.@setup_workload begin
+# PT.@setup_workload begin
+#     ms = (MIZModel(), WIModel(), ClassicModel())
+#     Fs = (identity, sin)
+#     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
+#     redirect_stdout(devnull)
+#     PT.@compile_workload begin
+#         for m in ms, F in Fs, farg in fs_args
+#             st = SpaceTime{F}(10, 10, 1)
+#             forcing = Forcing(farg...)
+#             par = default_parameters(m)
+#             T = fill(0.0, st.nx)
+#             init = Collection{Vec}(:Tg => T)
+#             if m isa ClassicModel
+#                 init.E = par.cw * T
+#             else # MIZModel or WIModel
+#                 init.Ei = zeros(st.nx)
+#                 init.Ew = par.cw * T
+#                 init.h = zeros(st.nx)
+#                 init.D = zeros(st.nx)
+#             end # if isa; elseif
+#             integrate(m, st, forcing, par, init)
+#         end # for m, F, farg
+#     end # PT.@compile_workload begin
+# end # PT.@setup_workload begin
 
 end # module EnergyBalanceModel

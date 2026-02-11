@@ -98,5 +98,12 @@ function mean_size(dmn::Float64, dmx::Float64, par::Par)::Float64
     return sol.u
 end # function mean_size
 
+function Infrastructure.step!(
+    ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par; spectrum::Spectrum
+)::Collection{Vec} where F
+    Infrastructure.step!(MIZModel(), t, f, vars, st, par) # thermodynamics
+    # edgeinx = findfirst(<(0), vars.Ei)
+    return vars
+end # function Infrastructure.step!
 
 end # module WIMEBM

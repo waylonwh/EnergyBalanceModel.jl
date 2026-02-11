@@ -132,14 +132,14 @@ function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par)::Vec
 end # function D_t
 
 function Infrastructure.initialise(
-    ::MIZModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
+    model::Union{MIZModel,WIModel}, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
     lastonly::Bool=true
-)::Tuple{Collection{Vec}, Solutions{MIZModel,F,C}, Solutions{MIZModel,F,C}} where {F, C}
+)::Tuple{Collection{Vec}, Solutions{typeof(model),F,C}, Solutions{typeof(model),F,C}} where {F, C}
     # create storages
     vars = deepcopy(init)
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
-    sols = Solutions{MIZModel}(st, forcing, par, init, solvars, lastonly) # final output
-    annusol = Solutions{MIZModel}(st, forcing, par, init, solvars, true) # for annual means (internal use)
+    sols = Solutions{typeof(model)}(st, forcing, par, init, solvars, lastonly) # final output
+    annusol = Solutions{typeof(model)}(st, forcing, par, init, solvars, true) # for annual means (internal use)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)
     vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
@@ -151,7 +151,7 @@ end # function initialise
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
 
 function Infrastructure.step!(
-    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par
+    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par; _...
 )::Collection{Vec} where F
     # copy next variables to current
     vars.phi = copy(vars.nextphi)

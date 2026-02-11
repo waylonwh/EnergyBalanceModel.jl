@@ -5,15 +5,25 @@ using ..Utilities
 import EnergyBalanceModel
 import SparseArrays as SA, Statistics as Stats
 
-export AbstractModel, ClassicModel, MIZModel
+export AbstractModel, ClassicModel, MIZModel, WIModel
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export classic_paramset, default_parameters, default_parval, miz_paramset
 export get_diffop
 export annual_mean, hemispheric_mean
 export integrate
 
-const Vec = Vector{Float64} # abbreviation for vector type used in model
+"""
+    Vec
 
+Alias for `Vector{Float64}` to represent model variables.
+"""
+const Vec = Vector{Float64}
+
+"""
+    AbstractModel
+
+Abstract type for the different energy balance models.
+"""
 abstract type AbstractModel end
 
 """
@@ -23,6 +33,14 @@ Singleton type representing the extended idealised climate model with a marginal
 (MIZ).
 """
 struct MIZModel <: AbstractModel end
+
+"""
+    WIModel <: AbstractModel
+
+Singleton type representing the wave ice interaction model, as an extension of the
+[`MIZModel`](@ref).
+"""
+struct WIModel <: AbstractModel end
 
 """
     ClassicModel <: AbstractModel
@@ -39,7 +57,7 @@ for constructing a `Dict{Symbol,V}` to create a `Collection{V}`.
 
 # Examples
 ```julia-repl
-julia> parameters = Par(:D => 0.6, :A => 193.0, :B => 2.1)
+julia> parameters = Collection{Float64}(:D => 0.6, :A => 193.0, :B => 2.1)
 Collection{Float64} with 3 entries:
   :A => 193.0
   :D => 0.6
@@ -86,7 +104,14 @@ function Base.show(io::IO, ::MIME"text/plain", coll::Collection{V})::Nothing whe
     return nothing
 end # function Base.show
 
-const Par = Collection{Float64} # abbreviation for parameter collection type
+"""
+    Par
+
+Alias for `Collection{Float64}` to represent model parameters.
+
+See also [`Collection`](@ref).
+"""
+const Par = Collection{Float64}
 
 """
     SpaceTime{F}(urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375)
@@ -226,7 +251,7 @@ julia> f(17.57)
 3.785
 ```
 """
-struct Forcing{F}
+struct Forcing{C}
     base::Float64 # base forcing
     peak::Float64 # peak forcing
     cool::Float64 # forcing after cooldown
@@ -653,7 +678,8 @@ Integrate the specified model over the given `SpaceTime` with climate `Forcing`,
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
 `Solutions` object. Use `default_parameters` to get default model parameters. For
 `MIZModel`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D` and `:Tg`; for
-`ClassicModel`, `init` must contain `:E` and `:Tg`.
+`ClassicModel`, `init` must contain `:E` and `:Tg`. A keyword argument `spectrum` must be
+specified for `WIModel` to indicate the spectrum of the incident wave field.
 
 When `lastonly=true`, only the last year of the solution is stored for each time step,
 otherwise the full solution is stored. A progress bar is displayed and updated with
@@ -663,8 +689,12 @@ Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
     model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0
+    lastonly::Bool=true, updatefreq::Float64=1.0,
+    spectrum#=::Union{Spectrum,Nothing}=#=nothing
 )::Solutions{M,F,C} where {M<:AbstractModel, F, C}
+    # warn if spectrum is provided for non-WIModel
+    (M === WIModel || isnothing(spectrum)) ||
+        @warn "Keyword argument `spectrum` is ignored as $M does not have a WIM component."
     # initialise
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
     if isfinite(updatefreq)
@@ -676,7 +706,7 @@ function integrate(
     end # if isfinite
     # loop over time
     for ti in eachindex(st.T)
-        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par)
+        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
         savesol!(sols, annusol, vars, ti)
         isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
     end # for ti
