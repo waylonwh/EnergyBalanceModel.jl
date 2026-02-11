@@ -3,11 +3,11 @@ module Utilities # EnergyBalanceModel.
 import Statistics as Stats, StyledStrings as SS
 
 export Progress, update!
-export @persistent, iobuffer
+export @isdebugging, @persistent, iobuffer
 export condset, condset!, crossmean, zeroref!
 
 # add new function introduced in Julia 1.12
-if VERSION < v"1.12"
+@static if VERSION < v"1.12"
     export ctruncate
     ctruncate(x, _...) = x
 end # if <
@@ -63,9 +63,7 @@ macro persistent(exprs...)
         else # recursively search args
             for arg in expr.args
                 funcexpr = findexpr(arg, head)
-                if !isnothing(funcexpr)
-                    return funcexpr
-                end # if !
+                isnothing(funcexpr) || return funcexpr
             end # for arg
             return nothing
         end # if ==
@@ -92,6 +90,19 @@ macro persistent(exprs...)
         end # quote
     ) # esc
 end # macro persistent
+
+# determine is the current file or module is being debugged
+macro isdebugging()
+    dbg_env = get(ENV, "JULIA_DEBUG", "")
+    if isempty(dbg_env)
+        return false
+    else # !isempty
+        targets = split(dbg_env, ',')
+        file = splitext(splitpath(string(__source__.file))[end])[1]
+        mods = split(string(__module__), '.')
+        return file in targets || any(in(targets), mods)
+    end # if isempty, else
+end # macro isdebugging
 
 # Progress operations
 function display_time(time::Float64)::String
@@ -157,7 +168,7 @@ function output!(prog::Progress, feedargs::Tuple=())::Nothing
     prog.updates += 1 # !
     if !isfinite(speed) # no speed info
         spdstr = "-/sec"
-    elseif (speed >= 1) || (iszero(speed)) # speed > 1
+    elseif speed>=1 || iszero(speed) # speed > 1
         spdstr = string(round(speed; digits=2), "/sec")
     else # speed < 1
         spdstr = string(round(1/speed; digits=2), "sec/1")
@@ -192,9 +203,8 @@ function update!(prog::Progress, current::Int=prog.current+1; feedargs::Tuple=()
         prog.updated = time() - prog.freq # force immediate external update # !
     end # if isnan
     # external update
-    if (time() - prog.updated >= prog.freq) || (prog.current == prog.total)
+    ((time() - prog.updated >= prog.freq) || (prog.current == prog.total)) &&
         output!(prog, feedargs)
-    end # if ||
     return nothing
 end # function update!
 
@@ -208,9 +218,8 @@ iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
 
 # mean across vectors
 @inline function crossmean(vecvec::Vector{Vector{T}})::Vector{T} where T<:Number
-    @boundscheck if !all(length.(vecvec) .== length(vecvec[1]))
+    @boundscheck all(length.(vecvec) .== length(vecvec[1])) ||
         throw(BoundsError("All vectors must be the same length."))
-    end # if !
     return map((xi -> Stats.mean(vecvec[ti][xi] for ti in eachindex(vecvec))), eachindex(vecvec[1]))
 end # function crossmean
 

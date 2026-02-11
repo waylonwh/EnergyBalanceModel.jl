@@ -6,7 +6,7 @@ import EnergyBalanceModel
 import SparseArrays as SA, Statistics as Stats
 
 export AbstractModel, ClassicModel, MIZModel
-export Collection, Forcing, Solutions, SpaceTime, Vec
+export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export classic_paramset, default_parameters, default_parval, miz_paramset
 export get_diffop
 export annual_mean, hemispheric_mean
@@ -39,7 +39,7 @@ for constructing a `Dict{Symbol,V}` to create a `Collection{V}`.
 
 # Examples
 ```julia-repl
-julia> parameters = Collection{Float64}(:D => 0.6, :A => 193.0, :B => 2.1)
+julia> parameters = Par(:D => 0.6, :A => 193.0, :B => 2.1)
 Collection{Float64} with 3 entries:
   :A => 193.0
   :D => 0.6
@@ -85,6 +85,8 @@ function Base.show(io::IO, ::MIME"text/plain", coll::Collection{V})::Nothing whe
     print(io, str)
     return nothing
 end # function Base.show
+
+const Par = Collection{Float64} # abbreviation for parameter collection type
 
 """
     SpaceTime{F}(urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375)
@@ -338,7 +340,7 @@ An object to store model solutions. Type parameter `M` is the model type (`MIZMo
 - `spacetime::SpaceTime{F}`: space and time on which solutions are defined
 - `ts::Vec`: time vector for stored solutions
 - `forcing::Forcing{C}`: climate forcing
-- `parameters::Collection{Float64}`: model parameters
+- `parameters::Par`: model parameters
 - `initconds::Collection{Vec}`: initial conditions
 - `lastonly::Bool`: whether to store solutions for each time step only for the last year
 - `raw::Collection{Vector{Vec}}`: solutions for each time step
@@ -354,7 +356,7 @@ struct Solutions{M<:AbstractModel,F,C}
     spacetime::SpaceTime{F} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing{C} # climate forcing
-    parameters::Collection{Float64} # model parameters
+    parameters::Par # model parameters
     initconds::Collection{Vec} # initial conditions
     lastonly::Bool # store only last year of solution
     raw::Collection{Vector{Vec}} # solution storage
@@ -363,9 +365,8 @@ struct Solutions{M<:AbstractModel,F,C}
     } # seasonal peak and annual avg
 
     function Solutions{M}(
-        st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64},
-        init::Collection{Vec}, vars::Set{Symbol},
-        lastonly::Bool=true;
+        st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec},
+        vars::Set{Symbol}, lastonly::Bool=true
     ) where {M<:AbstractModel, F, C} # Solutions
         if lastonly
             dur_store = 1
@@ -420,7 +421,7 @@ end # function Base.show
 
 # default parameter values
 let cw::Float64 = 9.8
-    global const default_parval = Collection{Float64}(
+    global const default_parval = Par(
         :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
         :A => 193.0, # OLR when T = T_m (W m^-2)
         :B => 2.1, # OLR temperature dependence (W m^-2 K^-1)
@@ -446,7 +447,7 @@ let cw::Float64 = 9.8
         :Dmax => 156, # largest floe length (m)
         :hmin => 0.1, # new pancake thickness (m)
         :kappa => 0.01 * 31536000 # floe welding parameter
-    ) # Collection{Float64}
+    ) # Par
 end # let cw
 
 # parameters used in each model
@@ -461,14 +462,14 @@ const classic_paramset = Set{Symbol}(
 )
 
 # Create a parameter dictionary from default values for a given Set
-function default_parameters(paramset::Set{Symbol})::Collection{Float64}
+function default_parameters(paramset::Set{Symbol})::Par
     setvec = collect(paramset)
-    return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
+    return Par(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultparameters
 
 """
-    default_parameters(::MIZModel) -> Collection{Float64}
-    default_parameters(::ClassicModel) -> Collection{Float64}
+    default_parameters(::MIZModel) -> Par
+    default_parameters(::ClassicModel) -> Par
 
 Get default parameters for a given model.
 
@@ -489,8 +490,8 @@ Collection{Float64} with 16 entries:
   ⋮   => ⋮
 ```
 """
-default_parameters(::MIZModel)::Collection{Float64} = default_parameters(miz_paramset)
-default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(classic_paramset)
+default_parameters(::MIZModel)::Par = default_parameters(miz_paramset)
+default_parameters(::ClassicModel)::Par = default_parameters(classic_paramset)
 
 # calculate diffusion operator matrix
 @persistent(
@@ -646,7 +647,7 @@ function step! end
 function initialise end
 
 """
-    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
@@ -661,25 +662,23 @@ frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
-    model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+    model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
     lastonly::Bool=true, updatefreq::Float64=1.0
 )::Solutions{M,F,C} where {M<:AbstractModel, F, C}
     # initialise
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
-    if updatefreq < Inf
+    if isfinite(updatefreq)
         progress::Progress = Progress(
             length(st.T), "Integrating", updatefreq;
             infofeed=(t -> string("t = ", round(t, digits=2)))
         )
         update!(progress; feedargs=(0,))
-    end # if <
+    end # if isfinite
     # loop over time
     for ti in eachindex(st.T)
         step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par)
         savesol!(sols, annusol, vars, ti)
-        if updatefreq < Inf
-            update!(progress; feedargs=(st.T[ti],))
-        end # if <
+        isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
     end # for ti
     return sols
 end # function integrate

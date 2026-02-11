@@ -9,7 +9,7 @@ import LinearAlgebra as LA, SparseArrays as SA
     S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64,
     id::UInt = UInt(0),
 
-    @inline function get_statics(st::SpaceTime{F}, par::Collection{Float64})::@NamedTuple{
+    @inline function get_statics(st::SpaceTime{F}, par::Par)::@NamedTuple{
         cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
         S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64
     } where F
@@ -35,8 +35,7 @@ import LinearAlgebra as LA, SparseArrays as SA
 ) # @persistent
 
 function Infrastructure.initialise(
-    ::ClassicModel,
-    st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+    ::ClassicModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
     lastonly::Bool=true
 )::Tuple{Collection{Vec},Solutions{ClassicModel,F,C},Solutions{ClassicModel,F,C}} where {F, C}
     vars = deepcopy(init)
@@ -48,7 +47,7 @@ end # function initialise
 
 function Infrastructure.step!(
     ::ClassicModel,
-    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64}
+    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par
 )::Collection{Vec} where F
     # get static variables
     stat = get_statics(st, par)

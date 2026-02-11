@@ -56,7 +56,7 @@ details on data handling and visualisation.
 module EnergyBalanceModel
 
 export ClassicModel, MIZModel
-export Collection, Forcing, Solutions, SpaceTime, Vec
+export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export default_parameters, integrate
 export annual_mean, hemispheric_mean
 export Layout, backend, plot_avg, plot_raw, plot_seasonal
@@ -65,14 +65,11 @@ export run_example
 include("utilities.jl")
 include("infrastructure.jl")
 include("mizebm.jl")
+include("wimebm.jl")
 include("classicebm.jl")
 include("plot.jl")
 
-using .Utilities
-using .Infrastructure
-using .MIZEBM
-using .ClassicEBM
-using .Plot
+using .ClassicEBM, .Infrastructure, .MIZEBM, .Plot, .Utilities, .WIMEBM
 
 """
     run_example(model<:AbstractModel=MIZModel(); plotbackend::Symbol=:GLMakie)
