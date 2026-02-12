@@ -79,7 +79,7 @@ const classic_layout = Layout(
 
 const missingsym = gensym(:missing)
 
-default_layout(::MIZModel)::Layout{Symbol} = miz_layout
+default_layout(::Union{MIZModel,WIModel})::Layout{Symbol} = miz_layout
 default_layout(::ClassicModel)::Layout{Symbol} = classic_layout
 
 isloaded(::Val)::Bool = false

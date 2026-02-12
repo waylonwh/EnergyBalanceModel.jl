@@ -2,8 +2,7 @@ module Infrastructure # EnergyBalanceModel.
 
 using ..Utilities
 
-import EnergyBalanceModel
-import SparseArrays as SA, Statistics as Stats
+import InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats
 
 export AbstractModel, ClassicModel, MIZModel, WIModel
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
@@ -460,30 +459,39 @@ let cw::Float64 = 9.8
         :Fb => 4.0, # heat flux from ocean below (W m^-2)
         :k => 2.0, # sea ice thermal conductivity (W m^-2 K^-1)
         :Lf => 9.5, # sea ice latent heat of fusion (W yr m^-3)
-        :F => 0.0, # radiative forcing (W m^-2)
         :cg => 1e-3 * cw, # ghost layer heat capacity(W yr m^-2 K^-1)
         :tau => 1e-5 * cw, # ghost layer coupling timescale (yr)
         :Tm => 0.0, # mean temperature (C)
-        :m1 => 1.6e-6 * 31536000, # empirical constants of lateral melt
+        :m1 => 1.6e-6 * 31536000, # empirical constants of lateral melt (m y^-1 K^-1)
         :m2 => 1.36, # empirical constants of lateral melt
         :alpha => 0.66, # floe geometry constant, Ai = alpha * D^2
         :rl => 0.5, # lead region width (m)
         :Dmin => 1.0, # new pancake size (m)
-        :Dmax => 156, # largest floe length (m)
+        :Dmax => 500.0, # largest floe length (m)
         :hmin => 0.1, # new pancake thickness (m)
-        :kappa => 0.01 * 31536000 # floe welding parameter
+        :kappa => 0.01 * 31536000, # floe welding parameter (m^2 s^-1)
+        :Y => 5.5, # Effective Young's modulus (GPa)
+        :nu => 0.3, # Poisson's ratio
+        :rhow => 1025.0, # Water density (kg/m^3)
+        :g => 9.81, # Gravitational acceleration (m/s^2),
+        :Ec => 7.05e-5, # Breaking significant strain
+        :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
+        :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
+        :dmn => 20.0, # Chosen minmum floe diameter for the truncated power-law FSD in WIM (m)
     ) # Par
 end # let cw
 
 # parameters used in each model
-const miz_paramset = Set{Symbol}(
-    (
-        :D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :Tm, :m1, :m2, :alpha,
-        :rl, :Dmin, :Dmax, :hmin, :kappa, :cg, :tau
-    )
+const classicmodel_parvars = Set{Symbol}(
+    (:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :cg, :tau)
 )
-const classic_paramset = Set{Symbol}(
-    (:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :F, :cg, :tau)
+const mizmodel_parvars = push!(
+    deepcopy(classicmodel_parvars),
+    :Tm, :m1, :m2, :alpha, :rl, :Dmin, :Dmax, :hmin, :kappa
+)
+const wimodel_parvars = push!(
+    deepcopy(mizmodel_parvars),
+    :Y, :nu, :rhow, :g, :Ec, :Gamma, :gamma, :dmn
 )
 
 # Create a parameter dictionary from default values for a given Set
@@ -493,14 +501,13 @@ function default_parameters(paramset::Set{Symbol})::Par
 end # function get_defaultparameters
 
 """
-    default_parameters(::MIZModel) -> Par
-    default_parameters(::ClassicModel) -> Par
+    default_parameters(<:AbstractModel) -> Par
 
 Get default parameters for a given model.
 
 # Examples
 ```julia-repl
-julia> default_parameters(classic)
+julia> default_parameters(ClassicModel())
 Collection{Float64} with 16 entries:
   :a2 => 0.1
   :F  => 0.0
@@ -515,13 +522,15 @@ Collection{Float64} with 16 entries:
   ⋮   => ⋮
 ```
 """
-default_parameters(::MIZModel)::Par = default_parameters(miz_paramset)
-default_parameters(::ClassicModel)::Par = default_parameters(classic_paramset)
+function default_parameters end # stub
+for model in IU.subtypes(AbstractModel)
+    namelower = lowercase(split(string(model), '.')[end])
+    @eval default_parameters(::$model)::Par = default_parameters($(Symbol(namelower, "_parvars")))
+end # for model
 
 # calculate diffusion operator matrix
 @persistent(
     diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
-
     @inline function get_diffop(st::SpaceTime{identity})::SA.SparseMatrixCSC{Float64,Int64}
         if size(diffop) != (st.nx, st.nx) # recalculate diffusion operator
             dx = 1 / st.nx
@@ -539,7 +548,6 @@ default_parameters(::ClassicModel)::Par = default_parameters(classic_paramset)
 @persistent(
     diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
     xid::UInt = UInt(0),
-
     @inline function get_diffop(st::SpaceTime{F})::SA.SparseMatrixCSC{Float64,Int64} where F
         if xid != objectid(st.x) # recalculate diffusion operator
             x = [-st.x[1]; st.x; 2 - st.x[end]] # include ghost points

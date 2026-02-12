@@ -12,36 +12,40 @@ struct Spectrum
     freq::Vec
     period::Vec
     density::Vec
-
-    Spectrum(freq::Vec, density::Vec) =
-        length(freq) == length(density) ?
-            new(freq, 2pi ./ freq, density) :
-            throw(ArgumentError("Frequency and density vectors must be of the same length."))
 end # struct Spectrum
 
-function bretschneider(Hs::Float64, Tp::Float64, freq::Vec)::Spectrum
+Spectrum(freq::Vec, density::Vec) = length(freq) == length(density) ?
+    Spectrum(freq, 2pi ./ freq, density) :
+    throw(ArgumentError("Frequency and density vectors must be of the same length."))
+
+Base.copy(S::Spectrum)::Spectrum = Spectrum(S.freq, S.period, S.density)
+
+function bretschneider(
+    Hs::Float64, Tp::Float64, freq::Vec=collect(range(2pi/23.8, 2pi/2.5; step=7.5e-2))
+)::Spectrum
     T = 2pi ./ freq
     return Spectrum(freq, @. 1.25 * Hs^2 * T^5 / (8pi * Tp^4) * exp(-1.25(T/Tp)^4))
 end # function bretschneider
 
 function dispersion_relation(
-    k::Complex{Float64}, p::@NamedTuple{omega::Float64, gamma::Float64, h::Float64, par::Par}
+    k::Complex{Float64}, omega::Float64, gamma::Float64, h::Float64, par::Par
 )::Complex{Float64}
-    F = p.par.Y * p.h^3 / 12(1 - p.par.nu^2)
-    lhs = (F*k^4 + p.par.rho * (p.par.g - 0.9p.h*p.omega^2) - im*p.omega*p.gamma) * k
-    rhs = p.par.rho * p.omega^2
+    F = par.Y * h^3 / 12(1 - par.nu^2)
+    lhs = (F*k^4 + par.rhow * (par.g - 0.9h*omega^2) - im*omega*gamma) * k
+    rhs = par.rhow * omega^2
     return lhs - rhs
 end # function dispersion_relation
 
 function wavenumber_ice(omega::Float64, h::Float64, par::Par, gamma::Float64=0.0)::Complex{Float64}
+    prob = NlinSol.NonlinearProblem(
+        (k, _) -> dispersion_relation(k, omega, gamma, h, par), omega^2/par.g + 0im
+    )
     sol = NlinSol.solve(
-        NlinSol.NonlinearProblem(
-            dispersion_relation, omega^2/par.g + 0im, (; omega, gamma, h, par)
-        ),
-        NlinSol.NewtonRaphson(; autodiff=NlinSol.AutoFiniteDiff()),
-    ) # solve
+        prob, NlinSol.NewtonRaphson(; autodiff=NlinSol.AutoFiniteDiff());
+        abstol=1e-10
+    )
     if !NlinSol.SciMLBase.successful_retcode(sol)
-        @warn "Nonlinear solver did not converge. Result may be inaccurate."
+        @warn "Nonlinear solver did not converge when solving for wavenumber. Result may be inaccurate."
         @isdebugging() && @show (sol.retcode, sol.resid)
     end # if !
     return sol.u
@@ -53,7 +57,7 @@ function moment(S::Spectrum, n::Int; coeff::Function=one)::Float64
         Intgr.SimpsonsRule()
     )
     if !Intgr.SciMLBase.successful_retcode(int)
-        @warn "Integral did not converge. Result may be inaccurate."
+        @warn "Integral did not converge when computing moment. Result may be inaccurate."
         @isdebugging() && @show int.retcode
     end # if !
     return int.u
@@ -65,11 +69,16 @@ moment_strain(S::Spectrum, n::Int, h::Float64, par::Par)::Float64 = moment(
     S, n; coeff=(freq -> real(wavenumber_ice(freq, h, par, 0.0))^4 * h^2/4)
 )
 
-# TODO inplace version?
-function attenuate(S::Spectrum, L::Float64, h::Float64, phi::Float64, par::Par)::Spectrum
-    alpha = 2phi * imag.(wavenumber_ice.(S.freq, h, Ref(par), par.Gamma))
-    return Spectrum(S.freq, @.(S.density * exp(-alpha*L)))
-end # function attenuate
+@persistent(
+    alpha1::Vector{Float64}, input::UInt=0x0,
+    function attenuate(S::Spectrum, L::Float64, h::Float64, phi::Float64, par::Par)::Spectrum
+        if input != hash((S.freq, h, par))
+            alpha1 = imag.(wavenumber_ice.(S.freq, h, Ref(par), par.Gamma))
+            input = hash((S.freq, h, par))
+        end # if !=
+        return Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * L))
+    end # function attenuate
+) # @persistent
 
 wave_period(S::Spectrum)::Float64 = 2pi * sqrt(moment_elevation(S, 0) / moment_elevation(S, 2))
 
@@ -81,28 +90,73 @@ end # function wave_length
 
 wave_strain(S::Spectrum, h::Float64, par::Par)::Float64 = 2sqrt(moment_strain(S, 0, h, par))
 
+function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, par::Par)::Float64
+    sol = NlinSol.solve(
+        NlinSol.IntervalNonlinearProblem(
+            (l, _) -> wave_strain(attenuate(S, l, h, phi, par), h, par), (0.0, L)
+        )
+    )
+    if !NlinSol.SciMLBase.successful_retcode(sol)
+        @warn "Nonlinear solver did not converge when solving for fracture distance. Result may be inaccurate."
+        @isdebugging() && @show (sol.retcode, sol.resid)
+    end # if !
+    return sol.u
+end # function fracture_distance
+
 fsd(d::Float64, dmn::Float64, dmx::Float64, par::Par)::Float64 =
     dmn <= d <= dmx ?
         par.gamma * dmn^par.gamma * d^(-(par.gamma+1)) / (1 - (dmn/dmx)^par.gamma) :
         0.0
 
-function mean_size(dmn::Float64, dmx::Float64, par::Par)::Float64
+function mean_size(dmx::Float64, par::Par)::Float64
     sol = Intgr.solve(
-        Intgr.IntegralProblem((d, _) -> d * fsd(d, dmn, dmx, par), (dmn, dmx)),
+        Intgr.IntegralProblem((d, _) -> d * fsd(d, par.dmn, dmx, par), (par.dmn, dmx)),
         Intgr.QuadGKJL()
     )
     if !Intgr.SciMLBase.successful_retcode(sol)
-        @warn "Integral did not converge. Result may be inaccurate."
+        @warn "Integral did not converge when computing mean size. Result may be inaccurate."
         @isdebugging() && @show (sol.retcode, sol.resid)
     end # if !
     return sol.u
 end # function mean_size
 
+# Physical grid length at a given index in metres
+function grid_length(st::SpaceTime{F}, i::Int)::Float64 where F
+    if i == 1 # first grid
+        dtheta = 1/2 * (asin(st.x[1]) + asin(st.x[2]))
+    elseif i == st.nx # last grid
+        dtheta = pi/2 - 1/2 * (asin(st.x[st.nx-1]) + asin(st.x[st.nx]))
+    else # middle grids
+        dtheta = 1/2 * (asin(st.x[i+1]) - asin(st.x[i-1]))
+    end
+    return dtheta / (pi/2) * 1e7
+end # function grid_length
+
 function Infrastructure.step!(
     ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par; spectrum::Spectrum
 )::Collection{Vec} where F
     Infrastructure.step!(MIZModel(), t, f, vars, st, par) # thermodynamics
-    # edgeinx = findfirst(<(0), vars.Ei)
+    edgeinx = findfirst(>(0), vars.h)
+    isnothing(edgeinx) && return vars # no ice
+    xi = edgeinx # to retain scope of xi
+    local S = copy(spectrum) # protect original spectrum
+    local lastS::Spectrum # retain scope for partial breakup
+    for outer xi in edgeinx:st.nx
+        L = grid_length(st, xi)
+        lastS = copy(S)
+        S = attenuate(S, L, vars.h[xi], vars.phi[xi], par)
+        wave_strain(S, vars.h[xi], par) < par.Ec && break # wave can not break ice anymore
+        dmx = 1/2 * wave_length(S, vars.h[xi], par)
+        dbar = mean_size(dmx, par)
+        dbar < vars.D[xi] && (vars.D[xi] = dbar) # update floe size if it has been reduced by breaking # !
+    end # for outer xi
+    # partial breakup
+    L = grid_length(st, xi)
+    l = fracture_distance(lastS, vars.h[xi], vars.phi[xi], L, par)
+    S = attenuate(lastS, l, vars.h[xi], vars.phi[xi], par)
+    frontd = mean_size(1/2*wave_length(spectrum, vars.h[xi], par), par)
+    dbar = (l*frontd + (L-l)*vars.D[xi]) / L
+    dbar < vars.D[xi] && (vars.D[xi] = dbar) # !
     return vars
 end # function Infrastructure.step!
 

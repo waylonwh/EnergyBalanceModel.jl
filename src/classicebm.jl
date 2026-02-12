@@ -8,7 +8,6 @@ import LinearAlgebra as LA, SparseArrays as SA
     cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
     S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64,
     id::UInt = UInt(0),
-
     @inline function get_statics(st::SpaceTime{F}, par::Par)::@NamedTuple{
         cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
         S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64

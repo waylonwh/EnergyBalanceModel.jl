@@ -100,7 +100,7 @@ macro isdebugging()
         targets = split(dbg_env, ',')
         file = splitext(splitpath(string(__source__.file))[end])[1]
         mods = split(string(__module__), '.')
-        return file in targets || any(in(targets), mods)
+        return file in targets || !isempty(intersect(targets, mods))
     end # if isempty, else
 end # macro isdebugging
 
