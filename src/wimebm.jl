@@ -28,23 +28,27 @@ function bretschneider(
 end # function bretschneider
 
 function dispersion_relation(
-    k::Complex{Float64}, omega::Float64, gamma::Float64, h::Float64, par::Par
-)::Complex{Float64}
+    k::ComplexF64, omega::Float64, gamma::Float64, h::Float64, par::Par
+)::ComplexF64
     F = par.Y * h^3 / 12(1 - par.nu^2)
     lhs = (F*k^4 + par.rhow * (par.g - 0.9h*omega^2) - im*omega*gamma) * k
     rhs = par.rhow * omega^2
     return lhs - rhs
 end # function dispersion_relation
 
-function wavenumber_ice(omega::Float64, h::Float64, par::Par, gamma::Float64=0.0)::Complex{Float64}
+function wavenumber_ice(
+    omega::Float64, h::Float64, par::Par, gamma::Float64=0.0;
+    init::ComplexF64=omega^2/par.g + 0im
+)::ComplexF64
     prob = NlinSol.NonlinearProblem(
-        (k, _) -> dispersion_relation(k, omega, gamma, h, par), omega^2/par.g + 0im
+        (k, _) -> dispersion_relation(k, omega, gamma, h, par), init
     )
     sol = NlinSol.solve(
-        prob, NlinSol.NewtonRaphson(; autodiff=NlinSol.AutoFiniteDiff());
-        abstol=1e-10
+        prob, NlinSol.NewtonRaphson(; autodiff=NlinSol.AutoFiniteDiff()); abstol=1e-11
     )
-    if !NlinSol.SciMLBase.successful_retcode(sol)
+    if real(sol.u) < 0 && abs(init) < 100 # try another initial guess
+        sol = wavenumber_ice(omega, h, par, gamma; init=10init)
+    elseif !NlinSol.SciMLBase.successful_retcode(sol)
         @warn "Nonlinear solver did not converge when solving for wavenumber. Result may be inaccurate."
         @isdebugging() && @show (sol.retcode, sol.resid)
     end # if !

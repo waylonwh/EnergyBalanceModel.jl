@@ -52,7 +52,7 @@ mutable struct Progress
     end # function Progress
 end # struct Progress
 
-macro persistent(exprs...)
+macro persistent(exprs...) # -> Expr
     # syntax tree operations
     findexpr(_, ::Symbol)::Nothing = nothing
     function findexpr(expr::Expr, head::Symbol)::Union{Expr,Nothing}
@@ -92,7 +92,7 @@ macro persistent(exprs...)
 end # macro persistent
 
 # determine is the current file or module is being debugged
-macro isdebugging()
+macro isdebugging() # -> Bool
     dbg_env = get(ENV, "JULIA_DEBUG", "")
     if isempty(dbg_env)
         return false
