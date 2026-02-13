@@ -708,7 +708,7 @@ function integrate(
     if isfinite(updatefreq)
         progress::Progress = Progress(
             length(st.T), "Integrating", updatefreq;
-            infofeed=(t -> string("t = ", round(t, digits=2)))
+            infofeed=(t -> string("t = ", round(t; digits=2)))
         )
         update!(progress; feedargs=(0,))
     end # if isfinite

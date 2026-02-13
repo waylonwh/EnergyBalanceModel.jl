@@ -38,20 +38,26 @@ end # function dispersion_relation
 
 function wavenumber_ice(
     omega::Float64, h::Float64, par::Par, gamma::Float64=0.0;
-    init::ComplexF64=omega^2/par.g + 0im
+    init::ComplexF64=omega^2/par.g + 0im, abstol::Float64=1e-10
 )::ComplexF64
     prob = NlinSol.NonlinearProblem(
         (k, _) -> dispersion_relation(k, omega, gamma, h, par), init
     )
     sol = NlinSol.solve(
-        prob, NlinSol.NewtonRaphson(; autodiff=NlinSol.AutoFiniteDiff()); abstol=1e-11
+        prob, NlinSol.NewtonRaphson(; autodiff=NlinSol.AutoFiniteDiff()); abstol
     )
-    if real(sol.u) < 0 && abs(init) < 100 # try another initial guess
-        sol = wavenumber_ice(omega, h, par, gamma; init=10init)
-    elseif !NlinSol.SciMLBase.successful_retcode(sol)
-        @warn "Nonlinear solver did not converge when solving for wavenumber. Result may be inaccurate."
-        @isdebugging() && @show (sol.retcode, sol.resid)
-    end # if !
+    (real(sol.u) < 0 || imag(sol.u) < 0 || abs(sol.resid) > 1) && abs(init) < 100  &&
+        return wavenumber_ice(omega, h, par, gamma; init=10init) # try another initial guess
+    stalledsol = sol.retcode === NlinSol.ReturnCode.Stalled && abs(sol.resid) < 10abstol
+    NlinSol.SciMLBase.successful_retcode(sol) || stalledsol ||
+        @warn(
+            "Nonlinear solver did not converge when solving for wavenumber. Result may be inaccurate.",
+            sol.retcode, sol.resid
+        )
+    @isdebugging() && stalledsol && (
+        isdefined(Main, :stalled_kice_sols) ?
+            Main.stalled_kice_sols += 1 : @eval Main stalled_kice_sols = 1
+    )
     return sol.u
 end # function wavenumber_ice
 
@@ -101,8 +107,8 @@ function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, pa
         )
     )
     if !NlinSol.SciMLBase.successful_retcode(sol)
-        @warn "Nonlinear solver did not converge when solving for fracture distance. Result may be inaccurate."
-        @isdebugging() && @show (sol.retcode, sol.resid)
+        # @warn "Nonlinear solver did not converge when solving for fracture distance. Result may be inaccurate." # TODO
+        @isdebugging() && nothing #@show (sol.retcode, sol.resid)
     end # if !
     return sol.u
 end # function fracture_distance
@@ -149,6 +155,7 @@ function Infrastructure.step!(
         L = grid_length(st, xi)
         lastS = copy(S)
         S = attenuate(S, L, vars.h[xi], vars.phi[xi], par)
+        any(isinf, S.density) && @eval Main atten_input = ($lastS, $L, $(vars.h[xi]), $(vars.phi[xi]), $par)
         wave_strain(S, vars.h[xi], par) < par.Ec && break # wave can not break ice anymore
         dmx = 1/2 * wave_length(S, vars.h[xi], par)
         dbar = mean_size(dmx, par)

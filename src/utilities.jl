@@ -31,7 +31,7 @@ mutable struct Progress
     function Progress(
         total::Int,
         title::String="Progress", freq::Float64=1.0;
-        width::Int=50, infofeed::Function=(_ -> "")
+        width::Int=50, infofeed::Function=Returns("")
     )
         barwidth = width - (ndigits(total) * 2 + 1) - 2 - 5 - 3 # current/total [=> ] xx.x%
         return new(
@@ -189,7 +189,7 @@ function output!(prog::Progress, feedargs::Tuple=())::Nothing
     userstr::String = prog.infofeed(feedargs...)
     userstrvec = split(userstr, '\n')
     annotatedvec = map((s -> SS.styled" {note:$s}"), userstrvec)
-    foreach(s -> println(s), annotatedvec)
+    foreach(println, annotatedvec)
     prog.lines += length(annotatedvec) # !
     return nothing
 end # function output
