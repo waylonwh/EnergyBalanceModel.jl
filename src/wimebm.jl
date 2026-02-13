@@ -107,7 +107,7 @@ function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, pa
         )
     )
     if !NlinSol.SciMLBase.successful_retcode(sol)
-        # @warn "Nonlinear solver did not converge when solving for fracture distance. Result may be inaccurate." # TODO
+        @warn "Nonlinear solver did not converge when solving for fracture distance. Result may be inaccurate." # TODO get rid of this warning
         @isdebugging() && nothing #@show (sol.retcode, sol.resid)
     end # if !
     return sol.u
@@ -150,12 +150,11 @@ function Infrastructure.step!(
     isnothing(edgeinx) && return vars # no ice
     xi = edgeinx # to retain scope of xi
     local S = copy(spectrum) # protect original spectrum
-    local lastS::Spectrum # retain scope for partial breakup
+    local lastS = copy(S) # retain scope for partial breakup
     for outer xi in edgeinx:st.nx
         L = grid_length(st, xi)
         lastS = copy(S)
         S = attenuate(S, L, vars.h[xi], vars.phi[xi], par)
-        any(isinf, S.density) && @eval Main atten_input = ($lastS, $L, $(vars.h[xi]), $(vars.phi[xi]), $par)
         wave_strain(S, vars.h[xi], par) < par.Ec && break # wave can not break ice anymore
         dmx = 1/2 * wave_length(S, vars.h[xi], par)
         dbar = mean_size(dmx, par)
