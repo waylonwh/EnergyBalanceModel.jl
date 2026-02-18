@@ -155,7 +155,7 @@ struct SpaceTime{F}
     nx::Int # number of evenly spaced latitudinal gridboxes (equator to pole)
     u::StepRangeLen{Float64,Base.TwicePrecision{Float64},Base.TwicePrecision{Float64},Int64} # grid before scale
     x::Vec # grid
-    dur::Int # duration of simulation in years
+    dur::Int # duration of simulation in years # TODO
     nt::Int # number of timesteps per year (limited by numerical stability)
     dt::Float64 # timestep
     t::Vec # time vector in a year
@@ -217,11 +217,13 @@ Defines a constant climate forcing of value `base`.
 
     Forcing(base::Float64, peak::Float64, cool::Float64, step::Float64=0.1, tol::Float64)
 
-Defines a time varying climate forcing that first reaches steady state under the `base`
-forcing. It then gradually ramps up to `peak` at a rate no greater than `step` per year. A
-step is only applied if the change in annual hemispheric mean temperature is less than
-`tol`, so the system is assured to be close to steady state before warming. After reaching
-`peak`, the orcing ramps down to `cool` following the same step and tolerance criteria.
+Defines a time varying self adaptive climate forcing that first reaches a steady state
+under the `base` forcing. This takes at least 10 model years. It then gradually ramps up to
+`peak` at a rate no greater than `step` per year. A step is applied only if the change in
+the annual hemispheric mean temperature is less than `tol`, so the system is assured to be
+close to steady state before warming. After reaching `peak`, the forcing is maintained at
+`peak` for 10 years. The forcing then ramps down to `cool`, following the same step and
+tolerance criteria.
 
 `Forcing.f` stores the forcing value for each year of the simulation, and `Forcing.tip` is
 the year when the forcing pattern changes from ramping up to ramping down.
@@ -260,7 +262,7 @@ Base.show(io::IO, forcing::Forcing{false})::Nothing = print(
     "Forcing(", forcing.base, ", ", forcing.peak, ", ", forcing.cool, ')'
 )
 
-@enum ClimateChangeState Ready=0 Warming=1 Cooling=2 Done=3
+@enum ClimateChangeState Ready=0 Stablising=1 Warming=2 Waiting=3 Cooling=4 Done=5
 
 mutable struct ClimateChange
     forcing::Forcing{false}
@@ -626,11 +628,12 @@ function integrate(
     model::M, st::SpaceTime{F}, forcing::Forcing{true}, par::Par, init::Collection{Vec};
     lastonly::Bool=true, progress::Bool=true,
     spectrum#=::Union{Spectrum,Nothing}=#=nothing
-)::Solutions{M,F,C} where {M<:AbstractModel, F}
+)::Solutions{M,F} where {M<:AbstractModel, F}
     # warn if spectrum is provided for non-WIModel
     (M === WIModel || isnothing(spectrum)) ||
         @warn "Keyword argument `spectrum` is ignored as $M does not have a WIM component."
     # initialise
+    forcing.f = fill(forcing.base, st.dur) # fill in the forcing value for each year
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
     prog::Progress = Progress(
         st.T[last], "t", "Integrating";
@@ -651,7 +654,7 @@ function integrate(
     model::M, st::SpaceTime{F}, forcing::Forcing{false}, par::Par, init::Collection{Vec};
     lastonly::Bool=true, progress::Bool=true,
     spectrum#=::Union{Spectrum,Nothing}=#=nothing
-)::Solutions{M,F,C} where {M<:AbstractModel, F} # constant forcing
+)::Solutions{M,F} where {M<:AbstractModel, F} # constant forcing
     # warn if spectrum is provided for non-WIModel
     (M === WIModel || isnothing(spectrum)) ||
         @warn "Keyword argument `spectrum` is ignored as $M does not have a WIM component."

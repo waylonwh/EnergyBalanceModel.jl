@@ -2,7 +2,7 @@ module Utilities # EnergyBalanceModel.
 
 import Statistics as Stats, StyledStrings as SS
 
-export Progress, update!
+export Progress, start!, update!
 export @isdebugging, @persistent, iobuffer
 export condset, condset!, crossmean, zeroref!
 
