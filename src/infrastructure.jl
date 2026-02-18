@@ -692,8 +692,7 @@ parameters `par`, and initial conditions `init`. Results and inputs are stored i
 specified for `WIModel` to indicate the spectrum of the incident wave field.
 
 When `lastonly=true`, only the last year of the solution is stored for each time step,
-otherwise the full solution is stored. A progress bar is displayed and updated with
-frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
+otherwise the full solution is stored. A progress bar is displayed if `progress=true`.
 
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
