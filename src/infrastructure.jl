@@ -2,18 +2,27 @@ module Infrastructure # EnergyBalanceModel.
 
 using ..Utilities
 
-import EnergyBalanceModel
-import SparseArrays as SA, Statistics as Stats
+import InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats
 
-export AbstractModel, ClassicModel, MIZModel
-export Collection, Forcing, Solutions, SpaceTime, Vec
+export AbstractModel, ClassicModel, MIZModel, WIModel
+export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export classic_paramset, default_parameters, default_parval, miz_paramset
 export get_diffop
 export annual_mean, hemispheric_mean
 export integrate
 
-const Vec = Vector{Float64} # abbreviation for vector type used in model
+"""
+    Vec
 
+Alias for `Vector{Float64}` to represent model variables.
+"""
+const Vec = Vector{Float64}
+
+"""
+    AbstractModel
+
+Abstract type for the different energy balance models.
+"""
 abstract type AbstractModel end
 
 """
@@ -23,6 +32,14 @@ Singleton type representing the extended idealised climate model with a marginal
 (MIZ).
 """
 struct MIZModel <: AbstractModel end
+
+"""
+    WIModel <: AbstractModel
+
+Singleton type representing the wave ice interaction model, as an extension of the
+[`MIZModel`](@ref).
+"""
+struct WIModel <: AbstractModel end
 
 """
     ClassicModel <: AbstractModel
@@ -85,6 +102,15 @@ function Base.show(io::IO, ::MIME"text/plain", coll::Collection{V})::Nothing whe
     print(io, str)
     return nothing
 end # function Base.show
+
+"""
+    Par
+
+Alias for `Collection{Float64}` to represent model parameters.
+
+See also [`Collection`](@ref).
+"""
+const Par = Collection{Float64}
 
 """
     SpaceTime{F}(urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375)
@@ -224,7 +250,7 @@ julia> f(17.57)
 3.785
 ```
 """
-struct Forcing{F}
+struct Forcing{C}
     base::Float64 # base forcing
     peak::Float64 # peak forcing
     cool::Float64 # forcing after cooldown
@@ -338,7 +364,7 @@ An object to store model solutions. Type parameter `M` is the model type (`MIZMo
 - `spacetime::SpaceTime{F}`: space and time on which solutions are defined
 - `ts::Vec`: time vector for stored solutions
 - `forcing::Forcing{C}`: climate forcing
-- `parameters::Collection{Float64}`: model parameters
+- `parameters::Par`: model parameters
 - `initconds::Collection{Vec}`: initial conditions
 - `lastonly::Bool`: whether to store solutions for each time step only for the last year
 - `raw::Collection{Vector{Vec}}`: solutions for each time step
@@ -354,7 +380,7 @@ struct Solutions{M<:AbstractModel,F,C}
     spacetime::SpaceTime{F} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing{C} # climate forcing
-    parameters::Collection{Float64} # model parameters
+    parameters::Par # model parameters
     initconds::Collection{Vec} # initial conditions
     lastonly::Bool # store only last year of solution
     raw::Collection{Vector{Vec}} # solution storage
@@ -363,9 +389,8 @@ struct Solutions{M<:AbstractModel,F,C}
     } # seasonal peak and annual avg
 
     function Solutions{M}(
-        st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64},
-        init::Collection{Vec}, vars::Set{Symbol},
-        lastonly::Bool=true;
+        st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec},
+        vars::Set{Symbol}, lastonly::Bool=true
     ) where {M<:AbstractModel, F, C} # Solutions
         if lastonly
             dur_store = 1
@@ -420,7 +445,7 @@ end # function Base.show
 
 # default parameter values
 let cw::Float64 = 9.8
-    global const default_parval = Collection{Float64}(
+    global const default_parval = Par(
         :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
         :A => 193.0, # OLR when T = T_m (W m^-2)
         :B => 2.1, # OLR temperature dependence (W m^-2 K^-1)
@@ -434,47 +459,55 @@ let cw::Float64 = 9.8
         :Fb => 4.0, # heat flux from ocean below (W m^-2)
         :k => 2.0, # sea ice thermal conductivity (W m^-2 K^-1)
         :Lf => 9.5, # sea ice latent heat of fusion (W yr m^-3)
-        :F => 0.0, # radiative forcing (W m^-2)
         :cg => 1e-3 * cw, # ghost layer heat capacity(W yr m^-2 K^-1)
         :tau => 1e-5 * cw, # ghost layer coupling timescale (yr)
         :Tm => 0.0, # mean temperature (C)
-        :m1 => 1.6e-6 * 31536000, # empirical constants of lateral melt
+        :m1 => 1.6e-6 * 31536000, # empirical constants of lateral melt (m y^-1 K^-1)
         :m2 => 1.36, # empirical constants of lateral melt
         :alpha => 0.66, # floe geometry constant, Ai = alpha * D^2
         :rl => 0.5, # lead region width (m)
         :Dmin => 1.0, # new pancake size (m)
-        :Dmax => 156, # largest floe length (m)
+        :Dmax => 500.0, # largest floe length (m)
         :hmin => 0.1, # new pancake thickness (m)
-        :kappa => 0.01 * 31536000 # floe welding parameter
-    ) # Collection{Float64}
+        :kappa => 0.01 * 31536000, # floe welding parameter (m^2 s^-1)
+        :Y => 5.5, # Effective Young's modulus (GPa)
+        :nu => 0.3, # Poisson's ratio
+        :rhow => 1025.0, # Water density (kg/m^3)
+        :g => 9.81, # Gravitational acceleration (m/s^2),
+        :Ec => 7.05e-5, # Breaking significant strain
+        :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
+        :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
+        :dmn => 20.0, # Chosen minmum floe diameter for the truncated power-law FSD in WIM (m)
+    ) # Par
 end # let cw
 
 # parameters used in each model
-const miz_paramset = Set{Symbol}(
-    (
-        :D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :Tm, :m1, :m2, :alpha,
-        :rl, :Dmin, :Dmax, :hmin, :kappa, :cg, :tau
-    )
+const classicmodel_parvars = Set{Symbol}(
+    (:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :cg, :tau)
 )
-const classic_paramset = Set{Symbol}(
-    (:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :F, :cg, :tau)
+const mizmodel_parvars = push!(
+    deepcopy(classicmodel_parvars),
+    :Tm, :m1, :m2, :alpha, :rl, :Dmin, :Dmax, :hmin, :kappa
+)
+const wimodel_parvars = push!(
+    deepcopy(mizmodel_parvars),
+    :Y, :nu, :rhow, :g, :Ec, :Gamma, :gamma, :dmn
 )
 
 # Create a parameter dictionary from default values for a given Set
-function default_parameters(paramset::Set{Symbol})::Collection{Float64}
+function default_parameters(paramset::Set{Symbol})::Par
     setvec = collect(paramset)
-    return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
+    return Par(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultparameters
 
 """
-    default_parameters(::MIZModel) -> Collection{Float64}
-    default_parameters(::ClassicModel) -> Collection{Float64}
+    default_parameters(<:AbstractModel) -> Par
 
 Get default parameters for a given model.
 
 # Examples
 ```julia-repl
-julia> default_parameters(classic)
+julia> default_parameters(ClassicModel())
 Collection{Float64} with 16 entries:
   :a2 => 0.1
   :F  => 0.0
@@ -489,13 +522,15 @@ Collection{Float64} with 16 entries:
   ⋮   => ⋮
 ```
 """
-default_parameters(::MIZModel)::Collection{Float64} = default_parameters(miz_paramset)
-default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(classic_paramset)
+function default_parameters end # stub
+for model in IU.subtypes(AbstractModel)
+    namelower = lowercase(split(string(model), '.')[end])
+    @eval default_parameters(::$model)::Par = default_parameters($(Symbol(namelower, "_parvars")))
+end # for model
 
 # calculate diffusion operator matrix
 @persistent(
     diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
-
     @inline function get_diffop(st::SpaceTime{identity})::SA.SparseMatrixCSC{Float64,Int64}
         if size(diffop) != (st.nx, st.nx) # recalculate diffusion operator
             dx = 1 / st.nx
@@ -513,7 +548,6 @@ default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(cla
 @persistent(
     diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
     xid::UInt = UInt(0),
-
     @inline function get_diffop(st::SpaceTime{F})::SA.SparseMatrixCSC{Float64,Int64} where F
         if xid != objectid(st.x) # recalculate diffusion operator
             x = [-st.x[1]; st.x; 2 - st.x[end]] # include ghost points
@@ -646,13 +680,14 @@ function step! end
 function initialise end
 
 """
-    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
 `Solutions` object. Use `default_parameters` to get default model parameters. For
 `MIZModel`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D` and `:Tg`; for
-`ClassicModel`, `init` must contain `:E` and `:Tg`.
+`ClassicModel`, `init` must contain `:E` and `:Tg`. A keyword argument `spectrum` must be
+specified for `WIModel` to indicate the spectrum of the incident wave field.
 
 When `lastonly=true`, only the last year of the solution is stored for each time step,
 otherwise the full solution is stored. A progress bar is displayed and updated with
@@ -661,25 +696,27 @@ frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
-    model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0
+    model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
+    lastonly::Bool=true, updatefreq::Float64=1.0,
+    spectrum#=::Union{Spectrum,Nothing}=#=nothing
 )::Solutions{M,F,C} where {M<:AbstractModel, F, C}
+    # warn if spectrum is provided for non-WIModel
+    (M === WIModel || isnothing(spectrum)) ||
+        @warn "Keyword argument `spectrum` is ignored as $M does not have a WIM component."
     # initialise
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
-    if updatefreq < Inf
+    if isfinite(updatefreq)
         progress::Progress = Progress(
             length(st.T), "Integrating", updatefreq;
-            infofeed=(t -> string("t = ", round(t, digits=2)))
+            infofeed=(t -> string("t = ", round(t; digits=2)))
         )
         update!(progress; feedargs=(0,))
-    end # if <
+    end # if isfinite
     # loop over time
     for ti in eachindex(st.T)
-        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par)
+        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
         savesol!(sols, annusol, vars, ti)
-        if updatefreq < Inf
-            update!(progress; feedargs=(st.T[ti],))
-        end # if <
+        isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
     end # for ti
     return sols
 end # function integrate
