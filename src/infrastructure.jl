@@ -699,7 +699,7 @@ Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
     model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, progress::Bool=true
+    lastonly::Bool=true, progress::Bool=true,
     spectrum#=::Union{Spectrum,Nothing}=#=nothing
 )::Solutions{M,F,C} where {M<:AbstractModel, F, C}
     # warn if spectrum is provided for non-WIModel
