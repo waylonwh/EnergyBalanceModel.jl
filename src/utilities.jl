@@ -12,44 +12,54 @@ export condset, condset!, crossmean, zeroref!
     ctruncate(x, _...) = x
 end # if <
 
-# progress bar # TODO asynchronous progress bar
+# progress bar
 mutable struct Progress
-    title::String
-    total::Int
-    current::Int
-    last::Int # last printed progress
+    title::String # title of the progress
+    current::Float64 # current progress
+    stage::Int # current stage in path
+    path::Tuple{Vararg{Float64}} # eng points to reach at each stage
+    total::Float64 # absolute total progress to be made
+    digits::Int # number of digits to display in numbers
+    var::String # variable name for nums
     started::Float64 # start time
-    updated::Float64 # last external update time
-    freq::Float64 # external update frequency
-    infofeed::Function # Function(done::Bool, args...)::String
+    history::Vector{NTuple{3,Float64}} # [(time, percentage, absnum),]
+    infofeed::Function # Function(args...)::String
+    feedargs::Tuple # arguments for infofeed
     width::Int # number of characters wide, including progress texts
     barwidth::Int # width of the progress bar
+    numswidth::Int # width of the number display (current/total)
     lines::Int # lines printed
-    runners::Tuple{Vararg{Char}} # characters to use as runners
     updates::Int # number of external updates
+    timer::Timer # timer for automatic updates
 
     function Progress(
-        total::Int,
-        title::String="Progress", freq::Float64=1.0;
-        width::Int=50, infofeed::Function=Returns("")
+        path::Tuple{Vararg{Float64}}, var::String="", title::String="Progress";
+        infofeed::Function=Returns(""), digits::Union{Int,Nothing}=nothing, width::Int=60
     )
-        barwidth = width - (ndigits(total) * 2 + 1) - 2 - 5 - 3 # current/total [=> ] xx.x%
+        if isnothing(digits) # determine minor digits
+            if all(<=(1)∘abs, path) # 0.xxx
+                digits = 3
+            elseif any(>(1000)∘abs, path) # 1000.x
+                digits = 1
+            else # 1.xx 10.xx 100.xx
+                digits = 2
+            end # if all, elseif any, else
+        end # if isnothing
+        maxnumlen = maximum(length∘string∘Base.Fix1(trunc, Int), path) + digits
+        numswidth = maxnumlen * (length(path)+1) + length(path) + 2
+        barwidth = width - numswidth - 4 - 5 # (var = )0.00/ 1.23/10.00 /20.00 [=> ] xx.x%
+        isempty(var) || barwidth -= length(var) + 3
         return new(
-            title,
-            total,
-            -1, # current
-            0, # last
-            NaN, # started
-            NaN, # updated
-            freq,
-            infofeed,
-            width,
-            barwidth,
-            0, # lines
-            ('◓', '◑', '◒', '◐'), # runners
-            0 # updates
+            #     current↓  ↓stage          ↓total                      ↓started
+            title, path[1], 1, path, sum(abs, diff(path)), digits, var, NaN,
+            Vector{NTuple{3,Float64}}(), infofeed, (), width, barwidth, 0, 0,
+            #        ^history                      ^feedargs       lines^  ^updates
+            #         ↓timer
+            Timer(Returns(nothing), 0)
         ) # new
     end # function Progress
+
+    Progress(total::Float64, arg...; kwargs...) = Progress((0.0, total), arg...; kwargs...)
 end # struct Progress
 
 macro persistent(exprs...) # -> Expr
@@ -105,7 +115,44 @@ macro isdebugging() # -> Bool
 end # macro isdebugging
 
 # Progress operations
-function display_time(time::Float64)::String
+function speed!(prog::Progress)::Float64
+    length(prog.history) < 2 && return NaN # not enough history to determine speed
+    # keep history within 1% of current progress
+    while prog.history[2][2] < prog.history[end][2] - 0.01
+        deleteat!(prog.history, 1)
+    end # while <
+    return (prog.history[end][3] - prog.history[1][3]) / (prog.history[end][1] - prog.history[1][1])
+end # function speed!
+
+title_anstr(prog::Progress)::Base.AnnotatedString{String} =
+    SS.styled"{bold,region,warning:$(prog.title)}  {note:stage $(prog.stage) of $(length(prog.path)-1)}}"
+
+function nums_anstr(prog::Progress)::Base.AnnotatedString{String}
+    stagedone = prog.current == prog.path[prog.stage+1]
+    varstr = isempty(prog.var) ? "" : string(prog.var, " = ")
+    return SS.annotatedstring(
+        varstr, # var =
+        SS.styled"{note:$(join(round.(prog.path[1:prog.stage]; digits=prog.digits), '/'))/}", # previous stages
+        ' ', SS.styled"{$(stagedone ? :success : :info):$(prog.current)}", '/',
+        round(prog.path[prog.stage+1]; digits=prog.digits), ' ', # current stage
+        SS.styled"{note:$(join(round.(prog.path[prog.stage+2:end]; digits=prog.digits), '/'))}" # upcoming stages
+    ) # SS.annotatedstring
+end # function nums_anstr
+
+bar_anstr(::Val{true}, barwidth::Int, _)::Base.AnnotatedString{String} = SS.annotatedstring(
+    " [", SS.styled"{bold,success:$(repeat('━', prog.barwidth))}", "] ",
+)
+bar_anstr(::Val{false}, barwidth::Int, filling::Float64)::Base.AnnotatedString{String} = SS.annotatedstring(
+    " [", SS.styled"{info:{bold:$(repeat('━', filling))}❯}",
+    SS.styled"{note:$(repeat('─', max(barwidth-filling-1, 0)))}", "] ",
+)
+
+percentage_anstr(::Val{true}, _)::Base.AnnotatedString{String} = lpad(SS.styled"{success:100%}", 5)
+percentage_anstr(::Val{false}, percentage::Float64)::Base.AnnotatedString{String} = lpad(
+    SS.styled"{info:$(round(percentage*100; digits=1))%}", 5
+)
+
+function time_str(time::Float64)::String
     if isfinite(time) # remaining time unknown
         timeint = round(Int, time)
         min = fld(timeint, 60)
@@ -114,97 +161,104 @@ function display_time(time::Float64)::String
     else # !isfinite(time)
         return "-:--"
     end # if isfinite, else
-end # function display_time
+end # function time_str
 
-function output!(prog::Progress, feedargs::Tuple=())::Nothing
-    now = time()
-    isdone = false
-    # clear previous lines
-    while prog.lines > 0
-        print("\033[A\033[2K") # move up one line and clear the line
-        prog.lines -= 1 # !
-    end # while >
-    # title
-    println(SS.styled"{bold,region,warning:$(prog.title)}")
-    prog.lines += 1 # !
-    # get bar and info strings
-    elapsed = display_time(now-prog.started)
-    if prog.current >= prog.total # done
-        isdone = true
-        # progress
-        barstr = SS.annotatedstring(
-            # current/total
-            lpad(SS.styled"{success:$(prog.current)}", ndigits(prog.total) + 1), '/', prog.total,
-            # bar
-            " [", SS.styled"""{bold,success:$(repeat("━", prog.barwidth))}""", "] ",
-            # percentage
-            lpad(SS.styled"{success:$(round(Int, prog.current/prog.total*100))%}", 5)
-        ) # SS.annotatedstring
-        # time and speed
-        speed = prog.current / (now-prog.started)
-        togo = display_time((prog.total-prog.current) / speed)
-        prompt = SS.styled"{success:{bold:Done} ✓}"
-    else # in progress
-        # progress
-        done = floor(Int, prog.current / prog.total * prog.barwidth) # number of chars to fill =
-        barstr = SS.annotatedstring(
-            # current/total
-            lpad(SS.styled"{info:$(prog.current)}", ndigits(prog.total) + 1), '/', prog.total,
-            # bar
-            " [",
-            SS.styled"""{info:{bold:$(repeat("━", done))}❯}""",
-            SS.styled"""{note:$(repeat("─", max(prog.barwidth-done-1, 0)))}""",
-            "] ",
-            # percentage
-            lpad(SS.styled"{info:$(round(prog.current/prog.total*100; digits=1))%}", 5)
-        ) # SS.annotatedstring
-        # time and speed
-        speed = (prog.current-prog.last) / (now-prog.updated)
-        togo = display_time((prog.total-prog.current) / speed)
-        prompt = SS.styled"{info:{bold:In progress} $(prog.runners[mod1(prog.updates, length(prog.runners))])}"
-    end # if >=, else
-    prog.last = prog.current # !
-    prog.updated = now # !
-    prog.updates += 1 # !
+function speed_str(speed::Float64)::String
     if !isfinite(speed) # no speed info
-        spdstr = "-/sec"
+        return "-/sec"
     elseif speed>=1 || iszero(speed) # speed > 1
-        spdstr = string(round(speed; digits=2), "/sec")
+        return string(round(speed; digits=2), "/sec")
     else # speed < 1
-        spdstr = string(round(1/speed; digits=2), "sec/1")
+        return string(round(1/speed; digits=2), "sec/1")
     end # if >, elseif, else
-    timespeed = SS.annotatedstring(
-        ' ',
-        SS.styled"{$(isdone ? :success : :info):$elapsed}", "/", SS.styled"{note:-$togo}",
-        ' ',
-        spdstr
-    ) # SS.annotatedstring
-    infopaddings = repeat(" ", max(prog.width-length(timespeed)-length(prompt), 1))
-    # output bar and info
-    println(barstr)
+end # function speed_str
+
+function timespeed_anstr(
+    ::Val{true}, prog::Progress, now::Float64, _
+)::Base.AnnotatedString{String}
+    elapsed = now - prog.started
+    speed = prog.total / elapsed
+    return SS.annotatedstring(
+        SS.styled"{success:$(time_str(elapsed))}", '/', SS.styled"{note:-$(time_str(0.0))}",
+        ' ', speed_str(speed)
+    )
+end # function timespeed_anstr
+
+function timespeed_anstr(
+    ::Val{false}, prog::Progress, now::Float64, speed::Float64
+)::Base.AnnotatedString{String}
+    elapsed = now - prog.started
+    togo = (prog.total - prog.history[end][3]) / speed
+    return SS.annotatedstring(
+        SS.styled"{info:$(time_str(elapsed))}", '/', SS.styled"{note:-$(time_str(togo))}",
+        ' ', speed_str(speed)
+    )
+end # function timespeed_anstr
+
+prompt_anstr(::Val{true}, _)::Base.AnnotatedString{String} = SS.styled"{success:{bold:Done} ✓}"
+function prompt_anstr(::Val{false}, updates::Int)::Base.AnnotatedString{String}
+    runner = ('◓', '◑', '◒', '◐')[mod1(updates, 4)]
+    return SS.styled"{info:{bold:In progress} $runner}"
+end
+
+function output!(prog::Progress)::Nothing
+    now = time()
+    prog.updates += 1 # !
+    isdone = prog.stage == length(prog.path)-1 && prog.current == prog.path[end]
+    absprog = sum(abs, diff(prog.path[1:prog.stage])) + abs(prog.path[prog.stage] - prog.current)
+    percentage = prog.current / prog.total
+    filling = floor(Int, percentage * prog.barwidth)
+    push!(prog.history, (now, percentage, absprog)) # !
+    speed = speed!(prog)
+    # clear previous lines
+    print(repeat("\033[A\033[2K", prog.lines)) # move up and clear lines
+    prog.lines = 0 # !
+    # title
+    println(title_anstr(prog)) # [title]  Stage 1/1
     prog.lines += 1 # !
-    println(timespeed, infopaddings, prompt)
+    # prgress & bar
+    print(rpad(nums_anstr(prog), prog.numswidth)) # 0.00/ 1.00/2.00 /3.00
+    print(bar_anstr(Val(isdone), prog.barwidth, filling)) # [━❯─]
+    println(percentage_anstr(Val(isdone), percentage)) # 12.3% 100%
     prog.lines += 1 # !
-    # update user custom info
-    userstr::String = prog.infofeed(feedargs...)
+    # time, speed and prompt
+    timespeed = timespeed_anstr(Val(isdone), prog, now, speed) # 0:17/-0:26 1.23/sec
+    prompt = prompt_anstr(Val(isdone), prog.updates) # Done ✓  In progress ◓
+    paddings = repeat(' ', max(prog.width-length(timespeed)-length(prompt), 1))
+    println(timespeed, paddings, prompt)
+    prog.lines += 1 # !
+    # user custom info
+    userstr::String = prog.infofeed(prog.feedargs...)
     userstrvec = split(userstr, '\n')
-    annotatedvec = map((s -> SS.styled" {note:$s}"), userstrvec)
+    annotatedvec = map((s -> SS.styled"{note:$s}"), userstrvec)
     foreach(println, annotatedvec)
     prog.lines += length(annotatedvec) # !
     return nothing
 end # function output
 
-function update!(prog::Progress, current::Int=prog.current+1; feedargs::Tuple=())::Nothing
-    # internal update
+function start!(prog::Progress; feedargs::Tuple=())::Nothing
+    prog.started = time() # !
+    prog.feedargs = feedargs # !
+    prog.timer = Timer(_ -> output!(prog), 0; interval=0.2)
+    return nothing
+end # function start!
+
+function update!(
+    prog::Progress, current::Float64;
+    stage::Union{Int,Nothing}=nothing, feedargs::Tuple=()
+)::Nothing
     prog.current = current # !
-    # initialise if not started
-    if isnan(prog.started)
-        prog.started = time() # !
-        prog.updated = time() - prog.freq # force immediate external update # !
-    end # if isnan
-    # external update
-    ((time() - prog.updated >= prog.freq) || (prog.current == prog.total)) &&
-        output!(prog, feedargs)
+    prog.feedargs = feedargs # !
+    if !isnothing(stage)
+        prog.stage = stage # !
+    elseif current == prog.path[prog.stage+1] && prog.stage < length(prog.path)-1
+        prog.stage += 1 # !
+    end # if !, elseif &&
+    if stage == length(prog.path)-1 && current == prog.path[end]
+        isopen(prog.timer) || @warn "Progress output timer is closed before completion!"
+        close(prog.timer) # stop timer
+        output!(prog) # final output
+    end # if &&
     return nothing
 end # function update!
 

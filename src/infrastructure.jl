@@ -351,6 +351,8 @@ function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
     end # if <, elseif*3, else
 end # function (forcing::Forcing{false})
 
+function Progress(forcing::Forcing) end
+
 """
     Solutions{M,F,C}
 
@@ -697,7 +699,7 @@ Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
     model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0,
+    lastonly::Bool=true, progress::Bool=true
     spectrum#=::Union{Spectrum,Nothing}=#=nothing
 )::Solutions{M,F,C} where {M<:AbstractModel, F, C}
     # warn if spectrum is provided for non-WIModel
@@ -705,18 +707,18 @@ function integrate(
         @warn "Keyword argument `spectrum` is ignored as $M does not have a WIM component."
     # initialise
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
-    if isfinite(updatefreq)
-        progress::Progress = Progress(
+    if progress
+        prog::Progress = Progress(
             length(st.T), "Integrating", updatefreq;
             infofeed=(t -> string("t = ", round(t; digits=2)))
         )
-        update!(progress; feedargs=(0,))
+        start!(prog; feedargs=(0,))
     end # if isfinite
     # loop over time
     for ti in eachindex(st.T)
         step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
         savesol!(sols, annusol, vars, ti)
-        isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
+        progress && update!(prog; feedargs=(st.T[ti],))
     end # for ti
     return sols
 end # function integrate
