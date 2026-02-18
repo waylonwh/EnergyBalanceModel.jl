@@ -6,29 +6,27 @@ import LinearAlgebra as LA
 import SparseArrays as SA
 
 # solar radiation absorbed on ice and water
-solar(x::Vec, t::Float64, ::Val{:ice}, par::Collection{Float64})::Vec =
+solar(x::Vec, t::Float64, ::Val{:ice}, par::Par)::Vec =
     @. par.ai * (par.S0 - par.S1 * x * cos(2pi * t) - par.S2 * x^2)
-solar(x::Vec, t::Float64, ::Val{:water}, par::Collection{Float64})::Vec =
+solar(x::Vec, t::Float64, ::Val{:water}, par::Par)::Vec =
     @. (par.a0 - par.a2 * x^2) * (par.S0 - par.S1 * x * cos(2pi * t) - par.S2 * x^2)
-solar(x::Vec, t::Float64, surface::Symbol, par::Collection{Float64})::Vec = solar(x, t, Val(surface), par)
+solar(x::Vec, t::Float64, surface::Symbol, par::Par)::Vec = solar(x, t, Val(surface), par)
 
 # phi-weighted average
 weighted_avg(vi::Vec, vw::Vec, phi::Vec)::Vec = @. vi*phi + (1-phi)vw
 
 # temperatures
-water_temp(Ew::Vec, phi::Vec, par::Collection{Float64})::Vec = @. par.Tm + Ew / ((1-phi)par.cw)
-water_temp_nonan(Ew::Vec, phi::Vec, par::Collection{Float64})::Vec = condset!(
-    water_temp(Ew, phi, par), 0.0, isone, phi
-)
+water_temp(Ew::Vec, phi::Vec, par::Par)::Vec = @. par.Tm + Ew / ((1-phi)par.cw)
+water_temp_nonan(Ew::Vec, phi::Vec, par::Par)::Vec = condset!(water_temp(Ew, phi, par), 0.0, isone, phi)
 
-ice_temp(T0::Vec, par::Collection{Float64})::Vec = min.(T0, par.Tm)
+ice_temp(T0::Vec, par::Par)::Vec = min.(T0, par.Tm)
 
-solveT0(x::Vec, t::Float64, h::Vec, Tg::Vec, Tw::Vec, phi::Vec, f::Float64, par::Collection{Float64})::Vec =
+solveT0(x::Vec, t::Float64, h::Vec, Tg::Vec, Tw::Vec, phi::Vec, f::Float64, par::Par)::Vec =
     @. (par.Tm * (par.B + par.k/h) + par.cg/par.tau * (Tg - (1-phi)Tw) + $(solar(x, t, :ice, par)) - par.A + f) /
     (par.B + par.k/h + par.cg/par.tau * phi)
 
 function stepTg!(
-    t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64}
+    t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Par
 )::Vec where F
     frez = @. (T0<par.Tm) & (h>0)
     watr = .~frez
@@ -56,10 +54,10 @@ function stepTg!(
 end # function stepTg!
 
 # lateral melt rate
-wlat(Tw::Vec, par::Collection{Float64})::Vec = @. par.m1 * (Tw - par.Tm^par.m2)
+wlat(Tw::Vec, par::Par)::Vec = @. par.m1 * (Tw - par.Tm^par.m2)
 
 # concentration
-function concentration(Ei::Vec, h::Vec, par::Collection{Float64})::Vec
+function concentration(Ei::Vec, h::Vec, par::Par)::Vec
     phi = @. -Ei / (par.Lf * h)
     zeroref!(phi, h)
     condset!(phi, 1.0, >(1)) # correct concentration
@@ -67,27 +65,27 @@ function concentration(Ei::Vec, h::Vec, par::Collection{Float64})::Vec
 end # function concentration
 
 # floe number
-function num(D::Vec, phi::Vec, par::Collection{Float64})::Vec
+function num(D::Vec, phi::Vec, par::Par)::Vec
     n = @. phi / (par.alpha * D^2)
     zeroref!(n, D)
     return n
 end # function num
 
 # lead region area
-function area_lead(D::Vec, phi::Vec, n::Vec, par::Collection{Float64})::Vec
+function area_lead(D::Vec, phi::Vec, n::Vec, par::Par)::Vec
     ring = @. par.alpha * n * ((D + 2par.rl)^2 - D^2)
     return min.(ring, 1 .- phi)
 end # function area_lead
 
 # fluxes
 function vert_flux(
-    t::Float64, surface::Symbol, Tg::Vec, Tbar::Vec, f::Float64, st::SpaceTime{F}, par::Collection{Float64}
+    t::Float64, surface::Symbol, Tg::Vec, Tbar::Vec, f::Float64, st::SpaceTime{F}, par::Par
 )::Vec where F
     L = @. par.A + par.B * (Tbar - par.Tm) # OLR
     return solar(st.x, t, surface, par) .- L .+ par.cg/par.tau * (Tg-Tbar) .+ par.Fb .+ f
 end # function vert_flux
 
-function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Collection{Float64})::Vec
+function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Par)::Vec
     Flat = @. phi * h * par.Lf * $(wlat(Tw, par)) * pi / (par.alpha*D)
     zeroref!(Flat, D)
     return Flat
@@ -111,7 +109,7 @@ function split_psiEw(psiEw::Vec, phi::Vec, Al::Vec)::@NamedTuple{Ql::Vec, Qp::Ve
     return (; Ql, Qp)
 end # function split_psiEw
 
-dphip(Qp::Vec, par::Collection{Float64})::Vec = @. -Qp / (par.Lf * par.hmin) # change rate of φ due to pancakes
+dphip(Qp::Vec, par::Par)::Vec = @. -Qp / (par.Lf * par.hmin) # change rate of φ due to pancakes
 
 function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
     total = n .+ dn
@@ -124,8 +122,8 @@ end # function average
 # differential equations
 Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
 Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1-phi)Fvw - Flat
-h_t(Fvi::Vec, par::Collection{Float64})::Vec = -1/par.Lf * Fvi
-function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64})::Vec
+h_t(Fvi::Vec, par::Par)::Vec = -1/par.Lf * Fvi
+function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par)::Vec
     lat_melt = -pi / 2 * par.alpha * wlat(Tw, par)
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
@@ -134,15 +132,14 @@ function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64
 end # function D_t
 
 function Infrastructure.initialise(
-    ::MIZModel,
-    st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+    model::Union{MIZModel,WIModel}, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
     lastonly::Bool=true
-)::Tuple{Collection{Vec}, Solutions{MIZModel,F,C}, Solutions{MIZModel,F,C}} where {F, C}
+)::Tuple{Collection{Vec}, Solutions{typeof(model),F,C}, Solutions{typeof(model),F,C}} where {F, C}
     # create storages
     vars = deepcopy(init)
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
-    sols = Solutions{MIZModel}(st, forcing, par, init, solvars, lastonly) # final output
-    annusol = Solutions{MIZModel}(st, forcing, par, init, solvars, true) # for annual means (internal use)
+    sols = Solutions{typeof(model)}(st, forcing, par, init, solvars, lastonly) # final output
+    annusol = Solutions{typeof(model)}(st, forcing, par, init, solvars, true) # for annual means (internal use)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)
     vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
@@ -154,8 +151,7 @@ end # function initialise
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
 
 function Infrastructure.step!(
-    ::MIZModel,
-    t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Collection{Float64}
+    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par; _...
 )::Collection{Vec} where F
     # copy next variables to current
     vars.phi = copy(vars.nextphi)
