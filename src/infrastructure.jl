@@ -215,143 +215,69 @@ end # function Base.show
 
 Defines a constant climate forcing of value `base`.
 
-    Forcing(base::Float64, peak::Float64, cool::Float64, holdyrs::NTuple{2,Int}, rates::NTuple{2,Float64})
+    Forcing(base::Float64, peak::Float64, cool::Float64, step::Float64=0.1, tol::Float64)
 
-Defines a time-varying climate forcing that first holds at `base` for `holdyrs[1]` years,
-warms to `peak` at rate `rates[1]>0` per year, holds at `peak` for `holdyrs[2]` years, cools
-to `cool` at rate `rates[2]<0` per year, and then holds at `cool` thereafter. Warming and
-cooling times (`(peak-base)/rates[1]` and `(cool-peak)/rates[2]`) must be positive integers.
+Defines a time varying climate forcing that first reaches steady state under the `base`
+forcing. It then gradually ramps up to `peak` at a rate no greater than `step` per year. A
+step is only applied if the change in annual hemispheric mean temperature is less than
+`tol`, so the system is assured to be close to steady state before warming. After reaching
+`peak`, the orcing ramps down to `cool` following the same step and tolerance criteria.
 
-`Forcing` has a field `domain` which is a tuple of years at which the forcing pattern
-changes: `Forcing.domain=(1:0, 2:start of warming, 3:reach peak, 4:start of cooling,
-5:reach cool)`.
-
-A `Forcing` object can be called as a function to evaluate the forcing at a given time in
-years.
+`Forcing.f` stores the forcing value for each year of the simulation, and `Forcing.tip` is
+the year when the forcing pattern changes from ramping up to ramping down.
 
 # Examples
 ```julia-repl
-julia> Forcing(0.0)
-Forcing{true}(0.0) is constant:
-  F(t)=0.0, t∈[0,∞)
 
-julia> f = Forcing(0.0, 5.0, -5.0, (10, 10), (0.5, -0.5))
-Forcing{false} varies from 0.0 up to 5.0 and back to -5.0:
-  F(t)={  0.0            , t∈[ 0,10) (base)
-       {  0.0 + 0.5(t-10), t∈[10,20) (warming)
-       {  5.0            , t∈[20,30) (peak)
-       {  5.0 - 0.5(t-30), t∈[30,50) (cooling)
-       { -5.0            , t∈[50, ∞) (cool)
-
-julia> f.domain
-(0, 10, 20, 30, 50)
-
-julia> f(17.57)
-3.785
 ```
-"""
-struct Forcing{C}
+""" # TODO Examples for Forcing
+mutable struct Forcing{C}
     base::Float64 # base forcing
     peak::Float64 # peak forcing
     cool::Float64 # forcing after cooldown
-    holdyrs::NTuple{2,Int} # years to hold at (base, peak) forcing
-    rates::NTuple{2,Float64} # rates of change
-    domain::NTuple{5,Int} # years at which forcing pattern changes
+    rate::Float64 # rates of change
+    tol::Float64 # tolerance for change
+    f::Vec # log of forcing in each year
+    tip::Int # the year when the forcing pattern changes
 
     # constant forcing
     Forcing(base::Float64) = new{true}(
-        base, base, base, (0, 0), (0.0, 0.0), (0, 0, 0, 0, 0)
+        base, base, base, NaN, NaN, Vec(), 0, 0
     )
-    # warming/cooling forcing
-    function Forcing(
-        base::Float64, peak::Float64, cool::Float64, holdyrs::NTuple{2,Int}, rates::NTuple{2,Float64}
-    )
-        domainvec = zeros(Int, 5)
-        # hold at base
-        @. domainvec[2:5] += holdyrs[1]
-        # time to warm
-        warming = (peak-base) / rates[1]
-        rates[1]>0 && isinteger(warming) ?
-            @.(domainvec[3:5] += warming) :
-            throw(ArgumentError("Warming time must be positive integer. Got $warming y."))
-        # hold at peak
-        @. domainvec[4:5] += holdyrs[2]
-        # time to cool
-        cooling = (cool-peak) / rates[2]
-        rates[2]<0 && isinteger(cooling) ?
-            domainvec[5] += cooling :
-            throw(ArgumentError("Cooling time must be positive integer. Got $cooling y."))
-        return new{false}(base, peak, cool, holdyrs, rates, Tuple(domainvec))
-    end # function Forcing
+    # warming/cooling forcing # TODO determine tol
+    Forcing(base::Float64, peak::Float64, cool::Float64, rate::Float64=0.1, tol::Float64=0.1) =
+        new{false}(base, peak, cool, rate, tol, Vec(), 0, 0)
 end # struct Forcing{F}
 
 function Base.show(io::IO, forcing::Forcing{true})::Nothing
-    print(io, typeof(forcing), '(', forcing.base, ')')
+    print(io, "Forcing(", forcing.base, ')')
     printstyled(io, " (constant forcing)", color=:light_black)
     return nothing
 end # function Base.show
 
 Base.show(io::IO, forcing::Forcing{false})::Nothing = print(
     io,
-    typeof(forcing), '(', forcing.base, " ↗ ", forcing.peak, " ↘ ", forcing.cool, ')'
+    "Forcing(", forcing.base, ", ", forcing.peak, ", ", forcing.cool, ')'
 )
 
-function Base.show(io::IO, ::MIME"text/plain", forcing::Forcing{true})::Nothing
-    println(io, typeof(forcing), '(', forcing.base, ") is constant:")
-    print(io, "  F(t)=", forcing.base, ", t∈[0,∞)")
-    return nothing
-end # function Base.show
+@enum ClimateChangeState Ready=0 Warming=1 Cooling=2 Done=3
 
-function Base.show(io::IO, ::MIME"text/plain", forcing::Forcing{false})::Nothing
-    println(
-        io,
-        typeof(forcing), " varies from ", forcing.base, " up to ", forcing.peak, " and back to ", forcing.cool, ':'
-    )
-    head = "  F(t)={ "
-    headpad = lpad("{ ", length(head))
-    biaslen = maximum(length∘string, (forcing.base, forcing.peak, forcing.cool))
-    ratelen = maximum(length∘string∘abs, forcing.rates)
-    domainlen = maximum(length∘string, forcing.domain)
-    constline(field::Symbol)::String = string(
-        lpad(getfield(forcing, field), biaslen), " "^(ratelen+domainlen+7)
-    )
-    varyline(bias::Float64, rate::Float64, start::Int)::String = string(
-        lpad(bias, biaslen),
-        ' ', rate>0 ? '+' : '-', ' ',
-        lpad(abs(rate), ratelen), "(t-", lpad(start, domainlen), ")"
-    )
-    domainstr(i::Int, nextdomain::String=string(forcing.domain[i+1]))::String = string(
-        ", t∈[", lpad(forcing.domain[i], domainlen), ',', lpad(nextdomain, domainlen), ")"
-    )
-    print(io, head, constline(:base), domainstr(1))
-    printstyled(io, " (base)\n", color=:light_black)
-    print(io, headpad, varyline(forcing.base, forcing.rates[1], forcing.domain[2]), domainstr(2))
-    printstyled(io, " (warming)\n", color=:light_black)
-    print(io, headpad, constline(:peak), domainstr(3))
-    printstyled(io, " (peak)\n", color=:light_black)
-    print(io, headpad, varyline(forcing.peak, forcing.rates[2], forcing.domain[4]), domainstr(4))
-    printstyled(io, " (cooling)\n", color=:light_black)
-    print(io, headpad, constline(:cool), domainstr(5, "∞"))
-    printstyled(io, " (cool)", color=:light_black)
-end # function Base.show
+mutable struct ClimateChange
+    forcing::Forcing{false}
+    f::Float64
+    lastT::Float64
+    updated::Bool
 
-# evaluate forcing at time T (in years)
-(forcing::Forcing{true})(::Float64)::Float64 = forcing.base # constant forcing
-function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
-    if T < forcing.domain[2] # hold at base
-        return forcing.base
-    elseif T < forcing.domain[3] # warming
-        return forcing.base + forcing.rates[1] * (T-forcing.domain[2])
-    elseif T < forcing.domain[4] # hold at peak
-        return forcing.peak
-    elseif T < forcing.domain[5] # cooling
-        return forcing.peak + forcing.rates[2] * (T-forcing.domain[4])
-    else # hold at cool
-        return forcing.cool
-    end # if <, elseif*3, else
-end # function (forcing::Forcing{false})
+    ClimateChange(forcing::Forcing{false}) = new(forcing, forcing.base, NaN, false)
+end # struct ClimateChange
 
-function Progress(forcing::Forcing) end
+function Base.iterate(cc::ClimateChange)
+end # function Base.iterate
+
+function Base.iterate(cc::ClimateChange, state::ClimateChangeState)
+end # function Base.iterate
+
+Base.isdone(::ClimateChange, state::ClimateChangeState) = state === Done
 
 """
     Solutions{M,F,C}
@@ -682,7 +608,7 @@ function step! end
 function initialise end
 
 """
-    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+    integrate(model::M, st::SpaceTime{F}, forcing::Forcing{false}, par::Par, init::Collection{Vec}; lastonly::Bool=true, progress::Bool=true, spectrum::Union{Spectrum,Nothing}=nothing)::Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
@@ -697,27 +623,52 @@ otherwise the full solution is stored. A progress bar is displayed if `progress=
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
-    model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
+    model::M, st::SpaceTime{F}, forcing::Forcing{true}, par::Par, init::Collection{Vec};
     lastonly::Bool=true, progress::Bool=true,
     spectrum#=::Union{Spectrum,Nothing}=#=nothing
-)::Solutions{M,F,C} where {M<:AbstractModel, F, C}
+)::Solutions{M,F,C} where {M<:AbstractModel, F}
     # warn if spectrum is provided for non-WIModel
     (M === WIModel || isnothing(spectrum)) ||
         @warn "Keyword argument `spectrum` is ignored as $M does not have a WIM component."
     # initialise
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
-    if progress
-        prog::Progress = Progress(
-            length(st.T), "Integrating", updatefreq;
-            infofeed=(t -> string("t = ", round(t; digits=2)))
-        )
-        start!(prog; feedargs=(0,))
-    end # if isfinite
+    prog::Progress = Progress(
+        st.T[last], "t", "Integrating";
+        infofeed=((t, tps) -> string("t = ", round(t; digits=2), "  ", round(1/tps; digits=2), "itr/s"))
+    )
+    progress && start!(prog; feedargs=(0,))
     # loop over time
     for ti in eachindex(st.T)
-        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
+        vt = @timed step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
         savesol!(sols, annusol, vars, ti)
-        progress && update!(prog; feedargs=(st.T[ti],))
+        t = st.T[ti]
+        progress && update!(prog, t; feedargs=(t, vt.time))
+    end # for ti
+    return sols
+end # function integrate
+
+function integrate(
+    model::M, st::SpaceTime{F}, forcing::Forcing{false}, par::Par, init::Collection{Vec};
+    lastonly::Bool=true, progress::Bool=true,
+    spectrum#=::Union{Spectrum,Nothing}=#=nothing
+)::Solutions{M,F,C} where {M<:AbstractModel, F} # constant forcing
+    # warn if spectrum is provided for non-WIModel
+    (M === WIModel || isnothing(spectrum)) ||
+        @warn "Keyword argument `spectrum` is ignored as $M does not have a WIM component."
+    # initialise
+    vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
+    # reach base equilibrium
+    prog::Progress = Progress(
+        forcing.tol, forcing.tol, "|ΔT|", "Reaching Steady State";
+        infofeed=((t, tps) -> string("t = ", round(t; digits=2), "  ", round(1/tps; digits=2), "itr/s"))
+    )
+    progress && start!(prog; feedargs=(0,))
+    # loop over time
+    for ti in eachindex(st.T)
+        vt = @timed step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
+        savesol!(sols, annusol, vars, ti)
+        t = st.T[ti]
+        progress && update!(prog, t; feedargs=(t, vt.time))
     end # for ti
     return sols
 end # function integrate
