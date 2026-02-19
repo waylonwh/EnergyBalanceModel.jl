@@ -58,7 +58,7 @@ module EnergyBalanceModel
 export ClassicModel, MIZModel, WIModel
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export default_parameters, integrate
-export Spectrum, bretschneider
+export Spectrum, bretschneider, monochromatic
 export annual_mean, hemispheric_mean
 export Layout, backend, plot_avg, plot_raw, plot_seasonal
 export run_example
@@ -151,7 +151,7 @@ import PrecompileTools as PT
 
 PT.@setup_workload begin
     import InteractiveUtils as IU
-    ms = Tuple(M() for M in IU.subtypes(AbstractModel))
+    ms = Tuple(M() for M in IU.subtypes(AbstractModel) if M !== Infrastructure.ModelDiff)
     Fs = (identity, sin)
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
     spectrum = bretschneider(3.0, 9.5)

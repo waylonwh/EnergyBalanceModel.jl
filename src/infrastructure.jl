@@ -4,7 +4,7 @@ using ..Utilities
 
 import InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats
 
-export AbstractModel, ClassicModel, MIZModel, WIModel
+export AbstractModel, ClassicModel, MIZModel, WIModel, ModelDiff
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export classic_paramset, default_parameters, default_parval, miz_paramset
 export get_diffop
@@ -88,6 +88,8 @@ end # struct Collection
 (Base.setproperty!(coll::Collection{V}, key::Symbol, val::V)::Dict{Symbol,V}) where V =
     setindex!(getfield(coll, :dict), val, key)
 (Base.propertynames(coll::Collection{V})::Set{Symbol}) where V = Set(keys(getfield(coll, :dict)))
+(Base.iterate(coll::Collection{V})::Union{Tuple{Pair{Symbol,V},Int},Nothing}) where V =
+    iterate(getfield(coll, :dict))
 (Base.iterate(coll::Collection{V}, state::Int)::Union{Tuple{Pair{Symbol,V},Int},Nothing}) where V =
     iterate(getfield(coll, :dict), state)
 (Base.length(coll::Collection{V})::Int) where V = length(getfield(coll, :dict))
@@ -438,8 +440,8 @@ function Base.:-(
     vars = intersect(propertynames(sx.raw), propertynames(sy.raw))
     lastonly = sx.lastonly || sy.lastonly
     diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly)
-    xinx = findall(diffsol.ts, sx.spacetime.T)
-    yinx = findall(diffsol.ts, sy.spacetime.T)
+    xinx = findall(in(diffsol.ts), sx.spacetime.T)
+    yinx = findall(in(diffsol.ts), sy.spacetime.T)
     foreach(
         var -> setproperty!(
             diffsol.raw, var,

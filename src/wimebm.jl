@@ -6,7 +6,7 @@ import Integrals as Intgr
 import NonlinearSolve as NlinSol
 
 export Spectrum
-export bretschneider
+export bretschneider, monochromatic
 
 struct Spectrum
     freq::Vec
@@ -26,6 +26,10 @@ function bretschneider(
     T = 2pi ./ freq
     return Spectrum(freq, @. 1.25 * Hs^2 * T^5 / (8pi * Tp^4) * exp(-1.25(T/Tp)^4))
 end # function bretschneider
+
+monochromatic(A::Float64, T::Float64)::Spectrum = Spectrum(
+    [2pi/T-1e-2, 2pi/T, 2pi/T+1e-2], [0.0, A^2/2, 0.0]
+)
 
 function dispersion_relation(
     k::ComplexF64, omega::Float64, gamma::Float64, h::Float64, par::Par

@@ -68,7 +68,7 @@ const miz_layout = Layout(
     AbstractString[
         Mk.L"$E_w$ ($\mathrm{J\,m^{-2}}$)"  Mk.L"$E_i$ ($\mathrm{J\,m^{-2}}$)"       Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"
         Mk.L"$T_w$ ($\mathrm{\degree\!C}$)" Mk.L"$T_i$ ($\mathrm{\degree\!C}$)"      Mk.L"$T$ ($\mathrm{\degree\!C}$)"
-        Mk.L"$\bar{h}$ ($\mathrm{m}$)"      Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)" Mk.L"\varphi"
+        Mk.L"$\bar{h}$ ($\mathrm{m}$)"      Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)" Mk.L"$\varphi$"
     ]
 )
 
@@ -81,6 +81,15 @@ const missingsym = gensym(:missing)
 
 default_layout(::Union{MIZModel,WIModel})::Layout{Symbol} = miz_layout
 default_layout(::ClassicModel)::Layout{Symbol} = classic_layout
+function default_layout(::ModelDiff{A,B})::Layout{Symbol} where {A<:AbstractModel, B<:AbstractModel}
+    layout = (A === ClassicModel || B === ClassicModel) ?
+        deepcopy(classic_layout) : deepcopy(miz_layout)
+    foreach(
+        i -> layout.titles[i] = Mk.latexstring(raw"$\Delta ", layout.titles[i][2:end]),
+        eachindex(layout.titles)
+    )
+    return layout
+end # function default_layout
 
 isloaded(::Val)::Bool = false
 
@@ -118,9 +127,11 @@ backend(bcknd::Symbol)::Module = init_backend(Val(bcknd))
 
 function contourf_tiles(
     t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}};
-    xlim::Union{NTuple{2,Real},Nothing}=nothing, tlim::Union{NTuple{2,Real}, Nothing}=nothing, inspect::Bool=false
+    xlim::Union{NTuple{2,Real},Nothing}=nothing,
+    tlim::Union{NTuple{2,Real}, Nothing}=nothing, diff::Bool=false, inspect::Bool=false,
+    figsize::Tuple{Int,Int}=(600, 400)
 )::Mk.Figure where T<:Real
-    fig = Mk.Figure()
+    fig = Mk.Figure(size=figsize)
     for row in axes(layout, 1), col in axes(layout, 2)
         subfig = fig[row,col]
         ax = Mk.Axis(
@@ -133,8 +144,9 @@ function contourf_tiles(
         if all(isnan, layout[row,col].var)
             @warn "All data are NaN at position ($row, $col). Skipping plot."
         else # valid data
-            colorscale = occursin(Mk.L"\bar{\mathcal{D}}", layout[row,col].title) ? log : identity
-            ctr = Mk.contourf!(ax, t, x, layout[row,col].var; colorscale)
+            # colorscale = occursin(Mk.L"\bar{\mathcal{D}}", layout[row,col].title) ? log : identity # TODO
+            levels = diff ? maximum(abs, filter(!isnan, layout[row,col].var)) * range(-1, 1; length=21) : 21
+            ctr = Mk.contourf!(ax, t, x, layout[row,col].var; levels)
             Mk.Colorbar(subfig[1,2], ctr)
         end # if all; else
     end # for row, col
@@ -194,6 +206,7 @@ backend `bcknd`. The function will find available backend if not specified.
 - `tsizelim::Int`: Maximum number of time steps to plot.
 - `xrange::NTuple{2,Real}`: Range of spatial points to plot.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
+- `figsize::Tuple{Int,Int}`: Size of the figure in pixels.
 """
 function plot_raw(
     sols::Solutions{M,F,C},
@@ -203,7 +216,8 @@ function plot_raw(
     xsizelim::Int=1000,
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
-    trange::NTuple{2,Real}=extrema(sols.ts)
+    trange::NTuple{2,Real}=extrema(sols.ts),
+    figsize::Tuple{Int,Int}=(600, 400)
 )::Mk.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, sols.ts, xsizelim, tsizelim, xrange, trange)
@@ -213,7 +227,7 @@ function plot_raw(
     end # for inx
     return contourf_tiles(
         sols.ts[tinx], sols.spacetime.x[xinx], datatitle;
-        xlim=xrange, tlim=trange, inspect
+        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff, figsize
     )
 end # function plot_raw
 
@@ -234,6 +248,7 @@ Makie backend `bcknd`. The function will find available backend if not specified
 - `tsizelim::Int`: Maximum number of time steps to plot.
 - `xrange::NTuple{2,Real}`: Range of spatial points to plot.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
+- `figsize::Tuple{Int,Int}`: Size of the figure in pixels.
 """
 function plot_avg(
     sols::Solutions{M,F,C},
@@ -243,7 +258,8 @@ function plot_avg(
     xsizelim::Int=1000,
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
-    trange::NTuple{2,Real}=(1, sols.spacetime.dur)
+    trange::NTuple{2,Real}=(1, sols.spacetime.dur),
+    figsize::Tuple{Int,Int}=(600, 400)
 )::Mk.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, collect(1:sols.spacetime.dur), xsizelim, tsizelim, xrange, trange)
@@ -253,7 +269,7 @@ function plot_avg(
     end # for inx
     return contourf_tiles(
         collect(tinx), sols.spacetime.x[xinx], datatitle;
-        xlim=xrange, tlim=trange, inspect
+        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff, figsize
     )
 end # function plot_avg
 
