@@ -125,6 +125,20 @@ GLMakie
 backend()::Union{Module,Missing} = Mk.current_backend()
 backend(bcknd::Symbol)::Module = init_backend(Val(bcknd))
 
+# (isD::Val{[Bool]}, diff::Val{[Bool]}, data::Matrix{Float64}) -> (levels, extendlow, extendhigh)
+get_levels(::Val{false}, ::Val{false}, _)::Tuple{Int,Nothing,Nothing,Mk.Automatic} = (
+    21, nothing, nothing, Mk.automatic
+) # normal
+get_levels(::Val{true}, ::Val{false}, _)::Tuple{Vector{Float64},Nothing,Symbol,Vector{Int}} = (
+    [collect(0:0.5:10); 50; 100], nothing, :auto, [0, 10, 50, 100]
+) # D sol
+get_levels(::Val{true}, ::Val{true}, _)::Tuple{Vector{Float64},Symbol,Symbol,Vector{Int}} = (
+    [-100; -50; collect(-10:10); 50; 100], :auto, :auto, [-100, -50, -10, 10, 50, 100]
+) # D diff
+get_levels(::Val{false}, ::Val{true}, data::Matrix{Float64})::Tuple{Vector{Float64},Nothing,Nothing,Mk.Automatic} = (
+    maximum(abs, filter(!isnan, data))*range(-1, 1; length=21), nothing, nothing, Mk.automatic
+)
+
 function contourf_tiles(
     t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}};
     xlim::Union{NTuple{2,Real},Nothing}=nothing,
@@ -144,10 +158,10 @@ function contourf_tiles(
         if all(isnan, layout[row,col].var)
             @warn "All data are NaN at position ($row, $col). Skipping plot."
         else # valid data
-            # colorscale = occursin(Mk.L"\bar{\mathcal{D}}", layout[row,col].title) ? log : identity # TODO
-            levels = diff ? maximum(abs, filter(!isnan, layout[row,col].var)) * range(-1, 1; length=21) : 21
-            ctr = Mk.contourf!(ax, t, x, layout[row,col].var; levels)
-            Mk.Colorbar(subfig[1,2], ctr)
+            isD = occursin(raw"\mathcal{D}", layout[row,col].title)
+            levels, extendlow, extendhigh, ticks = get_levels(Val(isD), Val(diff), layout[row,col].var)
+            ctr = Mk.contourf!(ax, t, x, layout[row,col].var; levels, extendlow, extendhigh)
+            Mk.Colorbar(subfig[1,2], ctr; ticks)
         end # if all; else
     end # for row, col
     inspect && Mk.DataInspector(fig)
