@@ -40,7 +40,7 @@ function wavenumber_ice(
     omega::Float64, h::Float64, par::Par, gamma::Float64=0.0;
     init::ComplexF64=omega^2/par.g + 0im, abstol::Float64=1e-10
 )::ComplexF64
-    prob = NlinSol.NonlinearProblem(
+    prob = NlinSol.NonlinearProblem{false}(
         (k, _) -> dispersion_relation(k, omega, gamma, h, par), init
     )
     sol = NlinSol.solve(
@@ -55,8 +55,8 @@ function wavenumber_ice(
             sol.retcode, sol.resid
         )
     @isdebugging() && stalledsol && (
-        isdefined(Main, :stalled_kice_sols) ?
-            Main.stalled_kice_sols += 1 : @eval Main stalled_kice_sols = 1
+        isdefined(@__MODULE__, :_stalled_kice_sols) ?
+            (global _stalled_kice_sols += 1) : (global _stalled_kice_sols = 1)
     )
     return sol.u
 end # function wavenumber_ice
@@ -66,10 +66,8 @@ function moment(S::Spectrum, n::Int; coeff::Function=one)::Float64
         Intgr.SampledIntegralProblem(@.(coeff(S.freq) * S.freq^n * S.density), S.freq),
         Intgr.SimpsonsRule()
     )
-    if !Intgr.SciMLBase.successful_retcode(int)
-        @warn "Integral did not converge when computing moment. Result may be inaccurate."
-        @isdebugging() && @show int.retcode
-    end # if !
+    Intgr.SciMLBase.successful_retcode(int) ||
+        @warn "Integral did not converge when computing moment. Result may be inaccurate." int.retcode
     return int.u
 end # function moment
 
@@ -103,13 +101,14 @@ wave_strain(S::Spectrum, h::Float64, par::Par)::Float64 = 2sqrt(moment_strain(S,
 function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, par::Par)::Float64
     sol = NlinSol.solve(
         NlinSol.IntervalNonlinearProblem(
-            (l, _) -> wave_strain(attenuate(S, l, h, phi, par), h, par), (0.0, L)
+            (l, _) -> wave_strain(attenuate(S, l, h, phi, par), h, par) - par.Ec, (0.0, L)
         )
     )
-    if !NlinSol.SciMLBase.successful_retcode(sol)
-        @warn "Nonlinear solver did not converge when solving for fracture distance. Result may be inaccurate." # TODO get rid of this warning
-        @isdebugging() && nothing #@show (sol.retcode, sol.resid)
-    end # if !
+    NlinSol.SciMLBase.successful_retcode(sol) ||
+        @warn(
+            "Nonlinear solver did not converge when solving for fracture distance. Result may be inaccurate.",
+            sol.retcode, sol.resid
+        )
     return sol.u
 end # function fracture_distance
 
@@ -123,10 +122,11 @@ function mean_size(dmx::Float64, par::Par)::Float64
         Intgr.IntegralProblem((d, _) -> d * fsd(d, par.dmn, dmx, par), (par.dmn, dmx)),
         Intgr.QuadGKJL()
     )
-    if !Intgr.SciMLBase.successful_retcode(sol)
-        @warn "Integral did not converge when computing mean size. Result may be inaccurate."
-        @isdebugging() && @show (sol.retcode, sol.resid)
-    end # if !
+    Intgr.SciMLBase.successful_retcode(sol) ||
+        @warn(
+            "Integral did not converge when computing mean size. Result may be inaccurate.",
+            sol.retcode, sol.resid
+        )
     return sol.u
 end # function mean_size
 
@@ -142,31 +142,38 @@ function grid_length(st::SpaceTime{F}, i::Int)::Float64 where F
     return dtheta / (pi/2) * 1e7
 end # function grid_length
 
+function updateD!(newD::Float64, xi::Int, vars::Collection{Vec}, l::Float64=1.0, L::Float64=1.0)::Nothing
+    dbar = (l*newD + (L-l)*vars.D[xi]) / L # weighted average based on fracture distance
+    dbar < vars.D[xi] && (vars.D[xi] = dbar) # update floe size if it has been reduced by breaking # !
+    return nothing
+end # function updateD!
+
 function Infrastructure.step!(
     ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par; spectrum::Spectrum
 )::Collection{Vec} where F
     Infrastructure.step!(MIZModel(), t, f, vars, st, par) # thermodynamics
     edgeinx = findfirst(>(0), vars.h)
-    isnothing(edgeinx) && return vars # no ice
-    xi = edgeinx # to retain scope of xi
-    local S = copy(spectrum) # protect original spectrum
-    local lastS = copy(S) # retain scope for partial breakup
-    for outer xi in edgeinx:st.nx
+    (isnothing(edgeinx) || wave_strain(spectrum, vars.h[edgeinx], par) < par.Ec) &&
+        return vars # no ice or no breakup
+    S = copy(spectrum) # protect input spectrum
+    for xi in edgeinx:st.nx
         L = grid_length(st, xi)
-        lastS = copy(S)
-        S = attenuate(S, L, vars.h[xi], vars.phi[xi], par)
-        wave_strain(S, vars.h[xi], par) < par.Ec && break # wave can not break ice anymore
-        dmx = 1/2 * wave_length(S, vars.h[xi], par)
-        dbar = mean_size(dmx, par)
-        dbar < vars.D[xi] && (vars.D[xi] = dbar) # update floe size if it has been reduced by breaking # !
-    end # for outer xi
-    # partial breakup
-    L = grid_length(st, xi)
-    l = fracture_distance(lastS, vars.h[xi], vars.phi[xi], L, par)
-    S = attenuate(lastS, l, vars.h[xi], vars.phi[xi], par)
-    frontd = mean_size(1/2*wave_length(spectrum, vars.h[xi], par), par)
-    dbar = (l*frontd + (L-l)*vars.D[xi]) / L
-    dbar < vars.D[xi] && (vars.D[xi] = dbar) # !
+        attedS = attenuate(S, L, vars.h[xi], vars.phi[xi], par)
+        if wave_strain(attedS, vars.h[xi], par) > par.Ec # full breakup
+            dmx = 1/2 * wave_length(attedS, vars.h[xi], par)
+            dbar = mean_size(dmx, par)
+            updateD!(dbar, xi, vars)
+            S = copy(attedS) # update spectrum for next grid cell
+        elseif wave_strain(S, vars.h[xi], par) < par.Ec # no breakup for higher h
+            break
+        else # partial breakup
+            l = fracture_distance(S, vars.h[xi], vars.phi[xi], L, par)
+            attedS = attenuate(S, l, vars.h[xi], vars.phi[xi], par)
+            frontd = mean_size(1/2*wave_length(spectrum, vars.h[xi], par), par)
+            updateD!(frontd, xi, vars, l, L)
+            break # last cell to break
+        end # if >, else
+    end # for xi
     return vars
 end # function Infrastructure.step!
 

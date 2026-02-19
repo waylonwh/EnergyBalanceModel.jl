@@ -443,6 +443,23 @@ function Base.show(io::IO, ::MIME"text/plain", sols::Solutions{<:AbstractModel,F
     return nothing
 end # function Base.show
 
+# Base.diff(sol1::Solutions{M,F,C}, sol2::Solutions{M,F,C}) where {M<:AbstractModel, F, C} = begin # TODO
+#     if sol1.spacetime != sol2.spacetime
+#         throw(ArgumentError("Cannot compute difference of solutions defined on different space-time grids."))
+#     elseif sol1.forcing != sol2.forcing
+#         throw(ArgumentError("Cannot compute difference of solutions with different forcings."))
+#     elseif sol1.parameters != sol2.parameters
+#         throw(ArgumentError("Cannot compute difference of solutions with different parameters."))
+#     elseif sol1.initconds != sol2.initconds
+#         throw(ArgumentError("Cannot compute difference of solutions with different initial conditions."))
+#     else # all match, compute difference
+#         diffraw = Collection{Vector{Vec}}()
+#         foreach((var -> setproperty!(diffraw, var, Vector{Vec}(undef, length(sol1.ts)))), propertynames(sol1.raw))
+#         foreach((var -> @. getproperty(diffraw, var) = getproperty(sol1.raw, var) - getproperty(sol2.raw, var)), propertynames(sol1.raw))
+#         return Solutions{M}(sol1.spacetime, sol1.forcing, sol1.parameters, sol1.initconds, propertynames(diffraw), sol1.lastonly)
+#     end # if mismatch; else
+# end # function Base.diff
+
 # default parameter values
 let cw::Float64 = 9.8
     global const default_parval = Par(
@@ -707,7 +724,7 @@ function integrate(
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
     if isfinite(updatefreq)
         progress::Progress = Progress(
-            length(st.T), "Integrating", updatefreq;
+            length(st.T), string("Integrating ", M), updatefreq;
             infofeed=(t -> string("t = ", round(t; digits=2)))
         )
         update!(progress; feedargs=(0,))

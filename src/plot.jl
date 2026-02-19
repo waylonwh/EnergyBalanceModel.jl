@@ -133,7 +133,8 @@ function contourf_tiles(
         if all(isnan, layout[row,col].var)
             @warn "All data are NaN at position ($row, $col). Skipping plot."
         else # valid data
-            ctr = Mk.contourf!(ax, t, x, layout[row,col].var; extendlow=:auto, extendhigh=:auto)
+            colorscale = occursin(Mk.L"\bar{\mathcal{D}}", layout[row,col].title) ? log : identity
+            ctr = Mk.contourf!(ax, t, x, layout[row,col].var; colorscale)
             Mk.Colorbar(subfig[1,2], ctr)
         end # if all; else
     end # for row, col
