@@ -188,7 +188,7 @@ function output!(prog::Progress, feedargs::Tuple=())::Nothing
     # update user custom info
     userstr::String = prog.infofeed(feedargs...)
     userstrvec = split(userstr, '\n')
-    annotatedvec = map((s -> SS.styled" {note:$s}"), userstrvec)
+    annotatedvec = map(s -> SS.styled" {note:$s}", userstrvec)
     foreach(println, annotatedvec)
     prog.lines += length(annotatedvec) # !
     return nothing
@@ -220,7 +220,7 @@ iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
 @inline function crossmean(vecvec::Vector{Vector{T}})::Vector{T} where T<:Number
     @boundscheck all(length.(vecvec) .== length(vecvec[1])) ||
         throw(BoundsError("All vectors must be the same length."))
-    return map((xi -> Stats.mean(vecvec[ti][xi] for ti in eachindex(vecvec))), eachindex(vecvec[1]))
+    return map(xi -> Stats.mean(vecvec[ti][xi] for ti in eachindex(vecvec)), eachindex(vecvec[1]))
 end # function crossmean
 
 # conditional copy in place

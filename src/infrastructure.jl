@@ -49,6 +49,13 @@ Singleton type representing the classic idealised climate model by Wagner & Eise
 struct ClassicModel <: AbstractModel end
 
 """
+    ModelDiff{B<:AbstractModel, S<:AbstractModel} <: AbstractModel
+
+A type representing the difference (S-B) between two models `B` and `S`.
+"""
+struct ModelDiff{B<:AbstractModel, S<:AbstractModel} <: AbstractModel end
+
+"""
     Collection{V}(args...)
 
 A simple wrapper around `Dict{Symbol,V}` to allow dot syntax access to fields. Use syntax
@@ -72,36 +79,27 @@ julia> parameters.F = 0.0; parameters.F
 0.0
 ```
 """
-struct Collection{V}
+struct Collection{V} <: AbstractDict{Symbol,V}
     dict::Dict{Symbol,V}
-    Collection{V}(args...) where V = new(Dict{Symbol,V}(args...))
+    Collection{V}(args...) where V = new{V}(Dict{Symbol,V}(args...))
 end # struct Collection
 
 (Base.getproperty(coll::Collection{V}, key::Symbol)::V) where V = getindex(getfield(coll, :dict), key)
 (Base.setproperty!(coll::Collection{V}, key::Symbol, val::V)::Dict{Symbol,V}) where V =
     setindex!(getfield(coll, :dict), val, key)
 (Base.propertynames(coll::Collection{V})::Set{Symbol}) where V = Set(keys(getfield(coll, :dict)))
+(Base.iterate(coll::Collection{V}, state::Int)::Union{Tuple{Pair{Symbol,V},Int},Nothing}) where V =
+    iterate(getfield(coll, :dict), state)
 (Base.length(coll::Collection{V})::Int) where V = length(getfield(coll, :dict))
 (Base.hash(coll::Collection{V}, h::UInt)::UInt) where V = hash(getfield(coll, :dict), h)
 
-function Base.show(io::IO, coll::Collection{V})::Nothing where V
-    buffer = iobuffer(io)
-    show(buffer, getfield(coll, :dict))
-    str = replace(String(take!(buffer.io)), "Dict"=>string(typeof(coll)))
-    print(io, str)
-    return nothing
-end # function Base.show
-
-function Base.show(io::IO, ::MIME"text/plain", coll::Collection{V})::Nothing where V
-    buffer = iobuffer(io)
-    show(buffer, MIME("text/plain"), getfield(coll, :dict))
-    str = replace(
-        String(take!(buffer.io)),
-        string(typeof(getfield(coll, :dict))) => string(typeof(coll))
-    )
-    print(io, str)
-    return nothing
-end # function Base.show
+function uniqueunion(ca::Collection{A}, cb::Collection{B}) where {A, B}
+    vtype = typejoin(A, B)
+    vtype === Any && (vtype = Union{A, B})
+    overlap = intersect(propertynames(ca), propertynames(cb))
+    return all(key -> getproperty(ca, key) === getproperty(cb, key), overlap) ?
+        Collection{vtype}() : Collection{vtype}(union(ca, cb))
+end # function uniqueunion
 
 """
     Par
@@ -401,10 +399,10 @@ struct Solutions{M<:AbstractModel,F,C}
         end # if lastonly, else
         # construct raw solution storage
         solraw = Collection{Vector{Vec}}()
-        foreach((var -> setproperty!(solraw, var, Vector{Vec}(undef, length(ts)))), vars)
+        foreach(var -> setproperty!(solraw, var, Vector{Vec}(undef, length(ts))), vars)
         # construct seasonal solution storage template
         seasonaltemp = Collection{Vector{Vec}}()
-        foreach((var -> setproperty!(seasonaltemp, var, Vector{Vec}(undef, st.dur))), vars)
+        foreach(var -> setproperty!(seasonaltemp, var, Vector{Vec}(undef, st.dur)), vars)
         return new{M,F,C}(
             st, # spacetime
             ts,
@@ -421,6 +419,42 @@ struct Solutions{M<:AbstractModel,F,C}
         ) # new
     end # function Solutions
 end # struct Solutions{M,F,C}
+
+function Base.:-(
+    sx::Solutions{X,F,true}, sy::Solutions{Y,F,true}
+)::Solutions{ModelDiff{X,Y},F,true} where {X<:AbstractModel, Y<:AbstractModel, F}
+    (sx.spacetime.x == sy.spacetime.x && sx.spacetime.t == sy.spacetime.t) ||
+        throw(
+            ArgumentError(
+                "Cannot compute difference of solutions defined on different space-time grids."
+            )
+        ) # throw
+    st = sx.spacetime.dur == sy.spacetime.dur ?
+        sx.spacetime :
+        SpaceTime{F}(sx.spacetime.x, sx.spacetime.t, max(sx.spacetime.dur, sy.spacetime.dur))
+    forcing = Forcing(sx.forcing.base - sy.forcing.base)
+    par = uniqueunion(sx.parameters, sy.parameters)
+    init = uniqueunion(sx.initconds, sy.initconds)
+    vars = intersect(propertynames(sx.raw), propertynames(sy.raw))
+    lastonly = sx.lastonly || sy.lastonly
+    diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly)
+    xinx = findall(diffsol.ts, sx.spacetime.T)
+    yinx = findall(diffsol.ts, sy.spacetime.T)
+    foreach(
+        var -> setproperty!(
+            diffsol.raw, var,
+            getproperty(sx.raw, var)[xinx] .- getproperty(sy.raw, var)[yinx]
+        ),
+        vars
+    ) # foreach
+    for season in 1:3, var in vars
+        setproperty!(
+            diffsol.annual[season], var,
+            getproperty(sx.annual[season], var)[1:st.dur] .- getproperty(sy.annual[season], var)[1:st.dur]
+        )
+    end # for season, var
+    return diffsol
+end # function Base.diff
 
 (Base.show(io::IO, sols::Solutions{<:AbstractModel,F,C})::Nothing) where {F, C} = print(
     io,
@@ -442,23 +476,6 @@ function Base.show(io::IO, ::MIME"text/plain", sols::Solutions{<:AbstractModel,F
     print(io, "  with forcing ", repr(sols.forcing))
     return nothing
 end # function Base.show
-
-# Base.diff(sol1::Solutions{M,F,C}, sol2::Solutions{M,F,C}) where {M<:AbstractModel, F, C} = begin # TODO
-#     if sol1.spacetime != sol2.spacetime
-#         throw(ArgumentError("Cannot compute difference of solutions defined on different space-time grids."))
-#     elseif sol1.forcing != sol2.forcing
-#         throw(ArgumentError("Cannot compute difference of solutions with different forcings."))
-#     elseif sol1.parameters != sol2.parameters
-#         throw(ArgumentError("Cannot compute difference of solutions with different parameters."))
-#     elseif sol1.initconds != sol2.initconds
-#         throw(ArgumentError("Cannot compute difference of solutions with different initial conditions."))
-#     else # all match, compute difference
-#         diffraw = Collection{Vector{Vec}}()
-#         foreach((var -> setproperty!(diffraw, var, Vector{Vec}(undef, length(sol1.ts)))), propertynames(sol1.raw))
-#         foreach((var -> @. getproperty(diffraw, var) = getproperty(sol1.raw, var) - getproperty(sol2.raw, var)), propertynames(sol1.raw))
-#         return Solutions{M}(sol1.spacetime, sol1.forcing, sol1.parameters, sol1.initconds, propertynames(diffraw), sol1.lastonly)
-#     end # if mismatch; else
-# end # function Base.diff
 
 # default parameter values
 let cw::Float64 = 9.8
@@ -600,7 +617,7 @@ function annual_mean(annusol::Solutions{<:AbstractModel,F,C})::Collection{Vec} w
     # calculate annual mean for each variable except temperatures
     means = Collection{Vec}()
     foreach(
-        (var -> setproperty!(means, var, crossmean(getproperty(annusol.raw, var)))),
+        var -> setproperty!(means, var, crossmean(getproperty(annusol.raw, var))),
         propertynames(annusol.raw)
     )
     return means
@@ -632,36 +649,36 @@ function savesol!(
     ti = mod1(tinx, sols.spacetime.nt) # index of time in the year
     # save raw data to annual
     foreach(
-        (var -> getproperty(annusol.raw, var)[ti] = getproperty(varscp, var)), # !
+        var -> getproperty(annusol.raw, var)[ti] = getproperty(varscp, var), # !
         propertynames(annusol.raw)
     )
     # save raw data
     if !sols.lastonly # save all raw data
         foreach(
-            (var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), tinx)),
+            var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), tinx),
             propertynames(sols.raw)
         )
     elseif tinx > length(sols.spacetime.T) - sols.spacetime.nt # save the raw data of the last year
         foreach(
-            (var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti)),
+            var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti),
             propertynames(sols.raw)
         )
     end # if !, elseif
     # save seasonal data
     if ti == sols.spacetime.winter.inx
         foreach(
-            (var -> setindex!(getproperty(sols.annual.winter, var), getproperty(varscp, var), year)),
+            var -> setindex!(getproperty(sols.annual.winter, var), getproperty(varscp, var), year),
             propertynames(sols.annual.winter)
         )
     elseif ti == sols.spacetime.summer.inx
         foreach(
-            (var -> setindex!(getproperty(sols.annual.summer, var), getproperty(varscp, var), year)),
+            var -> setindex!(getproperty(sols.annual.summer, var), getproperty(varscp, var), year),
             propertynames(sols.annual.summer)
         )
     elseif ti == sols.spacetime.nt # calculate annual average
         means = annual_mean(annusol)
         foreach(
-            (var -> setindex!(getproperty(sols.annual.avg, var), getproperty(means, var), year)),
+            var -> setindex!(getproperty(sols.annual.avg, var), getproperty(means, var), year),
             propertynames(sols.annual.avg)
         )
     end # if ==, elseif*2
