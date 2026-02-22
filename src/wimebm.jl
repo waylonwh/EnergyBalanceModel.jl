@@ -123,7 +123,7 @@ fsd(d::Float64, dmn::Float64, dmx::Float64, par::Par)::Float64 =
 
 function mean_size(dmx::Float64, par::Par)::Float64
     sol = Intgr.solve(
-        Intgr.IntegralProblem((d, _) -> d * fsd(d, par.Dmin, dmx, par), (par.Dmin, dmx)),
+        Intgr.IntegralProblem((d, _) -> d * fsd(d, par.dmn, dmx, par), (par.dmn, dmx)),
         Intgr.QuadGKJL()
     )
     Intgr.SciMLBase.successful_retcode(sol) ||
