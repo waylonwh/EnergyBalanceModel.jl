@@ -262,24 +262,34 @@ Base.show(io::IO, forcing::Forcing{false})::Nothing = print(
     "Forcing(", forcing.base, ", ", forcing.peak, ", ", forcing.cool, ')'
 )
 
-@enum ClimateChangeState Ready=0 Stablising=1 Warming=2 Waiting=3 Cooling=4 Done=5
+@enum ClimateChangeStage CCS_Stablising CCS_Warming CCS_Waiting CCS_Cooling CCS_End
+
+struct ClimateChangeState{S}
+    year::Int
+    stable::Bool
+end
 
 mutable struct ClimateChange
     forcing::Forcing{false}
     f::Float64
-    lastT::Float64
-    updated::Bool
+    avgT::Float64
+    history::NTuple{2,Float64} # (previous, last)
 
-    ClimateChange(forcing::Forcing{false}) = new(forcing, forcing.base, NaN, false)
+    ClimateChange(forcing::Forcing{false}) = new(forcing, forcing.base, NaN, (NaN, NaN))
 end # struct ClimateChange
 
-function Base.iterate(cc::ClimateChange)
+Base.iterate(cc::ClimateChange)::Tuple{Float64,ClimateChangeState{CCS_Stablising}} = (
+    cc.f, ClimateChangeState{CCS_Stablising}(0, false)
+)
+
+function Base.iterate(
+    cc::ClimateChange, state::ClimateChangeState{S}
+)::Tuple{Float64,ClimateChangeState{T}} where {S, T}
+    isnan(cc.avgT) && throw(ArgumentError("ClimateChange.avgT must be updated before iterating."))
+    # TODO pick up from here
 end # function Base.iterate
 
-function Base.iterate(cc::ClimateChange, state::ClimateChangeState)
-end # function Base.iterate
-
-Base.isdone(::ClimateChange, state::ClimateChangeState) = state === Done
+Base.isdone(::ClimateChange, state::ClimateChangeState) = state.stage === CCS_End
 
 """
     Solutions{M,F,C}
