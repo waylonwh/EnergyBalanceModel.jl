@@ -26,8 +26,8 @@ solveT0(x::Vec, t::Float64, h::Vec, Tg::Vec, Tw::Vec, phi::Vec, f::Float64, par:
     (par.B + par.k/h + par.cg/par.tau * phi)
 
 function stepTg!(
-    t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Par
-)::Vec where F
+    t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Par
+)::Vec
     frez = @. (T0<par.Tm) & (h>0)
     watr = .~frez
     diagphi = SA.spdiagm(phi)
@@ -79,8 +79,8 @@ end # function area_lead
 
 # fluxes
 function vert_flux(
-    t::Float64, surface::Symbol, Tg::Vec, Tbar::Vec, f::Float64, st::SpaceTime{F}, par::Par
-)::Vec where F
+    t::Float64, surface::Symbol, Tg::Vec, Tbar::Vec, f::Float64, st::SpaceTime, par::Par
+)::Vec
     L = @. par.A + par.B * (Tbar - par.Tm) # OLR
     return solar(st.x, t, surface, par) .- L .+ par.cg/par.tau * (Tg-Tbar) .+ par.Fb .+ f
 end # function vert_flux
@@ -131,15 +131,15 @@ function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par)::Vec
     return @. lat_melt + lat_grow + weld
 end # function D_t
 
-function Infrastructure.initialise(
-    model::Union{MIZModel,WIModel}, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
+function Infrastructure.initialise( # TODO
+    ::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true
-)::Tuple{Collection{Vec}, Solutions{typeof(model),F,C}, Solutions{typeof(model),F,C}} where {F, C}
+) where M<:Union{MIZModel,WIModel} # -> Tuple{Collection{Vec}, Solutions{M,F,V}, Solutions{M,F,V}}
     # create storages
     vars = deepcopy(init)
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
-    sols = Solutions{typeof(model)}(st, forcing, par, init, solvars, lastonly) # final output
-    annusol = Solutions{typeof(model)}(st, forcing, par, init, solvars, true) # for annual means (internal use)
+    sols = Solutions{M}(st, forcing, par, init, solvars, lastonly) # final output
+    annusol = Solutions{M}(st, forcing, par, init, solvars, true) # for annual means (internal use)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)
     vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
@@ -151,8 +151,8 @@ end # function initialise
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
 
 function Infrastructure.step!(
-    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par; _...
-)::Collection{Vec} where F
+    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; _
+)::Collection{Vec}
     # copy next variables to current
     vars.phi = copy(vars.nextphi)
     vars.Tw = copy(vars.nextTw)

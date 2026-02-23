@@ -8,10 +8,10 @@ import LinearAlgebra as LA, SparseArrays as SA
     cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
     S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64,
     id::UInt = UInt(0),
-    @inline function get_statics(st::SpaceTime{F}, par::Par)::@NamedTuple{
+    @inline function get_statics(st::SpaceTime, par::Par)::@NamedTuple{
         cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
         S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64
-    } where F
+    }
         if id != hash((st, par)) # recompute only if st or par changed
             # Difinitions for implicit scheme for Tg
             cg_tau = par.cg / par.tau
@@ -33,10 +33,10 @@ import LinearAlgebra as LA, SparseArrays as SA
     end # function get_statics
 ) # @persistent
 
-function Infrastructure.initialise(
-    ::ClassicModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
+function Infrastructure.initialise( # TODO
+    ::ClassicModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true
-)::Tuple{Collection{Vec},Solutions{ClassicModel,F,C},Solutions{ClassicModel,F,C}} where {F, C}
+) # -> Tuple{Collection{Vec},Solutions{ClassicModel,F,V},Solutions{ClassicModel,F,V}}
     vars = deepcopy(init)
     solvars = Set{Symbol}((:E, :T, :h))
     sols = Solutions{ClassicModel}(st, forcing, par, init, solvars, lastonly)
@@ -45,8 +45,8 @@ function Infrastructure.initialise(
 end # function initialise
 
 function Infrastructure.step!(
-    ::ClassicModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par; _...
-)::Collection{Vec} where F
+    ::ClassicModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; _
+)::Collection{Vec}
     # get static variables
     stat = get_statics(st, par)
     # get time index

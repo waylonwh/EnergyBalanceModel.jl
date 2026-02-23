@@ -121,8 +121,7 @@ function speed!(prog::Progress)::Float64
     return (prog.history[end][3] - prog.history[1][3]) / (prog.history[end][1] - prog.history[1][1])
 end # function speed!
 
-title_anstr(prog::Progress)::Base.AnnotatedString{String} =
-    SS.styled"{bold,region,warning:$(prog.title)}"
+title_anstr(prog::Progress)::Base.AnnotatedString{String} = SS.styled"{bold,region,warning:$(prog.title)}"
 
 function nums_anstr(prog::Progress, isdone::Bool)::Base.AnnotatedString{String}
     varstr = isempty(prog.var) ? "" : string(prog.var, " = ")
@@ -189,6 +188,7 @@ function timespeed_anstr(
 end # function timespeed_anstr
 
 prompt_anstr(::Val{true}, _)::Base.AnnotatedString{String} = SS.styled"{success:{bold:Done} ✓}"
+
 function prompt_anstr(::Val{false}, updates::Int)::Base.AnnotatedString{String}
     runner = ('◓', '◑', '◒', '◐')[mod1(updates, 4)]
     return SS.styled"{info:{bold:In progress} $runner}"
@@ -230,7 +230,7 @@ end # function output
 function start!(prog::Progress; feedargs::Tuple=())::Nothing
     prog.started = time() # !
     prog.feedargs = feedargs # !
-    prog.timer = Timer(_ -> output!(prog), 0; interval=0.2)
+    prog.timer = Timer(_ -> output!(prog), 0; interval=0.2, spawn=true)
     return nothing
 end # function start!
 
@@ -257,22 +257,21 @@ iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
 )
 
 # mean across vectors
-@inline function crossmean(vecvec::Vector{Vector{T}})::Vector{T} where T<:Number
+@inline function crossmean(vecvec::Vector{Vector{<:Number}}) # -> Vector{<:Number}
     @boundscheck all(length.(vecvec) .== length(vecvec[1])) ||
         throw(BoundsError("All vectors must be the same length."))
     return map((xi -> Stats.mean(vecvec[ti][xi] for ti in eachindex(vecvec))), eachindex(vecvec[1]))
 end # function crossmean
 
 # conditional copy in place
-@inline function condset!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where T
+@inline function condset!(to::Vector, from, cond::Function, ref::Vector=to) # -> Vector{T}
     @. to[cond(ref)] = from # !
     return to
 end # function condset!
 
-@inline (condset(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T}) where T =
-    condset!(copy(to), from, cond, ref)
+@inline condset(to::Vector, from, cond::Function, ref::Vector=to) = condset!(copy(to), from, cond, ref) # -> Vector{T}
 
 # replace entries with zeros in ref with zeros in place in v
-@inline (zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where T<:Number = condset!(v, zero(T), iszero, ref)
+@inline (zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where T = condset!(v, zero(T), iszero, ref)
 
 end # module Utilities

@@ -25,7 +25,7 @@ import EnergyBalanceModel.Infrastructure:AbstractModel
     mizsols = integrate(MIZModel(), st, forcing, mizpar, mizinit; updatefreq=Inf)
     clasols = integrate(ClassicModel(), st, forcing, clapar, clainit; updatefreq=Inf)
 
-    (lastyear_hemi_mean(sols::Solutions{<:AbstractModel,F,C}, var::Symbol)::Float64) where {F, C} =
+    lastyear_hemi_mean(sols::Solutions, var::Symbol)::Float64 =
         hemispheric_mean(getproperty(sols.annual.avg, var)[sols.spacetime.dur], sols.spacetime.x)
 
     @test lastyear_hemi_mean(mizsols, :T) ≈ lastyear_hemi_mean(clasols, :T) atol=1

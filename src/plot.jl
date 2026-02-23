@@ -31,11 +31,10 @@ struct Layout{T}
 end # struct Layout
 Layout(vars::Matrix{T}, titles::Matrix{AbstractString}=string.(vars)) where T = Layout{T}(vars, titles)
 
-(Base.size(layout::Layout{T})::NTuple{2,Int}) where T = size(layout.vars)
-(Base.axes(layout::Layout{T}, dim::Int)::Base.OneTo{Int64}) where T = axes(layout.vars, dim)
-(Base.eachindex(layout::Layout{T})::Base.OneTo{Int64}) where T = eachindex(layout.vars)
-(Base.getindex(layout::Layout{T}, inx...)::@NamedTuple{var::T, title::AbstractString}) where T =
-    (var=layout.vars[inx...], title=layout.titles[inx...])
+Base.size(layout::Layout)::NTuple{2,Int} = size(layout.vars)
+Base.axes(layout::Layout, dim::Int)::Base.OneTo{Int64} = axes(layout.vars, dim)
+Base.eachindex(layout::Layout)::Base.OneTo{Int64} = eachindex(layout.vars)
+Base.getindex(layout::Layout, inx...) = (var=layout.vars[inx...], title=layout.titles[inx...]) # -> @NamedTuple{var::T, title::AbstractString}
 
 struct BackendError <: Exception
     requested::Symbol
@@ -117,9 +116,9 @@ backend()::Union{Module,Missing} = Mk.current_backend()
 backend(bcknd::Symbol)::Module = init_backend(Val(bcknd))
 
 function contourf_tiles(
-    t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}};
+    t::Vector{<:Real}, x::Vec, layout::Layout{Matrix{Float64}};
     xlim::Union{NTuple{2,Real},Nothing}=nothing, tlim::Union{NTuple{2,Real}, Nothing}=nothing, inspect::Bool=false
-)::Mk.Figure where T<:Real
+)::Mk.Figure
     fig = Mk.Figure()
     for row in axes(layout, 1), col in axes(layout, 2)
         subfig = fig[row,col]
@@ -144,10 +143,10 @@ end # function contourf_tiles
 matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
 
 function limit_size(
-    xs::Vec, ts::Vector{T},
+    xs::Vec, ts::Vector{<:Real},
     xsizelim::Int=1000, tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(xs), trange::NTuple{2,Real}=extrema(ts)
-)::@NamedTuple{xinx::Vector{Int}, tinx::Vector{Int}} where T<:Real
+)::@NamedTuple{xinx::Vector{Int}, tinx::Vector{Int}}
     # find range indices
     tiran = (findfirst(>=(trange[1]), ts), findlast(<=(trange[2]), ts))
     xiran = (findfirst(>=(xrange[1]), xs), findlast(<=(xrange[2]), xs))
@@ -177,7 +176,7 @@ function limit_size(
 end # function limit_size
 
 """
-    plot_raw(sols::Solutions{<:AbstractModel,F,C}, bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_raw(sols::Solutions, bcknd::Symbol=...; kwargs...) -> Makie.Figure
 
 Plot the the solution variables for each time step in `sols.raw` using the specified Makie
 backend `bcknd`. The function will find available backend if not specified.
@@ -195,7 +194,7 @@ backend `bcknd`. The function will find available backend if not specified.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
 """
 function plot_raw(
-    sols::Solutions{M,F,C},
+    sols::Solutions{M},
     bcknd::Symbol=find_backend();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false,
@@ -203,7 +202,7 @@ function plot_raw(
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
     trange::NTuple{2,Real}=extrema(sols.ts)
-)::Mk.Figure where {M<:AbstractModel, F, C}
+)::Mk.Figure where M<:AbstractModel
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, sols.ts, xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -217,7 +216,7 @@ function plot_raw(
 end # function plot_raw
 
 """
-    plot_avg(sols::Solutions{<:AbstractModel,F,C}, bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_avg(sols::Solutions, bcknd::Symbol=...; kwargs...) -> Makie.Figure
 
 Plot the annual average of solution variables in `sols.annual.avg` using the specified
 Makie backend `bcknd`. The function will find available backend if not specified.
@@ -235,7 +234,7 @@ Makie backend `bcknd`. The function will find available backend if not specified
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
 """
 function plot_avg(
-    sols::Solutions{M,F,C},
+    sols::Solutions{M},
     bcknd::Symbol=find_backend();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false,
@@ -243,7 +242,7 @@ function plot_avg(
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
     trange::NTuple{2,Real}=(1, sols.spacetime.dur)
-)::Mk.Figure where {M<:AbstractModel, F, C}
+)::Mk.Figure where M<:AbstractModel
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, collect(1:sols.spacetime.dur), xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -256,13 +255,13 @@ function plot_avg(
     )
 end # function plot_avg
 
-(ice_area(sols::Solutions{ClassicModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
+ice_area(sols::Solutions{ClassicModel}, season::Symbol, year::Int)::Float64 =
     2pi * hemispheric_mean((getproperty(sols.annual, season).E[year].<0), sols.spacetime.x)
-(ice_area(sols::Solutions{MIZModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
+ice_area(sols::Solutions{<:Union{MIZModel,WIModel}}, season::Symbol, year::Int)::Float64 =
     2pi * hemispheric_mean(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
 
 """
-    plot_seasonal(sols::Solutions{<:AbstractModel,F,false}, bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_seasonal(sols::Solutions, bcknd::Symbol=...; kwargs...) -> Makie.Figure
 
 Using the data from `sols.annual`, plot lines spanned by (`xfunc(sols, year)`,
 `yfunc(sols, season, year)`) for each year and for the seasons `:avg`, `:winter`, and
@@ -285,7 +284,7 @@ annual average are thick solid.
     plot.
 """
 function plot_seasonal(
-    sols::Solutions{<:AbstractModel,F,false},
+    sols::Solutions{<:AbstractModel,F,true},
     bcknd::Symbol=find_backend();
     xfunc::Function=((sols, year) -> hemispheric_mean(sols.annual.avg.T[year], sols.spacetime.x)),
     yfunc::Function=ice_area,

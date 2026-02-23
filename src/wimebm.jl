@@ -131,7 +131,7 @@ function mean_size(dmx::Float64, par::Par)::Float64
 end # function mean_size
 
 # Physical grid length at a given index in metres
-function grid_length(st::SpaceTime{F}, i::Int)::Float64 where F
+function grid_length(st::SpaceTime, i::Int)::Float64
     if i == 1 # first grid
         dtheta = 1/2 * (asin(st.x[1]) + asin(st.x[2]))
     elseif i == st.nx # last grid
@@ -143,8 +143,8 @@ function grid_length(st::SpaceTime{F}, i::Int)::Float64 where F
 end # function grid_length
 
 function Infrastructure.step!(
-    ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par; spectrum::Spectrum
-)::Collection{Vec} where F
+    ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; spectrum::Spectrum
+)::Collection{Vec}
     Infrastructure.step!(MIZModel(), t, f, vars, st, par) # thermodynamics
     edgeinx = findfirst(>(0), vars.h)
     isnothing(edgeinx) && return vars # no ice
