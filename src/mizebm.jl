@@ -126,7 +126,7 @@ h_t(Fvi::Vec, par::Par)::Vec = -1/par.Lf * Fvi
 function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par)::Vec
     lat_melt = -pi / 2 * par.alpha * wlat(Tw, par)
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
-    weld = @. par.kappa * par.alpha / 4 * phi * D^3
+    weld = @. par.kappa * par.alpha / 4 * phi * D^3 # TODO under the freezing condition only
     zeroref!(lat_grow, h)
     return @. lat_melt + lat_grow + weld
 end # function D_t
