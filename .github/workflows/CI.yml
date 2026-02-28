@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [ main, master, ww/latest ]
+    tags:
+      - 'present/**/*'
   pull_request:
     branches: [ main, master, ww/latest ]
 
@@ -14,9 +16,9 @@ jobs:
       fail-fast: false
       matrix:
         version:
-          - '1.10' # LTS
-          - '1' # latest stable
-          - '1.12-nightly' # upcoming stable
+          - 'lts' # 1.10
+          - '1' # latest stable (1.12)
+          - 'pre' # prerelease build (1.13)
           - 'nightly' # dev
         os:
           - ubuntu-latest
@@ -38,29 +40,3 @@ jobs:
         uses: julia-actions/julia-buildpkg@latest
       - name: Run tests
         uses: julia-actions/julia-runtest@latest
-
-  pr_automation:
-    name: PR Automation
-    needs: test
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
-      contents: write
-    if: github.event.pull_request.base.ref == 'ww/latest' && github.event.pull_request.author_association == 'OWNER'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-      - name: Merge to ww/latest
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          PR="${{ github.event.pull_request.number }}"
-          gh pr merge --merge --admin "$PR"
-      - name: Create draft PR to main
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          head='${{ github.event.pull_request.head.ref }}'
-          title='${{ github.event.pull_request.title }}'
-          body='${{ github.event.pull_request.body }}'
-          gh pr create --base main --head "$head" --title "$title" --body "$body" --draft
