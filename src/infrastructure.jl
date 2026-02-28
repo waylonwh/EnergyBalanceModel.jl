@@ -5,7 +5,7 @@ using ..Utilities
 import EnergyBalanceModel
 import SparseArrays as SA, Statistics as Stats
 
-export AbstractModel, ClassicModel, MIZModel
+export AbstractModel, ClassicModel, MIZModel, ModelDiff
 export Collection, Forcing, Solutions, SpaceTime, Vec
 export classic_paramset, default_parameters, default_parval, miz_paramset
 export get_diffop
@@ -32,6 +32,13 @@ Singleton type representing the classic idealised climate model by Wagner & Eise
 struct ClassicModel <: AbstractModel end
 
 """
+    ModelDiff{B<:AbstractModel, S<:AbstractModel} <: AbstractModel
+
+A type representing the difference (S-B) between two models `B` and `S`.
+"""
+struct ModelDiff{B<:AbstractModel, S<:AbstractModel} <: AbstractModel end
+
+"""
     Collection{V}(args...)
 
 A simple wrapper around `Dict{Symbol,V}` to allow dot syntax access to fields. Use syntax
@@ -55,36 +62,29 @@ julia> parameters.F = 0.0; parameters.F
 0.0
 ```
 """
-struct Collection{V}
+struct Collection{V} <: AbstractDict{Symbol,V}
     dict::Dict{Symbol,V}
-    Collection{V}(args...) where V = new(Dict{Symbol,V}(args...))
+    Collection{V}(args...) where V = new{V}(Dict{Symbol,V}(args...))
 end # struct Collection
 
 (Base.getproperty(coll::Collection{V}, key::Symbol)::V) where V = getindex(getfield(coll, :dict), key)
 (Base.setproperty!(coll::Collection{V}, key::Symbol, val::V)::Dict{Symbol,V}) where V =
     setindex!(getfield(coll, :dict), val, key)
 (Base.propertynames(coll::Collection{V})::Set{Symbol}) where V = Set(keys(getfield(coll, :dict)))
+(Base.iterate(coll::Collection{V})::Union{Tuple{Pair{Symbol,V},Int},Nothing}) where V =
+    iterate(getfield(coll, :dict))
+(Base.iterate(coll::Collection{V}, state::Int)::Union{Tuple{Pair{Symbol,V},Int},Nothing}) where V =
+    iterate(getfield(coll, :dict), state)
 (Base.length(coll::Collection{V})::Int) where V = length(getfield(coll, :dict))
 (Base.hash(coll::Collection{V}, h::UInt)::UInt) where V = hash(getfield(coll, :dict), h)
 
-function Base.show(io::IO, coll::Collection{V})::Nothing where V
-    buffer = iobuffer(io)
-    show(buffer, getfield(coll, :dict))
-    str = replace(String(take!(buffer.io)), "Dict"=>string(typeof(coll)))
-    print(io, str)
-    return nothing
-end # function Base.show
-
-function Base.show(io::IO, ::MIME"text/plain", coll::Collection{V})::Nothing where V
-    buffer = iobuffer(io)
-    show(buffer, MIME("text/plain"), getfield(coll, :dict))
-    str = replace(
-        String(take!(buffer.io)),
-        string(typeof(getfield(coll, :dict))) => string(typeof(coll))
-    )
-    print(io, str)
-    return nothing
-end # function Base.show
+function uniqueunion(ca::Collection{A}, cb::Collection{B}) where {A, B}
+    vtype = typejoin(A, B)
+    vtype === Any && (vtype = Union{A, B})
+    overlap = intersect(propertynames(ca), propertynames(cb))
+    return all(key -> getproperty(ca, key) === getproperty(cb, key), overlap) ?
+        Collection{vtype}() : Collection{vtype}(union(ca, cb))
+end # function uniqueunion
 
 """
     SpaceTime{F}(urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375)
@@ -396,6 +396,42 @@ struct Solutions{M<:AbstractModel,F,C}
         ) # new
     end # function Solutions
 end # struct Solutions{M,F,C}
+
+function Base.:-(
+    sx::Solutions{X,F,true}, sy::Solutions{Y,F,true}
+)::Solutions{ModelDiff{X,Y},F,true} where {X<:AbstractModel, Y<:AbstractModel, F}
+    (sx.spacetime.x == sy.spacetime.x && sx.spacetime.t == sy.spacetime.t) ||
+        throw(
+            ArgumentError(
+                "Cannot compute difference of solutions defined on different space-time grids."
+            )
+        ) # throw
+    st = sx.spacetime.dur == sy.spacetime.dur ?
+        sx.spacetime :
+        SpaceTime{F}(sx.spacetime.x, sx.spacetime.t, max(sx.spacetime.dur, sy.spacetime.dur))
+    forcing = Forcing(sx.forcing.base - sy.forcing.base)
+    par = uniqueunion(sx.parameters, sy.parameters)
+    init = uniqueunion(sx.initconds, sy.initconds)
+    vars = intersect(propertynames(sx.raw), propertynames(sy.raw))
+    lastonly = sx.lastonly || sy.lastonly
+    diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly)
+    xinx = findall(in(diffsol.ts), sx.spacetime.T)
+    yinx = findall(in(diffsol.ts), sy.spacetime.T)
+    foreach(
+        var -> setproperty!(
+            diffsol.raw, var,
+            getproperty(sx.raw, var)[xinx] .- getproperty(sy.raw, var)[yinx]
+        ),
+        vars
+    ) # foreach
+    for season in 1:3, var in vars
+        setproperty!(
+            diffsol.annual[season], var,
+            getproperty(sx.annual[season], var)[1:st.dur] .- getproperty(sy.annual[season], var)[1:st.dur]
+        )
+    end # for season, var
+    return diffsol
+end # function Base.diff
 
 (Base.show(io::IO, sols::Solutions{<:AbstractModel,F,C})::Nothing) where {F, C} = print(
     io,
