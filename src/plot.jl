@@ -2,7 +2,7 @@ module Plot
 
 using ..Infrastructure, ..Utilities
 
-import Makie
+import Makie as Mk
 
 export Layout, backend
 export plot_avg, plot_raw, plot_seasonal
@@ -68,21 +68,31 @@ const miz_layout = Layout(
         :h  :D  :phi
     ],
     AbstractString[
-        Makie.L"$E_w$ ($\mathrm{J\,m^{-2}}$)"  Makie.L"$E_i$ ($\mathrm{J\,m^{-2}}$)"       Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)"
-        Makie.L"$T_w$ ($\mathrm{\degree\!C}$)" Makie.L"$T_i$ ($\mathrm{\degree\!C}$)"      Makie.L"$T$ ($\mathrm{\degree\!C}$)"
-        Makie.L"$\bar{h}$ ($\mathrm{m}$)"      Makie.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)" Makie.L"\varphi"
+        Mk.L"$E_w$ ($\mathrm{J\,m^{-2}}$)"  Mk.L"$E_i$ ($\mathrm{J\,m^{-2}}$)"       Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"
+        Mk.L"$T_w$ ($\mathrm{\degree\!C}$)" Mk.L"$T_i$ ($\mathrm{\degree\!C}$)"      Mk.L"$T$ ($\mathrm{\degree\!C}$)"
+        Mk.L"$\bar{h}$ ($\mathrm{m}$)"      Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)" Mk.L"$\varphi$"
     ]
 )
 
 const classic_layout = Layout(
     [:E :T :h],
-    AbstractString[Makie.L"$E$ ($\mathrm{J\,m^{-2}}$)" Makie.L"$T$ ($\mathrm{\degree\!C}$)" Makie.L"$h$ ($\mathrm{m}$)"]
+    AbstractString[Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)" Mk.L"$T$ ($\mathrm{\degree\!C}$)" Mk.L"$h$ ($\mathrm{m}$)"]
 )
 
 const missingsym = gensym(:missing)
 
 default_layout(::MIZModel)::Layout{Symbol} = miz_layout
 default_layout(::ClassicModel)::Layout{Symbol} = classic_layout
+
+function default_layout(::ModelDiff{A,B})::Layout{Symbol} where {A<:AbstractModel, B<:AbstractModel}
+    layout = (A === ClassicModel || B === ClassicModel) ?
+        deepcopy(classic_layout) : deepcopy(miz_layout)
+    foreach(
+        i -> layout.titles[i] = Mk.latexstring(raw"$\Delta ", layout.titles[i][2:end]),
+        eachindex(layout.titles)
+    )
+    return layout
+end # function default_layout
 
 isloaded(::Val)::Bool = false
 
@@ -117,33 +127,49 @@ julia> import GLMakie; backend(:GLMakie)
 GLMakie
 ```
 """
-backend()::Union{Module,Missing} = Makie.current_backend()
+backend()::Union{Module,Missing} = Mk.current_backend()
 backend(bcknd::Symbol)::Module = init_backend(Val(bcknd))
+
+# (isD::Val{[Bool]}, diff::Val{[Bool]}, data::Matrix{Float64}) -> (levels, extendlow, extendhigh)
+get_levels(::Val{false}, ::Val{false}, _)::Tuple{Int,Nothing,Nothing,Mk.Automatic} = (
+    21, nothing, nothing, Mk.automatic
+) # normal
+get_levels(::Val{true}, ::Val{false}, _)::Tuple{Vector{Float64},Nothing,Symbol,Vector{Int}} = (
+    [collect(0:0.5:10); 50; 100], nothing, :auto, [0, 10, 50, 100]
+) # D sol
+get_levels(::Val{true}, ::Val{true}, _)::Tuple{Vector{Float64},Symbol,Symbol,Vector{Int}} = (
+    [-100; -50; collect(-10:10); 50; 100], :auto, :auto, [-100, -50, -10, 10, 50, 100]
+) # D diff
+get_levels(::Val{false}, ::Val{true}, data::Matrix{Float64})::Tuple{Vector{Float64},Nothing,Nothing,Mk.Automatic} = (
+    maximum(abs, filter(!isnan, data))*range(-1, 1; length=21), nothing, nothing, Mk.automatic
+)
 
 function contourf_tiles(
     t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}};
-    xlim::Union{NTuple{2,Real},Nothing}=nothing, tlim::Union{NTuple{2,Real}, Nothing}=nothing, inspect::Bool=false
-)::Makie.Figure where T<:Real
-    fig = Makie.Figure()
+    xlim::Union{NTuple{2,Real},Nothing}=nothing,
+    tlim::Union{NTuple{2,Real}, Nothing}=nothing, diff::Bool=false, inspect::Bool=false,
+    figsize::Tuple{Int,Int}=(600, 400)
+)::Mk.Figure where T<:Real
+    fig = Mk.Figure(size=figsize)
     for row in axes(layout, 1), col in axes(layout, 2)
         subfig = fig[row,col]
-        ax = Makie.Axis(
+        ax = Mk.Axis(
             subfig[1,1];
             title=layout[row,col].title,
-            xlabel=(row==lastindex(layout, 1) ? Makie.L"$t$ ($\mathrm{y}$)" : ""),
-            ylabel=(col==1 ? Makie.L"x" : ""),
+            xlabel=(row==lastindex(layout, 1) ? Mk.L"$t$ ($\mathrm{y}$)" : ""),
+            ylabel=(col==1 ? Mk.L"x" : ""),
             limits=(tlim, xlim)
         )
         if all(isnan, layout[row,col].var)
             @warn "All data are NaN at position ($row, $col). Skipping plot."
         else # valid data
-            ctr = Makie.contourf!(ax, t, x, layout[row,col].var; extendlow=:auto, extendhigh=:auto)
-            Makie.Colorbar(subfig[1,2], ctr)
+            isD = occursin(raw"\mathcal{D}", layout[row,col].title)
+            levels, extendlow, extendhigh, ticks = get_levels(Val(isD), Val(diff), layout[row,col].var)
+            ctr = Mk.contourf!(ax, t, x, layout[row,col].var; levels, extendlow, extendhigh)
+            Mk.Colorbar(subfig[1,2], ctr; ticks)
         end # if all; else
     end # for row, col
-    if inspect
-        Makie.DataInspector(fig)
-    end # if inspect
+    inspect && Mk.DataInspector(fig)
     return fig
 end # function contourf_tiles
 
@@ -201,6 +227,7 @@ backend `bcknd`. The function will find available backend if not specified.
 - `tsizelim::Int`: Maximum number of time steps to plot.
 - `xrange::NTuple{2,Real}`: Range of spatial points to plot.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
+- `figsize::Tuple{Int,Int}`: Size of the figure in pixels.
 """
 function plot_raw(
     sols::Solutions{M,F,C},
@@ -210,8 +237,9 @@ function plot_raw(
     xsizelim::Int=1000,
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
-    trange::NTuple{2,Real}=extrema(sols.ts)
-)::Makie.Figure where {M<:AbstractModel, F, C}
+    trange::NTuple{2,Real}=extrema(sols.ts),
+    figsize::Tuple{Int,Int}=(600, 400)
+)::Mk.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, sols.ts, xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -220,7 +248,7 @@ function plot_raw(
     end # for inx
     return contourf_tiles(
         sols.ts[tinx], sols.spacetime.x[xinx], datatitle;
-        xlim=xrange, tlim=trange, inspect
+        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff, figsize
     )
 end # function plot_raw
 
@@ -241,6 +269,7 @@ Makie backend `bcknd`. The function will find available backend if not specified
 - `tsizelim::Int`: Maximum number of time steps to plot.
 - `xrange::NTuple{2,Real}`: Range of spatial points to plot.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
+- `figsize::Tuple{Int,Int}`: Size of the figure in pixels.
 """
 function plot_avg(
     sols::Solutions{M,F,C},
@@ -250,8 +279,9 @@ function plot_avg(
     xsizelim::Int=1000,
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
-    trange::NTuple{2,Real}=(1, sols.spacetime.dur)
-)::Makie.Figure where {M<:AbstractModel, F, C}
+    trange::NTuple{2,Real}=(1, sols.spacetime.dur),
+    figsize::Tuple{Int,Int}=(600, 400)
+)::Mk.Figure where {M<:AbstractModel, F, C}
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, collect(1:sols.spacetime.dur), xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -260,7 +290,7 @@ function plot_avg(
     end # for inx
     return contourf_tiles(
         collect(tinx), sols.spacetime.x[xinx], datatitle;
-        xlim=xrange, tlim=trange, inspect
+        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff, figsize
     )
 end # function plot_avg
 
@@ -298,23 +328,23 @@ function plot_seasonal(
     xfunc::Function=((sols, year) -> hemispheric_mean(sols.annual.avg.T[year], sols.spacetime.x)),
     yfunc::Function=ice_area,
     title::AbstractString="Ice covered area",
-    xlabel::AbstractString=Makie.L"$\tilde{T}$ ($\mathrm{\degree\!C}$)",
-    ylabel::AbstractString=Makie.L"A_i",
+    xlabel::AbstractString=Mk.L"$\tilde{T}$ ($\mathrm{\degree\!C}$)",
+    ylabel::AbstractString=Mk.L"A_i",
     inspect::Bool=false
-)::Makie.Figure where F
+)::Mk.Figure where F
     backend(bcknd)
     xdata = xfunc.(Ref(sols), 1:sols.spacetime.dur)
-    fig = Makie.Figure()
-    ax = Makie.Axis(fig[1,1]; title, xlabel, ylabel)
+    fig = Mk.Figure()
+    ax = Mk.Axis(fig[1,1]; title, xlabel, ylabel)
     groups = (
-        Warming=Vector{Makie.Lines{Tuple{Vector{Makie.Point{2,Float64}}}}}(),
-        Cooling=Vector{Makie.Lines{Tuple{Vector{Makie.Point{2,Float64}}}}}()
+        Warming=Vector{Mk.Lines{Tuple{Vector{Mk.Point{2,Float64}}}}}(),
+        Cooling=Vector{Mk.Lines{Tuple{Vector{Mk.Point{2,Float64}}}}}()
     )
     for (domain, group, inx, colour) in zip(
         keys(groups),
         values(groups),
         (sols.forcing.domain[2]:sols.forcing.domain[3], sols.forcing.domain[4]:sols.forcing.domain[5]),
-        (Makie.Cycled(6), Makie.Cycled(1))
+        (Mk.Cycled(6), Mk.Cycled(1))
     ), season in (:avg, :winter, :summer)
         width = 1 # TODO Float64?
         if season === :avg
@@ -322,21 +352,19 @@ function plot_seasonal(
         end # if ===
         push!(
             group,
-            Makie.lines!(
+            Mk.lines!(
                 ax, xdata[inx], yfunc.(Ref(sols), Ref(season), inx);
                 color=colour, linewidth=width, linestyle=(season===:summer ? :dash : :solid)
             )
         ) # push!
     end # for domain, inx, colour, season
-    Makie.Legend(
+    Mk.Legend(
         fig[1,2],
         collect(values(groups)),
         fill(["mean", "winter", "summer"], 2),
         string.(collect(keys(groups)))
     )
-    if inspect
-        Makie.DataInspector(fig)
-    end # if inspect
+    inspect && Mk.DataInspector(fig)
     return fig
 end # function plot_seasonal
 
@@ -348,8 +376,7 @@ function precompile(bcnd::Module)::Nothing
         floats = collect(0.1:0.1:1.0)
         x = collect(0.1:0.1:1.0)
         layout = Layout(
-            reshape([rand(10, 10)], 1, 1),
-            reshape(AbstractString[Makie.L"title"], 1, 1)
+            reshape([rand(10, 10)], 1, 1), reshape(AbstractString[Mk.L"title"], 1, 1)
         )
         bcnd.activate!()
         PT.@compile_workload begin
