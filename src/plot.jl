@@ -153,6 +153,7 @@ function contourf_tiles(
             title=layout[row,col].title,
             xlabel=(row==lastindex(layout, 1) ? Mk.L"$t$ ($\mathrm{y}$)" : ""),
             ylabel=(col==1 ? Mk.L"x" : ""),
+            xticklabelrotation=(T===Int ? 0 : -pi/4),
             limits=(tlim, xlim)
         )
         if all(isnan, layout[row,col].var)
@@ -162,6 +163,13 @@ function contourf_tiles(
             levels, extendlow, extendhigh, ticks = get_levels(Val(isD), Val(diff), layout[row,col].var)
             ctr = Mk.contourf!(ax, t, x, layout[row,col].var; levels, extendlow, extendhigh)
             Mk.Colorbar(subfig[1,2], ctr; ticks)
+            if diff
+                Mk.contour!(ax, t, x, layout[row,col].var; levels=[0], color=:black)
+                cbaxis = Mk.Axis(subfig[1,2]; limits=((-1, 1), (-1, 1)))
+                Mk.hidedecorations!(cbaxis)
+                Mk.hidespines!(cbaxis)
+                Mk.hlines!(cbaxis, 0; color=:black, linewidth=1.5)
+            end # if diff
         end # if all; else
     end # for row, col
     inspect && Mk.DataInspector(fig)

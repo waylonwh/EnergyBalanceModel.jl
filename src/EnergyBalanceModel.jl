@@ -155,6 +155,7 @@ PT.@setup_workload begin
     Fs = (identity, sin)
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
     spectrum = bretschneider(3.0, 9.5)
+    m2s = Dict{AbstractModel,Solutions}()
     redirect_stdout(devnull)
     redirect_stderr(devnull)
     PT.@compile_workload begin
@@ -173,11 +174,13 @@ PT.@setup_workload begin
                 init.D = zeros(st.nx)
             end # if isa; elseif
             try # avoid AssertionError from WIModel
-                integrate(m, st, forcing, par, init; spectrum)
+                sol = integrate(m, st, forcing, par, init; spectrum)
             catch err
                 err isa AssertionError || err isa InexactError || rethrow(err)
             end # try; catch err
+            F === sin && length(farg) == 1 && (m2s[m] = sol)
         end # for m, F, farg
+        m2s[MIZModel()] - m2s[ClassicModel()]
     end # PT.@compile_workload begin
 end # PT.@setup_workload begin
 
