@@ -151,6 +151,7 @@ PT.@setup_workload begin
     ms = (MIZModel(), ClassicModel())
     Fs = (identity, sin)
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
+    m2s = Dict{AbstractModel,Solutions}()
     redirect_stdout(devnull)
     PT.@compile_workload begin
         for m in ms, F in Fs, farg in fs_args
@@ -167,8 +168,10 @@ PT.@setup_workload begin
             elseif m isa ClassicModel
                 init.E = par.cw * T
             end # if isa; elseif
-            integrate(m, st, forcing, par, init)
+            sol = integrate(m, st, forcing, par, init)
+            F === sin && length(farg) == 1 && (m2s[m] = sol)
         end # for m, F, farg
+        m2s[MIZModel()] - m2s[ClassicModel()]
     end # PT.@compile_workload begin
 end # PT.@setup_workload begin
 
