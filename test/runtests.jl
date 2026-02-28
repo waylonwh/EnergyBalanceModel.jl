@@ -37,6 +37,6 @@ end # @testset begin
 end # @testset begin
 
 @testset "Check the solutions include T0" begin
-    @test hasproperty(mizsols.raw, :T0)
     @test hasproperty(clasols.raw, :T0)
+    @test hasproperty(clasols.annual.avg, :T0)
 end # @testset begin
