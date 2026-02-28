@@ -2,7 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, master, ww/latest ]
+    branches: [ main, master, ww/latest, present/*]
+    tags:
+      - '**'
   pull_request:
     branches: [ main, master, ww/latest ]
 
