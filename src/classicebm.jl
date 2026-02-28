@@ -40,7 +40,7 @@ function Infrastructure.initialise(
     lastonly::Bool=true
 )::Tuple{Collection{Vec},Solutions{ClassicModel,F,C},Solutions{ClassicModel,F,C}} where {F, C}
     vars = deepcopy(init)
-    solvars = Set{Symbol}((:E, :T, :h))
+    solvars = Set{Symbol}((:E, :T, :h, :aS))
     sols = Solutions{ClassicModel}(st, forcing, par, init, solvars, lastonly)
     annusol = Solutions{ClassicModel}(st, forcing, par, init, solvars, true) # for calculating annual means
     return (vars, sols, annusol)
@@ -56,7 +56,8 @@ function Infrastructure.step!(
     i = round(Int, mod1((t + st.dt/2) * st.nt, st.nt))
     # forcing
     alpha = @. stat.aw * (vars.E>=0) + par.ai * (vars.E<0) # WE15 Eq. (4)
-    C = @. alpha*stat.S[:,i] + stat.cg_tau*vars.Tg - par.A + f
+    vars.aS = @. alpha * stat.S[:,i]
+    C = @. vars.aS + stat.cg_tau*vars.Tg - par.A + f
     # surface temperature
     T0 = @. C / (stat.M - stat.kLf/vars.E) # WE15 Eq. (A3)
     vars.T = @. vars.E/par.cw * (vars.E>=0) + T0 * (vars.E<0)*(T0<0) # WE15 Eq. (9)

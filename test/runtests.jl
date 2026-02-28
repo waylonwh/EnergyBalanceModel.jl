@@ -39,3 +39,10 @@ end # @testset begin
 @testset "(-)(::Solutions, ::Solutions) has no errors" begin
     @test (mizsols - clasols) isa Solutions{ModelDiff{MIZModel,ClassicModel},sin,true}
 end # @testset begin
+
+@testset "Solutions have :aS" begin
+    @test hasproperty(mizsols.raw, :aS)
+    @test hasproperty(mizsols.annual.avg, :aS)
+    @test hasproperty(clasols.raw, :aS)
+    @test hasproperty(clasols.annual.avg, :aS)
+end # @testset begin
