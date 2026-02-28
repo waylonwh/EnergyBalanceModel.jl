@@ -140,7 +140,7 @@ function Infrastructure.initialise(
 )::Tuple{Collection{Vec}, Solutions{MIZModel,F,C}, Solutions{MIZModel,F,C}} where {F, C}
     # create storages
     vars = deepcopy(init)
-    solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n, :aS))
+    solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n, :a))
     sols = Solutions{MIZModel}(st, forcing, par, init, solvars, lastonly) # final output
     annusol = Solutions{MIZModel}(st, forcing, par, init, solvars, true) # for annual means (internal use)
     # compute phi and Tw
@@ -170,7 +170,7 @@ function Infrastructure.step!(
     Fvi = vert_flux(t, :ice, vars.Tg, vars.T, f, st, par)
     Fvw = vert_flux(t, :water, vars.Tg, vars.T, f, st, par)
     Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
-    vars.aS = vars.phi .* solar(st.x, t, :ice, par) .+ (1 .- vars.phi) .* solar(st.x, t, :water, par)
+    vars.a = @. vars.phi * par.ai + (1-vars.phi) * (par.a0 - par.a2 * st.x^2)
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
     rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)

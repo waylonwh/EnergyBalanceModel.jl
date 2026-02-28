@@ -35,7 +35,7 @@ Layout(vars::Matrix{T}, titles::Matrix{AbstractString}=string.(vars)) where T = 
 (Base.size(layout::Layout{T})::NTuple{2,Int}) where T = size(layout.vars)
 (Base.axes(layout::Layout{T}, dim::Int)::Base.OneTo{Int64}) where T = axes(layout.vars, dim)
 (Base.eachindex(layout::Layout{T})::Base.OneTo{Int64}) where T = eachindex(layout.vars)
-(Base.getindex(layout::Layout{T}, inx...)::@NamedTuple{var::T, title::AbstractString}) where T =
+(Base.getindex(layout::Layout{T}, inx::Int...)::@NamedTuple{var::T, title::AbstractString}) where T =
     (var=layout.vars[inx...], title=layout.titles[inx...])
 
 struct BackendError <: Exception
@@ -158,7 +158,8 @@ function contourf_tiles(
             title=layout[row,col].title,
             xlabel=(row==lastindex(layout, 1) ? Mk.L"$t$ ($\mathrm{y}$)" : ""),
             ylabel=(col==1 ? Mk.L"x" : ""),
-            xticklabelrotation=(T===Int ? 0 : -pi/4),
+            xticklabelsvisible=(row==lastindex(layout, 1)),
+            yticklabelsvisible=(col==1),
             limits=(tlim, xlim)
         )
         if all(isnan, layout[row,col].var)
