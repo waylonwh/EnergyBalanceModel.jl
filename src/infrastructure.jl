@@ -440,8 +440,8 @@ function Base.:-(
     vars = intersect(propertynames(sx.raw), propertynames(sy.raw))
     lastonly = sx.lastonly || sy.lastonly
     diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly)
-    xinx = findall(in(diffsol.ts), sx.spacetime.T)
-    yinx = findall(in(diffsol.ts), sy.spacetime.T)
+    xinx = findall(in(diffsol.ts), sx.ts)
+    yinx = findall(in(diffsol.ts), sy.ts)
     foreach(
         var -> setproperty!(
             diffsol.raw, var,
