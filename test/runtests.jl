@@ -1,5 +1,7 @@
 using EnergyBalanceModel, Test
 
+import EnergyBalanceModel.Infrastructure: ModelDiff
+
 st = SpaceTime{sin}(180, 2000, 30)
 forcing = Forcing(0.0)
 
@@ -32,4 +34,8 @@ end # @testset begin
 @testset "Test for annual hemispheric means" begin
     @test lastyear_hemi_mean(mizsols, :T) - lastyear_hemi_mean(clasols, :T) < 1.0
     @test lastyear_hemi_mean(mizsols, :E) - lastyear_hemi_mean(clasols, :E) < 10.0
+end # @testset begin
+
+@testset "(-)(::Solutions, ::Solutions) has no errors" begin
+    @test (mizsols - clasols) isa Solutions{ModelDiff{MIZModel,ClassicModel},sin,true}
 end # @testset begin
