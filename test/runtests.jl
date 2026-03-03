@@ -40,9 +40,9 @@ end # @testset begin
     @test (mizsols - clasols) isa Solutions{ModelDiff{MIZModel,ClassicModel},sin,true}
 end # @testset begin
 
-@testset "Solutions have :aS" begin
-    @test hasproperty(mizsols.raw, :aS)
-    @test hasproperty(mizsols.annual.avg, :aS)
-    @test hasproperty(clasols.raw, :aS)
-    @test hasproperty(clasols.annual.avg, :aS)
+@testset "Solutions have :a" begin
+    @test hasproperty(mizsols.raw, :a)
+    @test hasproperty(mizsols.annual.avg, :a)
+    @test hasproperty(clasols.raw, :a)
+    @test hasproperty(clasols.annual.avg, :a)
 end # @testset begin
