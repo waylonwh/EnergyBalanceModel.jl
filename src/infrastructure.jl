@@ -166,16 +166,16 @@ struct SpaceTime{F}
     summer::@NamedTuple{t::Float64, inx::Int}
 
     function SpaceTime{F}(
-        urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int;
-        winter::Float64=0.26125, summer::Float64=0.77375 # TODO definition of "winter" and "summer"
+        urange::NTuple{2,Float64}, nx::Int, nt::Int;
+        winter::Float64=0.0, summer::Float64=0.5
     ) where F
         du = (urange[2]-urange[1]) / nx
         u = range(urange[1] + du/2, urange[2] - du/2, nx)
         x = F.(u)
         dt = 1 / nt
         t = collect(range(dt/2, 1 - dt/2, nt))
-        winterinx = round(Int, nt*winter)
-        summerinx = round(Int, nt*summer)
+        winterinx = clamp(round(Int, nt*winter), 1, nt)
+        summerinx = clamp(round(Int, nt*summer), 1, nt)
         return new{F}(
             nx, u, x, nt, dt, t, (t=winter, inx=winterinx), (t=summer, inx=summerinx)
         )
@@ -245,16 +245,18 @@ mutable struct Forcing{V}
     # constant forcing
     Forcing(base::Float64, tol::Float64=0.1) = new{false}(
         base, base, base, NaN, tol, -1, Vec(), [0; fill(-1, 5)]
+        #     ^peak ^cool ^rate     ^stable_wait   ^stages
     )
-    # warming/cooling forcing # TODO determine tol
     function Forcing(
-        base::Float64, peak::Float64, cool::Float64, rate::Float64=0.2, tol::Float64=0.1, stable_wait::Int=10
+        base::Float64, peak::Float64, cool::Float64, rate::Float64=0.2, tol::Float64=1e-4, stable_wait::Int=30
     )
         base+rate < peak > cool+rate || # check input
             throw(ArgumentError("peak is not the largest value or rate can not resolve the change."))
         new{true}(base, peak, cool, rate, tol, stable_wait, Vec(), [0; fill(-1, 5)])
     end # function Forcing
 end # struct Forcing{F}
+
+Base.getindex(f::Forcing, year::Int)::Float64 = f.f[year]
 
 function Base.show(io::IO, forcing::Forcing{false})::Nothing
     print(io, "Forcing(", forcing.base, ')')
@@ -267,7 +269,7 @@ Base.show(io::IO, forcing::Forcing{true})::Nothing = print(
     "Forcing(", forcing.base, ", ", forcing.peak, ", ", forcing.cool, ')'
 )
 
-@enum ClimateChangeState begin
+@enum ClimateChangeState begin # TODO review from here
     CCS_StablisingFirst = 1
     CCS_Warming = -1
     CCS_StablisingPeak = 2
