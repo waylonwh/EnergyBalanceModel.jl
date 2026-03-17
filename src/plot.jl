@@ -174,7 +174,7 @@ function contourf_tiles(
                 cbaxis = Mk.Axis(subfig[1,2]; limits=((-1, 1), (-1, 1)))
                 Mk.hidedecorations!(cbaxis)
                 Mk.hidespines!(cbaxis)
-                Mk.hlines!(cbaxis, 0; color=:black, linewidth=1.5)
+                Mk.hlines!(cbaxis, 0; color=:black, linewidth=2)
             end # if diff
         end # if all; else
     end # for row, col
