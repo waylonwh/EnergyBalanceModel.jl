@@ -307,8 +307,8 @@ function plot_seasonal(
         (sols.forcing.domain[2]:sols.forcing.domain[3], sols.forcing.domain[4]:sols.forcing.domain[5]),
         (Mk.Cycled(6), Mk.Cycled(1))
     ), season in (:avg, :winter, :summer)
-        width = 1 # TODO Float64?
-        season === :avg && (width += (domain===:Warming ? 2 : 1)) # TODO Float64?
+        width = 1
+        season === :avg && (width += (domain===:Warming ? 2 : 1))
         push!(
             group,
             Mk.lines!(
