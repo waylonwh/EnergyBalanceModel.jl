@@ -57,9 +57,9 @@ module EnergyBalanceModel
 
 export ClassicModel, MIZModel, WIModel
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
-export default_parameters, integrate
+export default_parameters, duration, integrate
 export Spectrum, bretschneider
-export annual_mean, hemispheric_mean
+export hemispheric_mean, ice_area
 export Layout, backend, plot_avg, plot_raw, plot_seasonal
 export run_example
 
@@ -184,3 +184,9 @@ PT.@setup_workload begin
 end # PT.@setup_workload begin
 
 end # module EnergyBalanceModel
+
+
+# TODO ROAD MAP
+#
+# [ ] Rewrite progress bar
+# [ ] Rewrite integrate function

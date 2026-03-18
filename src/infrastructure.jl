@@ -2,13 +2,13 @@ module Infrastructure # EnergyBalanceModel.
 
 using ..Utilities
 
-import InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats
+import InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats, Integrals as Intgr
 
 export AbstractModel, ClassicModel, MIZModel, WIModel
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
-export classic_paramset, default_parameters, default_parval, miz_paramset
+export default_parval
 export get_diffop
-export annual_mean, hemispheric_mean
+export duration, hemispheric_mean, ice_area
 export integrate
 
 """
@@ -232,7 +232,7 @@ the year when the forcing pattern changes from ramping up to ramping down.
 
 ```
 """ # TODO Examples for Forcing
-mutable struct Forcing{V}
+struct Forcing{V}
     base::Float64 # base forcing
     peak::Float64 # peak forcing
     cool::Float64 # forcing after cooldown
@@ -240,19 +240,19 @@ mutable struct Forcing{V}
     tol::Float64 # tolerance for change
     stable_wait::Int # minimum number of years to wait for stablising before ramping up or down
     f::Vec # log of forcing in each year
-    stages::Vector{Int} # [0, start_warming, end_warming, start_cooling, end_cooling, end]
+    stages::Vector{Int} # ['1', 2:start_warming, 3:end_warming, 4:start_cooling, 5:end_cooling, 6:end]
 
     # constant forcing
     Forcing(base::Float64, tol::Float64=0.1) = new{false}(
-        base, base, base, NaN, tol, -1, Vec(), [0; fill(-1, 5)]
+        base, base, base, NaN, tol, -1, Vec(), [1; fill(-1, 5)]
         #     ^peak ^cool ^rate     ^stable_wait   ^stages
     )
     function Forcing(
-        base::Float64, peak::Float64, cool::Float64, rate::Float64=0.2, tol::Float64=1e-4, stable_wait::Int=30
+        base::Float64, peak::Float64, cool::Float64, rate::Float64=0.2, tol::Float64=1e-3, stable_wait::Int=50
     )
         base+rate < peak > cool+rate || # check input
             throw(ArgumentError("peak is not the largest value or rate can not resolve the change."))
-        new{true}(base, peak, cool, rate, tol, stable_wait, Vec(), [0; fill(-1, 5)])
+        new{true}(base, peak, cool, rate, tol, stable_wait, Vec(), [1; fill(-1, 5)])
     end # function Forcing
 end # struct Forcing{F}
 
@@ -269,13 +269,13 @@ Base.show(io::IO, forcing::Forcing{true})::Nothing = print(
     "Forcing(", forcing.base, ", ", forcing.peak, ", ", forcing.cool, ')'
 )
 
-@enum ClimateChangeState begin # TODO review from here
+@enum ClimateChangeState begin
     CCS_StablisingFirst = 1
-    CCS_Warming = -1
-    CCS_StablisingPeak = 2
-    CCS_Cooling = -2
-    CCS_StablisingLast = 4
-    CCS_End = 0
+    CCS_Warming = -2
+    CCS_StablisingPeak = 3
+    CCS_Cooling = -4
+    CCS_StablisingLast = 5
+    CCS_End = 6
 end # enum ClimateChangeState
 
 mutable struct ClimateChange{V}
@@ -285,69 +285,79 @@ mutable struct ClimateChange{V}
     lim::Int
     avgT::Float64
     history::NTuple{2,Float64} # (previous, last)
-
-    function ClimateChange(forcing::Forcing{V}, lim::Int=(V ? 1000 : 100)) where V
-        lim < 1 && throw(ArgumentError("Duration must be a positive integer."))
-        fcopy = deepcopy(forcing)
-        empty!(fcopy.f)
-        fcopy.stages = [0; fill(-1, 5)]
-        return new{V}(fcopy, -1, NaN, lim, NaN, (NaN, NaN))
-    end # function ClimateChange
 end # struct ClimateChange
+
+function ClimateChange!(forcing::Forcing{V}, lim::Int=(V ? 10000 : 100)) where V # TODO lim when V=true
+    lim < 1 && throw(ArgumentError("Duration must be a positive integer."))
+    empty!(forcing.f)
+    forcing.stages = [1; fill(-1, 5)]
+    return ClimateChange{V}(forcing, -1, NaN, lim, NaN, (NaN, NaN))
+    #                                ^year ^f      ^avgT ^history
+end # function ClimateChange!
 
 function maintainf(cc::ClimateChange, state::ClimateChangeState)::Bool
     abs(cc.history[2]-cc.history[1]) >= cc.forcing.tol && any(>=(cc.forcing.tol)∘abs, cc.avgT .- (cc.history)) &&
         return true # unstable
-    if Integer(state) < 0
-        since = state === CCS_StablisingFirst ? 0 : cc.forcing.stages[Integer(state)]
-        cc.year - since >= cc.forcing.stable_wait && return true # stablised for long enough
+    if Integer(state) > 0 # stablising states
+        since = cc.forcing.stages[Integer(state)]
+        cc.year - since < cc.forcing.stable_wait && return true # didn't wait for long enough
     end # if <
     return false
 end # function maintainf
 
 function next_fs!(cc::ClimateChange{true}, ::Val{CCS_StablisingFirst})::Tuple{Float64,ClimateChangeState}
-    cc.forcing.stages[2] = cc.year + 1
+    cc.forcing.stages[abs(Integer(CCS_Warming))] = cc.year + 1
     return (cc.forcing.base + cc.forcing.rate, CCS_Warming)
 end # function next_fs
 
 function next_fs!(cc::ClimateChange{true}, ::Val{CCS_Warming})::Tuple{Float64,ClimateChangeState}
     peaked = cc.forcing.peak - cc.f <= cc.forcing.rate
-    f = peaked ? cc.forcing.peak : cc.f + cc.forcing.rate
-    newstate = peaked ? CCS_StablisingPeak : CCS_Warming
-    peaked && (cc.forcing.stages[3] = cc.year)
+    if peaked
+        f = cc.forcing.peak
+        newstate = CCS_StablisingPeak
+        cc.forcing.stages[Integer(newstate)] = cc.year
+    else # !peaked
+        f = cc.f + cc.forcing.rate
+        newstate = CCS_Warming
+    end # peaked, else
     return (f, newstate)
 end # function next_fs
 
 function next_fs!(cc::ClimateChange{true}, ::Val{CCS_StablisingPeak})::Tuple{Float64,ClimateChangeState}
-    cc.forcing.stages[4] = cc.year + 1
+    cc.forcing.stages[abs(Integer(CCS_Cooling))] = cc.year + 1
     return (cc.forcing.peak - cc.forcing.rate, CCS_Cooling)
 end # function next_fs
 
 function next_fs!(cc::ClimateChange{true}, ::Val{CCS_Cooling})::Tuple{Float64,ClimateChangeState}
     cooled = cc.f - cc.forcing.cool <= cc.forcing.rate
-    f = cooled ? cc.forcing.cool : cc.f - cc.forcing.rate
-    newstate = cooled ? CCS_StablisingLast : CCS_Cooling
-    cooled && (cc.forcing.stages[5] = cc.year)
+    if cooled
+        f = cc.forcing.cool
+        newstate = CCS_StablisingLast
+        cc.forcing.stages[Integer(newstate)] = cc.year
+    else # !cooled
+        f = cc.f - cc.forcing.rate
+        newstate = CCS_Cooling
+    end # cooled, else
     return (f, newstate)
 end # function next_fs
 
 function Base.iterate(cc::ClimateChange)::Tuple{Float64,ClimateChangeState}
-    cc.year = 0
+    cc.year = 1
     cc.avgT = NaN
     cc.history = (NaN, NaN)
-    cc.forcing.stages[1] = 0
+    cc.forcing.stages[Integer(CCS_StablisingFirst)] = 1
     return (cc.forcing.base, CCS_StablisingFirst)
 end
 
-function Base.iterate(cc::ClimateChange{V}, state::ClimateChangeState) where V # -> Tuple{Float64/Nothing,ClimateChangeState}
+function Base.iterate(cc::ClimateChange{V}, state::ClimateChangeState) where V # -> Tuple{Float64,ClimateChangeState}/Nothing
     isnan(cc.avgT) && throw(ArgumentError("ClimateChange.avgT must be updated before iterating."))
-    cc.year + 1 >= cc.lim && return (nothing, CCS_End) # exceed the upper integral limit
+    cc.year + 1 > cc.lim && return nothing # exceed the upper integral limit
     if maintainf(cc, state) # forcing and state do not change
         f = cc.f
         newstate = state
     elseif !V || state === CCS_StablisingLast # end of integration
-        cc.forcing.stages[6] = cc.year
-        return (nothing, CCS_End)
+        cc.forcing.stages[Integer(CCS_End)] = cc.year
+        return nothing
     else # force change
         f, newstate = next_fs!(cc, Val(state))
     end # if &&, elseif ||, else
@@ -422,12 +432,10 @@ struct Solutions{M<:AbstractModel,F,V}
     end # function Solutions
 end # struct Solutions{M,F,V}
 
+duration(sols::Solutions)::Float64 = length(sols.forcing.f)
+
 Base.show(io::IO, sols::Solutions)::Nothing = print(
-    io,
-    typeof(sols), '(',
-    sols.spacetime.nx, '×', length(sols.ts), "@(", first(sols.ts), ':', sols.spacetime.dt, ':', last(sols.ts), "), ",
-    propertynames(sols.raw),
-    ')'
+    io, typeof(sols), " with ", length(sols.raw), " variables"
 )
 
 function Base.show(io::IO, ::MIME"text/plain", sols::Solutions)::Nothing
@@ -440,46 +448,45 @@ function Base.show(io::IO, ::MIME"text/plain", sols::Solutions)::Nothing
     println(io, xhead, vecstr)
     println(io, "  and " , length(sols.ts), " timesteps: ", first(sols.ts), ':', sols.spacetime.dt, ':', last(sols.ts))
     print(io, "  with forcing ", repr(sols.forcing))
+    print(io, " for ", duration(sols), " years")
     return nothing
 end # function Base.show
 
 # default parameter values
-let cw::Float64 = 9.8
-    global const default_parval = Par(
-        :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
-        :A => 193.0, # OLR when T = T_m (W m^-2)
-        :B => 2.1, # OLR temperature dependence (W m^-2 K^-1)
-        :cw => cw, # ocean mixed layer heat capacity (W yr m^-2 K^-1)
-        :S0 => 420.0, # insolation at equator  (W m^-2)
-        :S1 => 338.0, # insolation seasonal dependence (W m^-2)
-        :S2 => 240.0, # insolation spatial dependence (W m^-2)
-        :a0 => 0.7, # ice-free co-albedo at equator
-        :a2 => 0.1, # ice-free co-albedo spatial dependence
-        :ai => 0.4, # co-albedo where there is sea ice
-        :Fb => 4.0, # heat flux from ocean below (W m^-2)
-        :k => 2.0, # sea ice thermal conductivity (W m^-2 K^-1)
-        :Lf => 9.5, # sea ice latent heat of fusion (W yr m^-3)
-        :cg => 1e-3 * cw, # ghost layer heat capacity(W yr m^-2 K^-1)
-        :tau => 1e-5 * cw, # ghost layer coupling timescale (yr)
-        :Tm => 0.0, # mean temperature (C)
-        :m1 => 1.6e-6 * 31536000, # empirical constants of lateral melt (m y^-1 K^-1)
-        :m2 => 1.36, # empirical constants of lateral melt
-        :alpha => 0.66, # floe geometry constant, Ai = alpha * D^2
-        :rl => 0.5, # lead region width (m)
-        :Dmin => 1.0, # new pancake size (m)
-        :Dmax => 500.0, # largest floe length (m)
-        :hmin => 0.1, # new pancake thickness (m)
-        :kappa => 0.01 * 31536000, # floe welding parameter (m^2 s^-1)
-        :Y => 5.5, # Effective Young's modulus (GPa)
-        :nu => 0.3, # Poisson's ratio
-        :rhow => 1025.0, # Water density (kg/m^3)
-        :g => 9.81, # Gravitational acceleration (m/s^2),
-        :Ec => 7.05e-5, # Breaking significant strain
-        :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
-        :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
-        :dmn => 20.0, # Chosen minmum floe diameter for the truncated power-law FSD in WIM (m)
-    ) # Par
-end # let cw
+const default_parval = Par(
+    :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
+    :A => 193.0, # OLR when T = T_m (W m^-2)
+    :B => 2.1, # OLR temperature dependence (W m^-2 K^-1)
+    :cw => 9.8, # ocean mixed layer heat capacity (W yr m^-2 K^-1)
+    :S0 => 420.0, # insolation at equator  (W m^-2)
+    :S1 => 338.0, # insolation seasonal dependence (W m^-2)
+    :S2 => 240.0, # insolation spatial dependence (W m^-2)
+    :a0 => 0.7, # ice-free co-albedo at equator
+    :a2 => 0.1, # ice-free co-albedo spatial dependence
+    :ai => 0.4, # co-albedo where there is sea ice
+    :Fb => 4.0, # heat flux from ocean below (W m^-2)
+    :k => 2.0, # sea ice thermal conductivity (W m^-2 K^-1)
+    :Lf => 9.5, # sea ice latent heat of fusion (W yr m^-3)
+    :cg => 1e-3 * 9.8, # ghost layer heat capacity(W yr m^-2 K^-1)
+    :tau => 1e-5 * 9.8, # ghost layer coupling timescale (yr)
+    :Tm => 0.0, # mean temperature (C)
+    :m1 => 1.6e-6 * 31536000, # empirical constants of lateral melt (m y^-1 K^-1)
+    :m2 => 1.36, # empirical constants of lateral melt
+    :alpha => 0.66, # floe geometry constant, Ai = alpha * D^2
+    :rl => 0.5, # lead region width (m)
+    :Dmin => 1.0, # new pancake size (m)
+    :Dmax => 500.0, # largest floe length (m)
+    :hmin => 0.1, # new pancake thickness (m)
+    :kappa => 0.01 * 31536000, # floe welding parameter (m^2 s^-1)
+    :Y => 5.5, # Effective Young's modulus (GPa)
+    :nu => 0.3, # Poisson's ratio
+    :rhow => 1025.0, # Water density (kg/m^3)
+    :g => 9.81, # Gravitational acceleration (m/s^2),
+    :Ec => 7.05e-5, # Breaking significant strain
+    :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
+    :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
+    :dmn => 20.0, # Chosen minmum floe diameter for the truncated power-law FSD in WIM (m)
+) # Par
 
 # parameters used in each model
 const classicmodel_parvars = Set{Symbol}(
@@ -582,10 +589,16 @@ end # for model
 function annual_mean(annusol::Solutions)::Collection{Vec}
     # calculate annual mean for each variable except temperatures
     means = Collection{Vec}()
-    foreach(
-        var -> setproperty!(means, var, crossmean(getproperty(annusol.raw, var))),
-        propertynames(annusol.raw)
-    )
+    for var in propertynames(annusol.raw)
+        vecvec = getproperty(annusol.raw, var)
+        length(vecvec) == annusol.spacetime.nt ||
+            throw(
+                ArgumentError(
+                    "Length of raw solution vector for $var does not match the number of timesteps per year, when calculating annual mean."
+                )
+            ) # throw
+        setproperty!(means, var, crossmean(vecvec))
+    end # for var
     return means
 end # function annual_mean
 
@@ -647,12 +660,32 @@ julia> hemispheric_mean(vec, x)
 ```
 """
 function hemispheric_mean(vec::Vec, x::Vec)::Float64
-    int = zero(Float64)
-    for i in 1:length(x)-1
-        @inbounds int += (vec[i] + vec[i+1]) * (x[i+1] - x[i]) / 2
-    end # for i
-    return int
+    int = Intgr.solve(
+        Intgr.SampledIntegralProblem(@.(2vec / (pi * sqrt(1-x^2))), x), Intgr.SimpsonsRule()
+    )
+    if !Intgr.SciMLBase.successful_retcode(int)
+        @warn "Integral did not converge when computing hemispheric mean. Result may be inaccurate."
+        @isdebugging() && @show int.retcode
+    end # if !
+    return int.u
 end # function hemispheric_mean
+
+# TODO doc string
+function ice_area(phi::Vec, x::Vec)::Float64
+    int = Intgr.solve(
+        Intgr.SampledIntegralProblem(@.(pi*x * phi / 2sqrt(1-x^2)), x), Intgr.SimpsonsRule()
+    )
+    if !Intgr.SciMLBase.successful_retcode(int)
+        @warn "Integral did not converge when computing ice area. Result may be inaccurate."
+        @isdebugging() && @show int.retcode
+    end # if !
+    return int.u
+end # function ice_area
+
+ice_area(sols::Solutions{ClassicModel}, season::Symbol, year::Int)::Float64 =
+    ice_area((getproperty(sols.annual, season).E[year].<0), sols.spacetime.x)
+ice_area(sols::Solutions{<:Union{MIZModel,WIModel}}, season::Symbol, year::Int)::Float64 =
+    ice_area(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
 
 # stub for functions for each model
 function step! end
@@ -672,14 +705,17 @@ When `lastonly=true`, only the last year of the solution is stored for each time
 otherwise the full solution is stored. A progress bar is displayed if `progress=true`.
 
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
-"""
-function integrate( # TODO copy forcing into Solutions and add ! version
-    model::M, st::SpaceTime, forcing::Forcing{false}, par::Par, init::Collection{Vec};
+""" # TODO update doc string
+function integrate!(
+    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec}, lim::Union{<:Integer,Nothing}=nothing;
     lastonly::Bool=true, progress::Bool=true, spectrum::S=nothing
 ) where {M<:AbstractModel, S} # -> Solutions{M,F,false}
     # check the type of spectrum
     S === Nothing || Symbol(S) === :Spectrum ||
-        throw(ArgumentError("Keyword argument `spectrum` must be of type `Spectrum` or `nothing`."))
+        throw(ArgumentError("Keyword argument `spectrum` must be of type Spectrum or Nothing."))
+    # check lim
+    isnothing(lim) || lim > 0 ||
+        throw(ArgumentError("lim must be a positive integer or nothing."))
     # warn if spectrum is provided for non-WIModel
     (M === WIModel || S===Nothing) ||
         @warn "Keyword argument `spectrum` is ignored as $M does not have a WIM component."
@@ -699,34 +735,15 @@ function integrate( # TODO copy forcing into Solutions and add ! version
         progress && update!(prog, t; feedargs=(t, vt.time))
     end # for ti
     return sols
-end # function integrate
+end # function integrate!
 
 function integrate(
-    model::M, st::SpaceTime, forcing::Forcing{true}, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, progress::Bool=true, spectrum::S=nothing
-) where {M<:AbstractModel, S} # -> Solutions{M,F,true}
-    # check the type of spectrum
-    S === Nothing || Symbol(S) === :Spectrum ||
-        throw(ArgumentError("Keyword argument `spectrum` must be of type `Spectrum` or `nothing`."))
-    # warn if spectrum is provided for non-WIModel
-    (M === WIModel || isnothing(spectrum)) ||
-        @warn "Keyword argument `spectrum` is ignored as $M does not have a WIM component."
-    # initialise
-    vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
-    # reach base equilibrium
-    prog::Progress = Progress(
-        forcing.tol, forcing.tol, "|ΔT|", "Reaching Steady State";
-        infofeed=((t, tps) -> string("t = ", round(t; digits=2), "  ", round(1/tps; digits=2), "itr/s"))
-    )
-    progress && start!(prog; feedargs=(0,))
-    # loop over time
-    for ti in eachindex(st.T)
-        vt = @timed step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
-        savesol!(sols, annusol, vars, ti)
-        t = st.T[ti]
-        progress && update!(prog, t; feedargs=(t, vt.time))
-    end # for ti
-    return sols
+    model::AbstractModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec},
+    lim::Union{<:Integer,Nothing}=nothing;
+    lastonly::Bool=true, progress::Bool=true, spectrum=nothing
+) # -> Solutions{M,F,true}
+    dcpf = deepcopy(forcing)
+    return integrate!(model, st, dcpf, par, init, lim; lastonly, progress, spectrum)
 end # function integrate
 
 end # module Infrastructure

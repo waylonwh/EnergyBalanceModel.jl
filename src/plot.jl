@@ -42,14 +42,14 @@ struct BackendError <: Exception
 end # struct BackendError
 
 function Base.showerror(io::IO, err::BackendError)::Nothing
-    if err.requested === missingsym
+    if err.requested === :missing
         println(io, "No Makie backend is currently loaded. Please load a backend package first.")
-    else # err.requested !== missingsym
+    else # err.requested !== :missing
         println(
             io,
             "Backend package $(err.requested) is not loaded or unsupported. Try `import $(err.requested)` first."
         )
-        err.loaded === missingsym ||
+        err.loaded === :missing ||
             println(
                 io,
                 "Hint: Another backend package $(err.loaded) is already loaded."
@@ -76,8 +76,6 @@ const classic_layout = Layout(
     AbstractString[Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)" Mk.L"$T$ ($\mathrm{\degree\!C}$)" Mk.L"$h$ ($\mathrm{m}$)"]
 )
 
-const missingsym = gensym(:missing)
-
 default_layout(::Union{MIZModel,WIModel})::Layout{Symbol} = miz_layout
 default_layout(::ClassicModel)::Layout{Symbol} = classic_layout
 
@@ -87,7 +85,7 @@ function find_backend()::Symbol
     for backend in (:GLMakie, :CairoMakie, :WGLMakie)
         isloaded(Val(backend)) && return backend
     end # for backend
-    return missingsym
+    return :missing
 end # function find_backend
 
 init_backend(::Val{S}) where S = throw(BackendError(S, find_backend()))
@@ -254,11 +252,6 @@ function plot_avg(
         xlim=xrange, tlim=trange, inspect
     )
 end # function plot_avg
-
-ice_area(sols::Solutions{ClassicModel}, season::Symbol, year::Int)::Float64 =
-    2pi * hemispheric_mean((getproperty(sols.annual, season).E[year].<0), sols.spacetime.x)
-ice_area(sols::Solutions{<:Union{MIZModel,WIModel}}, season::Symbol, year::Int)::Float64 =
-    2pi * hemispheric_mean(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
 
 """
     plot_seasonal(sols::Solutions, bcknd::Symbol=...; kwargs...) -> Makie.Figure

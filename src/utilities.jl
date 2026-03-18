@@ -275,3 +275,24 @@ end # function condset!
 @inline (zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where T = condset!(v, zero(T), iszero, ref)
 
 end # module Utilities
+
+
+# NEW PROGRESS BAR DESIGN
+#
+# Integrating: MIZModel    Stage 1 of 1
+#  |ΔT| = 2.36e-4  [━━━━━━━━━━━━━━━|────────────━━━]
+#                   1                         1e-4
+#  t = 3.26                F = -10.0 (stablising)
+#  2361 it/s               0:26 (estimating ETA)
+#  normalised annual mean ice cover A(10691) = 0.216
+#                                       ◐ In progress
+#
+#
+# Stage 1 took 3:14 ending at t=48
+# Integrating: MIZModel    Stage 2 of 5
+#  |ΔT| = 2.36e-4  [━━━━━━━━━━━━━━━|────────────━━━]
+#                   1                         1e-4
+#  t = 3.26 / 100          F = -10.0 / 10.0
+#  2361 it/s               6:26 / -124:48
+#  normalised annual mean ice cover A(10691) = 0.216
+#                                       ◐ In progress
