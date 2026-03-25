@@ -125,11 +125,12 @@ end # function average
 Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
 Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1-phi)Fvw - Flat
 h_t(Fvi::Vec, par::Collection{Float64})::Vec = -1/par.Lf * Fvi
-function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64})::Vec
+function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collection{Float64})::Vec
     lat_melt = -pi / 2 * par.alpha * wlat(Tw, par)
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
     zeroref!(lat_grow, h)
+    condset!(weld, 0.0, >=(par.Tm), Ti)
     return @. lat_melt + lat_grow + weld
 end # function D_t
 
@@ -189,7 +190,7 @@ function Infrastructure.step!(
     ) # !
     vars.D = forward_euler(
         average(vars.D, par.Dmin, vars.phi, phip), # new pancakes
-        D_t(lasth, vars.D, vars.Tw, vars.phi, Qlp.Ql, par),
+        D_t(lasth, vars.D, vars.Ti, vars.Tw, vars.phi, Qlp.Ql, par),
         st.dt
     ) # !
     clamp!(vars.h, 0, Inf) # avoid overshooting to negative thickness
