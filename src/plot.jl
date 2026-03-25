@@ -61,20 +61,22 @@ end # function Base.showerror
 
 const miz_layout = Layout(
     [
-        :Ew :Ei :E
-        :Tw :Ti :T
-        :h  :D  :phi
+        :Ew  :Ei  :E
+        :Tw  :Ti  :T
+        :h   :D   :phi
     ],
     AbstractString[
-        Mk.L"$E_w$ ($\mathrm{J\,m^{-2}}$)"  Mk.L"$E_i$ ($\mathrm{J\,m^{-2}}$)"       Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"
-        Mk.L"$T_w$ ($\mathrm{\degree\!C}$)" Mk.L"$T_i$ ($\mathrm{\degree\!C}$)"      Mk.L"$T$ ($\mathrm{\degree\!C}$)"
-        Mk.L"$\bar{h}$ ($\mathrm{m}$)"      Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)" Mk.L"\varphi"
+        Mk.L"$E_{\mathrm{w}}$ ($\mathrm{J\,m^{-2}}$)"   Mk.L"$E_{\mathrm{i}}$ ($\mathrm{J\,m^{-2}}$)"   Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"
+        Mk.L"$T_{\mathrm{w}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T_{\mathrm{i}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"
+        Mk.L"$\bar{h}$ ($\mathrm{m}$)"                  Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)"        Mk.L"\varphi"
     ]
 )
 
 const classic_layout = Layout(
-    [:E :T :h],
-    AbstractString[Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)" Mk.L"$T$ ($\mathrm{\degree\!C}$)" Mk.L"$h$ ($\mathrm{m}$)"]
+    [:E  :T  :h],
+    AbstractString[
+        Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"  Mk.L"$h$ ($\mathrm{m}$)"
+    ]
 )
 
 const missingsym = gensym(:missing)
