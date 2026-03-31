@@ -40,6 +40,7 @@ Singleton type representing the wave ice interaction model, as an extension of t
 [`MIZModel`](@ref).
 """
 struct WIModel <: AbstractModel end
+# TODO make WIModel <: MIZModel <: AbstractModel
 
 """
     ClassicModel <: AbstractModel
