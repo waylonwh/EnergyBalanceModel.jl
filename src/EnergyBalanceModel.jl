@@ -56,7 +56,7 @@ details on data handling and visualisation.
 module EnergyBalanceModel
 
 export ClassicModel, MIZModel
-export Collection, Forcing, Solutions, SpaceTime, Vec
+export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export default_parameters, integrate
 export annual_mean, hemispheric_mean
 export Layout, backend, plot_avg, plot_raw, plot_seasonal
@@ -68,11 +68,7 @@ include("mizebm.jl")
 include("classicebm.jl")
 include("plot.jl")
 
-using .Utilities
-using .Infrastructure
-using .MIZEBM
-using .ClassicEBM
-using .Plot
+using .ClassicEBM, .Infrastructure, .MIZEBM, .Plot, .Utilities
 
 """
     run_example(model<:AbstractModel=MIZModel(); plotbackend::Symbol=:GLMakie)
@@ -148,10 +144,13 @@ end # function run_example
 import PrecompileTools as PT
 
 PT.@setup_workload begin
-    ms = (MIZModel(), ClassicModel())
+    import InteractiveUtils as IU
+    ms = Tuple(M() for M in IU.subtypes(AbstractModel) if M !== Infrastructure.ModelDiff)
     Fs = (identity, sin)
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
+    m2s = Dict{AbstractModel,Solutions}()
     redirect_stdout(devnull)
+    redirect_stderr(devnull)
     PT.@compile_workload begin
         for m in ms, F in Fs, farg in fs_args
             st = SpaceTime{F}(10, 10, 1)
@@ -159,17 +158,21 @@ PT.@setup_workload begin
             par = default_parameters(m)
             T = fill(0.0, st.nx)
             init = Collection{Vec}(:Tg => T)
-            if m isa MIZModel
+            if m isa ClassicModel
+                init.E = par.cw * T
+            else # MIZModel
                 init.Ei = zeros(st.nx)
                 init.Ew = par.cw * T
                 init.h = zeros(st.nx)
                 init.D = zeros(st.nx)
-            elseif m isa ClassicModel
-                init.E = par.cw * T
             end # if isa; elseif
-            integrate(m, st, forcing, par, init)
+            sol = integrate(m, st, forcing, par, init)
+            F === sin && length(farg) == 1 && (m2s[m] = sol)
         end # for m, F, farg
+        m2s[MIZModel()] - m2s[ClassicModel()]
     end # PT.@compile_workload begin
 end # PT.@setup_workload begin
 
 end # module EnergyBalanceModel
+
+# TODO reduce deepcopys

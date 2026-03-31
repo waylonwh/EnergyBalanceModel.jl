@@ -2,18 +2,27 @@ module Infrastructure # EnergyBalanceModel.
 
 using ..Utilities
 
-import EnergyBalanceModel
-import SparseArrays as SA, Statistics as Stats
+import InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats
 
-export AbstractModel, ClassicModel, MIZModel
-export Collection, Forcing, Solutions, SpaceTime, Vec
+export AbstractModel, ClassicModel, MIZModel, ModelDiff
+export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export classic_paramset, default_parameters, default_parval, miz_paramset
 export get_diffop
 export annual_mean, hemispheric_mean
 export integrate
 
-const Vec = Vector{Float64} # abbreviation for vector type used in model
+"""
+    Vec
 
+Alias for `Vector{Float64}` to represent model variables.
+"""
+const Vec = Vector{Float64}
+
+"""
+    AbstractModel
+
+Abstract type for the different energy balance models.
+"""
 abstract type AbstractModel end
 
 """
@@ -30,6 +39,13 @@ struct MIZModel <: AbstractModel end
 Singleton type representing the classic idealised climate model by Wagner & Eisenman (2015).
 """
 struct ClassicModel <: AbstractModel end
+
+"""
+    ModelDiff{B<:AbstractModel, S<:AbstractModel} <: AbstractModel
+
+A type representing the difference (S-B) between two models `B` and `S`.
+"""
+struct ModelDiff{B<:AbstractModel, S<:AbstractModel} <: AbstractModel end
 
 """
     Collection{V}(args...)
@@ -55,36 +71,38 @@ julia> parameters.F = 0.0; parameters.F
 0.0
 ```
 """
-struct Collection{V}
+struct Collection{V} <: AbstractDict{Symbol,V}
     dict::Dict{Symbol,V}
-    Collection{V}(args...) where V = new(Dict{Symbol,V}(args...))
+    Collection{V}(args...) where V = new{V}(Dict{Symbol,V}(args...))
 end # struct Collection
 
 (Base.getproperty(coll::Collection{V}, key::Symbol)::V) where V = getindex(getfield(coll, :dict), key)
 (Base.setproperty!(coll::Collection{V}, key::Symbol, val::V)::Dict{Symbol,V}) where V =
     setindex!(getfield(coll, :dict), val, key)
 (Base.propertynames(coll::Collection{V})::Set{Symbol}) where V = Set(keys(getfield(coll, :dict)))
+(Base.iterate(coll::Collection{V})::Union{Tuple{Pair{Symbol,V},Int},Nothing}) where V =
+    iterate(getfield(coll, :dict))
+(Base.iterate(coll::Collection{V}, state::Int)::Union{Tuple{Pair{Symbol,V},Int},Nothing}) where V =
+    iterate(getfield(coll, :dict), state)
 (Base.length(coll::Collection{V})::Int) where V = length(getfield(coll, :dict))
 (Base.hash(coll::Collection{V}, h::UInt)::UInt) where V = hash(getfield(coll, :dict), h)
 
-function Base.show(io::IO, coll::Collection{V})::Nothing where V
-    buffer = iobuffer(io)
-    show(buffer, getfield(coll, :dict))
-    str = replace(String(take!(buffer.io)), "Dict"=>string(typeof(coll)))
-    print(io, str)
-    return nothing
-end # function Base.show
+function uniqueunion(ca::Collection{A}, cb::Collection{B}) where {A, B}
+    vtype = typejoin(A, B)
+    vtype === Any && (vtype = Union{A, B})
+    overlap = intersect(propertynames(ca), propertynames(cb))
+    return all(key -> getproperty(ca, key) === getproperty(cb, key), overlap) ?
+        Collection{vtype}() : Collection{vtype}(union(ca, cb))
+end # function uniqueunion
 
-function Base.show(io::IO, ::MIME"text/plain", coll::Collection{V})::Nothing where V
-    buffer = iobuffer(io)
-    show(buffer, MIME("text/plain"), getfield(coll, :dict))
-    str = replace(
-        String(take!(buffer.io)),
-        string(typeof(getfield(coll, :dict))) => string(typeof(coll))
-    )
-    print(io, str)
-    return nothing
-end # function Base.show
+"""
+    Par
+
+Alias for `Collection{Float64}` to represent model parameters.
+
+See also [`Collection`](@ref).
+"""
+const Par = Collection{Float64}
 
 """
     SpaceTime{F}(urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375)
@@ -224,7 +242,7 @@ julia> f(17.57)
 3.785
 ```
 """
-struct Forcing{F}
+struct Forcing{C}
     base::Float64 # base forcing
     peak::Float64 # peak forcing
     cool::Float64 # forcing after cooldown
@@ -338,7 +356,7 @@ An object to store model solutions. Type parameter `M` is the model type (`MIZMo
 - `spacetime::SpaceTime{F}`: space and time on which solutions are defined
 - `ts::Vec`: time vector for stored solutions
 - `forcing::Forcing{C}`: climate forcing
-- `parameters::Collection{Float64}`: model parameters
+- `parameters::Par`: model parameters
 - `initconds::Collection{Vec}`: initial conditions
 - `lastonly::Bool`: whether to store solutions for each time step only for the last year
 - `raw::Collection{Vector{Vec}}`: solutions for each time step
@@ -354,7 +372,7 @@ struct Solutions{M<:AbstractModel,F,C}
     spacetime::SpaceTime{F} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing{C} # climate forcing
-    parameters::Collection{Float64} # model parameters
+    parameters::Par # model parameters
     initconds::Collection{Vec} # initial conditions
     lastonly::Bool # store only last year of solution
     raw::Collection{Vector{Vec}} # solution storage
@@ -363,9 +381,8 @@ struct Solutions{M<:AbstractModel,F,C}
     } # seasonal peak and annual avg
 
     function Solutions{M}(
-        st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64},
-        init::Collection{Vec}, vars::Set{Symbol},
-        lastonly::Bool=true;
+        st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec},
+        vars::Set{Symbol}, lastonly::Bool=true
     ) where {M<:AbstractModel, F, C} # Solutions
         if lastonly
             dur_store = 1
@@ -376,10 +393,10 @@ struct Solutions{M<:AbstractModel,F,C}
         end # if lastonly, else
         # construct raw solution storage
         solraw = Collection{Vector{Vec}}()
-        foreach((var -> setproperty!(solraw, var, Vector{Vec}(undef, length(ts)))), vars)
+        foreach(var -> setproperty!(solraw, var, Vector{Vec}(undef, length(ts))), vars)
         # construct seasonal solution storage template
         seasonaltemp = Collection{Vector{Vec}}()
-        foreach((var -> setproperty!(seasonaltemp, var, Vector{Vec}(undef, st.dur))), vars)
+        foreach(var -> setproperty!(seasonaltemp, var, Vector{Vec}(undef, st.dur)), vars)
         return new{M,F,C}(
             st, # spacetime
             ts,
@@ -396,6 +413,42 @@ struct Solutions{M<:AbstractModel,F,C}
         ) # new
     end # function Solutions
 end # struct Solutions{M,F,C}
+
+function Base.:-(
+    sx::Solutions{X,F,true}, sy::Solutions{Y,F,true}
+)::Solutions{ModelDiff{X,Y},F,true} where {X<:AbstractModel, Y<:AbstractModel, F}
+    (sx.spacetime.x == sy.spacetime.x && sx.spacetime.t == sy.spacetime.t) ||
+        throw(
+            ArgumentError(
+                "Cannot compute difference of solutions defined on different space-time grids."
+            )
+        ) # throw
+    st = sx.spacetime.dur == sy.spacetime.dur ?
+        sx.spacetime :
+        SpaceTime{F}(sx.spacetime.x, sx.spacetime.t, max(sx.spacetime.dur, sy.spacetime.dur))
+    forcing = Forcing(sx.forcing.base - sy.forcing.base)
+    par = uniqueunion(sx.parameters, sy.parameters)
+    init = uniqueunion(sx.initconds, sy.initconds)
+    vars = intersect(propertynames(sx.raw), propertynames(sy.raw))
+    lastonly = sx.lastonly || sy.lastonly
+    diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly)
+    xinx = findall(in(diffsol.ts), sx.ts)
+    yinx = findall(in(diffsol.ts), sy.ts)
+    foreach(
+        var -> setproperty!(
+            diffsol.raw, var,
+            getproperty(sx.raw, var)[xinx] .- getproperty(sy.raw, var)[yinx]
+        ),
+        vars
+    ) # foreach
+    for season in 1:3, var in vars
+        setproperty!(
+            diffsol.annual[season], var,
+            getproperty(sx.annual[season], var)[1:st.dur] .- getproperty(sy.annual[season], var)[1:st.dur]
+        )
+    end # for season, var
+    return diffsol
+end # function Base.diff
 
 (Base.show(io::IO, sols::Solutions{<:AbstractModel,F,C})::Nothing) where {F, C} = print(
     io,
@@ -420,7 +473,7 @@ end # function Base.show
 
 # default parameter values
 let cw::Float64 = 9.8
-    global const default_parval = Collection{Float64}(
+    global const default_parval = Par(
         :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
         :A => 193.0, # OLR when T = T_m (W m^-2)
         :B => 2.1, # OLR temperature dependence (W m^-2 K^-1)
@@ -434,47 +487,43 @@ let cw::Float64 = 9.8
         :Fb => 4.0, # heat flux from ocean below (W m^-2)
         :k => 2.0, # sea ice thermal conductivity (W m^-2 K^-1)
         :Lf => 9.5, # sea ice latent heat of fusion (W yr m^-3)
-        :F => 0.0, # radiative forcing (W m^-2)
         :cg => 1e-3 * cw, # ghost layer heat capacity(W yr m^-2 K^-1)
         :tau => 1e-5 * cw, # ghost layer coupling timescale (yr)
         :Tm => 0.0, # mean temperature (C)
-        :m1 => 1.6e-6 * 31536000, # empirical constants of lateral melt
+        :m1 => 1.6e-6 * 31536000, # empirical constants of lateral melt (m y^-1 K^-1)
         :m2 => 1.36, # empirical constants of lateral melt
         :alpha => 0.66, # floe geometry constant, Ai = alpha * D^2
         :rl => 0.5, # lead region width (m)
         :Dmin => 1.0, # new pancake size (m)
-        :Dmax => 156, # largest floe length (m)
+        :Dmax => 500.0, # largest floe length (m)
         :hmin => 0.1, # new pancake thickness (m)
-        :kappa => 0.01 * 31536000 # floe welding parameter
-    ) # Collection{Float64}
+        :kappa => 0.01 * 31536000, # floe welding parameter (m^2 s^-1)
+    ) # Par
 end # let cw
 
 # parameters used in each model
-const miz_paramset = Set{Symbol}(
-    (
-        :D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :Tm, :m1, :m2, :alpha,
-        :rl, :Dmin, :Dmax, :hmin, :kappa, :cg, :tau
-    )
+const classicmodel_parvars = Set{Symbol}(
+    (:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :cg, :tau)
 )
-const classic_paramset = Set{Symbol}(
-    (:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :F, :cg, :tau)
+const mizmodel_parvars = push!(
+    copy(classicmodel_parvars),
+    :Tm, :m1, :m2, :alpha, :rl, :Dmin, :Dmax, :hmin, :kappa
 )
 
 # Create a parameter dictionary from default values for a given Set
-function default_parameters(paramset::Set{Symbol})::Collection{Float64}
+function default_parameters(paramset::Set{Symbol})::Par
     setvec = collect(paramset)
-    return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
+    return Par(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultparameters
 
 """
-    default_parameters(::MIZModel) -> Collection{Float64}
-    default_parameters(::ClassicModel) -> Collection{Float64}
+    default_parameters(<:AbstractModel) -> Par
 
 Get default parameters for a given model.
 
 # Examples
 ```julia-repl
-julia> default_parameters(classic)
+julia> default_parameters(ClassicModel())
 Collection{Float64} with 16 entries:
   :a2 => 0.1
   :F  => 0.0
@@ -489,13 +538,15 @@ Collection{Float64} with 16 entries:
   ⋮   => ⋮
 ```
 """
-default_parameters(::MIZModel)::Collection{Float64} = default_parameters(miz_paramset)
-default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(classic_paramset)
+function default_parameters end # stub
+for model in IU.subtypes(AbstractModel)
+    namelower = lowercase(split(string(model), '.')[end])
+    @eval default_parameters(::$model)::Par = default_parameters($(Symbol(namelower, "_parvars")))
+end # for model
 
 # calculate diffusion operator matrix
 @persistent(
     diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
-
     @inline function get_diffop(st::SpaceTime{identity})::SA.SparseMatrixCSC{Float64,Int64}
         if size(diffop) != (st.nx, st.nx) # recalculate diffusion operator
             dx = 1 / st.nx
@@ -513,7 +564,6 @@ default_parameters(::ClassicModel)::Collection{Float64} = default_parameters(cla
 @persistent(
     diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
     xid::UInt = UInt(0),
-
     @inline function get_diffop(st::SpaceTime{F})::SA.SparseMatrixCSC{Float64,Int64} where F
         if xid != objectid(st.x) # recalculate diffusion operator
             x = [-st.x[1]; st.x; 2 - st.x[end]] # include ghost points
@@ -549,7 +599,7 @@ function annual_mean(annusol::Solutions{<:AbstractModel,F,C})::Collection{Vec} w
     # calculate annual mean for each variable except temperatures
     means = Collection{Vec}()
     foreach(
-        (var -> setproperty!(means, var, crossmean(getproperty(annusol.raw, var)))),
+        var -> setproperty!(means, var, crossmean(getproperty(annusol.raw, var))),
         propertynames(annusol.raw)
     )
     return means
@@ -581,36 +631,36 @@ function savesol!(
     ti = mod1(tinx, sols.spacetime.nt) # index of time in the year
     # save raw data to annual
     foreach(
-        (var -> getproperty(annusol.raw, var)[ti] = getproperty(varscp, var)), # !
+        var -> getproperty(annusol.raw, var)[ti] = getproperty(varscp, var), # !
         propertynames(annusol.raw)
     )
     # save raw data
     if !sols.lastonly # save all raw data
         foreach(
-            (var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), tinx)),
+            var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), tinx),
             propertynames(sols.raw)
         )
     elseif tinx > length(sols.spacetime.T) - sols.spacetime.nt # save the raw data of the last year
         foreach(
-            (var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti)),
+            var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti),
             propertynames(sols.raw)
         )
     end # if !, elseif
     # save seasonal data
     if ti == sols.spacetime.winter.inx
         foreach(
-            (var -> setindex!(getproperty(sols.annual.winter, var), getproperty(varscp, var), year)),
+            var -> setindex!(getproperty(sols.annual.winter, var), getproperty(varscp, var), year),
             propertynames(sols.annual.winter)
         )
     elseif ti == sols.spacetime.summer.inx
         foreach(
-            (var -> setindex!(getproperty(sols.annual.summer, var), getproperty(varscp, var), year)),
+            var -> setindex!(getproperty(sols.annual.summer, var), getproperty(varscp, var), year),
             propertynames(sols.annual.summer)
         )
     elseif ti == sols.spacetime.nt # calculate annual average
         means = annual_mean(annusol)
         foreach(
-            (var -> setindex!(getproperty(sols.annual.avg, var), getproperty(means, var), year)),
+            var -> setindex!(getproperty(sols.annual.avg, var), getproperty(means, var), year),
             propertynames(sols.annual.avg)
         )
     end # if ==, elseif*2
@@ -646,7 +696,7 @@ function step! end
 function initialise end
 
 """
-    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
@@ -661,25 +711,23 @@ frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
-    model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Collection{Float64}, init::Collection{Vec};
+    model::M, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
     lastonly::Bool=true, updatefreq::Float64=1.0
 )::Solutions{M,F,C} where {M<:AbstractModel, F, C}
     # initialise
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
-    if updatefreq < Inf
+    if isfinite(updatefreq)
         progress::Progress = Progress(
-            length(st.T), "Integrating", updatefreq;
-            infofeed=(t -> string("t = ", round(t, digits=2)))
+            length(st.T), string("Integrating ", M), updatefreq;
+            infofeed=(t -> string("t = ", round(t; digits=2)))
         )
         update!(progress; feedargs=(0,))
-    end # if <
+    end # if isfinite
     # loop over time
     for ti in eachindex(st.T)
         step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par)
         savesol!(sols, annusol, vars, ti)
-        if updatefreq < Inf
-            update!(progress; feedargs=(st.T[ti],))
-        end # if <
+        isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
     end # for ti
     return sols
 end # function integrate

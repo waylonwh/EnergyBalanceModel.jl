@@ -7,9 +7,7 @@ import WGLMakie
 EBM.Plot.isloaded(::Val{:WGLMakie})::Bool = true
 
 function EBM.Plot.init_backend(::Val{:WGLMakie})::Module
-    if WGLMakie.Makie.current_backend() !== WGLMakie
-        WGLMakie.activate!()
-    end # if !==
+    WGLMakie.Makie.current_backend() === WGLMakie || WGLMakie.activate!()
     return WGLMakie
 end # function EBM.Plot.init_backend
 
