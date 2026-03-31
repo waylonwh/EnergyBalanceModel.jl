@@ -195,7 +195,7 @@ function Infrastructure.step!(
     ) # !
     clamp!(vars.h, 0, Inf) # avoid overshooting to negative thickness
     zeroref!(vars.h, vars.Ei) # restrict non-existence
-    clamp!(vars.D, par.Dmin, par.Dmax)
+    clamp!(vars.D, 0, par.Dmax)
     zeroref!(vars.D, vars.Ei) # restrict non-existence
     # update variables for Tg
     vars.nextphi = concentration(vars.Ei, vars.h, par) # !
