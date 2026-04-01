@@ -2,11 +2,11 @@ module Infrastructure # EnergyBalanceModel.
 
 using ..Utilities
 
-import InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats, Integrals as Intgr
+import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats
 
 export AbstractModel, ClassicModel, MIZModel, ModelDiff
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
-export default_parval
+export default_parameters, default_parval
 export get_diffop
 export hemispheric_mean, ice_area
 export integrate
@@ -738,7 +738,7 @@ function integrate(
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
     if isfinite(updatefreq)
         progress::Progress = Progress(
-            length(st.T), string("Integrating ", M), updatefreq;
+            length(st.T), string("Integrating ", M.name.name), updatefreq;
             infofeed=(t -> string("t = ", round(t; digits=2)))
         )
         update!(progress; feedargs=(0,))

@@ -215,7 +215,7 @@ iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
 )
 
 # mean across vectors
-@inline function crossmean(vecvec::Vector{Vector{<:Number}}) # -> Vector{<:Number}
+@inline function crossmean(vecvec::Vector{<:Vector}) # -> Vector{Number}
     @boundscheck all(length.(vecvec) .== length(vecvec[1])) ||
         throw(BoundsError("All vectors must be the same length."))
     return map(xi -> Stats.mean(vecvec[ti][xi] for ti in eachindex(vecvec)), eachindex(vecvec[1]))
