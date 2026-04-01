@@ -1,6 +1,6 @@
 name = "EnergyBalanceModel"
 uuid = "68dbb056-390c-4f33-8773-0304cbd749ae"
-version = "0.7.3-DEV.0" # minorfixes (update tests and CI)
+version = "0.7.3-DEV.1" # welding and plot titles
 authors = ["Waylon Wu <me@waylonwu.net>", "Navid C. Constantinou <navidcy@users.noreply.github.com>"]
 
 [deps]

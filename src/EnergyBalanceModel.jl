@@ -36,11 +36,11 @@ Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  1:21/-0:00 1231.41/sec                     Done ✓
  t = 50.0
-Solutions{EnergyBalanceModel.Infrastructure.MIZModel, sin, true} with:
+Solutions{EnergyBalanceModel.Infrastructure.MIZModel, sin, false} with:
   10 solution variables: Set([:T, :Ei, :Ti, :D, :n, :h, :phi, :Ew, :E, :Tw])
   on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
   and 2000 timesteps: 49.00025:0.0005:49.99975
-  with forcing Forcing{true}(0.0) (constant forcing)
+  with forcing Forcing{false}(0.0) (constant forcing)
 
 julia> save(sols, "./example.jld2");
 
@@ -55,11 +55,10 @@ details on data handling and visualisation.
 """
 module EnergyBalanceModel
 
-export ClassicModel, MIZModel, WIModel
+export ClassicModel, MIZModel
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export default_parameters, integrate
-export Spectrum, bretschneider
-export annual_mean, hemispheric_mean
+export hemispheric_mean, ice_area
 export Layout, backend, plot_avg, plot_raw, plot_seasonal
 export run_example
 
@@ -70,10 +69,10 @@ include("wimebm.jl")
 include("classicebm.jl")
 include("plot.jl")
 
-using .ClassicEBM, .Infrastructure, .MIZEBM, .Plot, .Utilities, .WIMEBM
+using .ClassicEBM, .Infrastructure, .MIZEBM, .Plot, .Utilities
 
 """
-    run_example(model<:AbstractModel=MIZModel(); plotbackend::Symbol=:GLMakie)
+    run_example(model<:AbstractModel=MIZModel(); plotbackend::Symbol=:GLMakie) -> Solutions{M,sin,false}
 
 Run a standard example simulation for the specified `model` (either an instance of
 `MIZModel`, `WIModel`, or `ClassicModel`). The results of the last year (year 50) are
@@ -93,25 +92,27 @@ Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  0:15/-0:00 6456.44/sec                     Done ✓
  t = 50.0
-Solutions{MIZModel, sin, true} with:
+Solutions{MIZModel, sin, false} with:
   10 solution variables: Set([:T, :Ei, :Ti, :D, :n, :h, :phi, :Ew, :E, :Tw])
   on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
   and 2000 timesteps: 49.00025:0.0005:49.99975
-  with forcing Forcing{true}(0.0) (constant forcing)
+  with forcing Forcing{false}(0.0) (constant forcing)
 
 julia> run_example(ClassicModel())
 Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  0:18/-0:00 5702.05/sec                     Done ✓
  t = 50.0
-Solutions{ClassicModel, sin, true} with:
+Solutions{ClassicModel, sin, false} with:
   3 solution variables: Set([:T, :h, :E])
   on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
   and 2000 timesteps: 49.00025:0.0005:49.99975
-  with forcing Forcing{true}(0.0) (constant forcing)
+  with forcing Forcing{false}(0.0) (constant forcing)
 ```
 """
-function run_example(model::M=MIZModel(); plotbackend::Symbol=Plot.find_backend()) where M<:AbstractModel
+function run_example(
+    model::M=MIZModel(); plotbackend::Symbol=Plot.find_backend()
+)::Solutions{M,sin,false} where M<:AbstractModel
     st = SpaceTime{sin}(180, 2000, 50)
     forcing = Forcing(0.0)
     par = default_parameters(model)
@@ -151,12 +152,12 @@ import PrecompileTools as PT
 
 PT.@setup_workload begin
     import InteractiveUtils as IU
-    ms = Tuple(M() for M in IU.subtypes(AbstractModel))
+    ms = Tuple(M() for M in IU.subtypes(AbstractModel) if M !== Infrastructure.ModelDiff)
     Fs = (identity, sin)
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
-    spectrum = bretschneider(3.0, 9.5)
-    redirect_stdout(devnull)
-    redirect_stderr(devnull)
+    m2s = Dict{AbstractModel,Solutions}()
+    # redirect_stdout(devnull)
+    # redirect_stderr(devnull)
     PT.@compile_workload begin
         for m in ms, F in Fs, farg in fs_args
             st = SpaceTime{F}(10, 10, 1)
@@ -166,18 +167,16 @@ PT.@setup_workload begin
             init = Collection{Vec}(:Tg => T)
             if m isa ClassicModel
                 init.E = par.cw * T
-            else # MIZModel or WIModel
+            else # MIZModel
                 init.Ei = zeros(st.nx)
                 init.Ew = par.cw * T
                 init.h = zeros(st.nx)
                 init.D = zeros(st.nx)
             end # if isa; elseif
-            try # avoid AssertionError from WIModel
-                integrate(m, st, forcing, par, init; spectrum)
-            catch err
-                err isa AssertionError || err isa InexactError || rethrow(err)
-            end # try; catch err
+            sol = integrate(m, st, forcing, par, init)
+            F === sin && length(farg) == 1 && (m2s[m] = sol)
         end # for m, F, farg
+        m2s[MIZModel()] - m2s[ClassicModel()]
     end # PT.@compile_workload begin
 end # PT.@setup_workload begin
 

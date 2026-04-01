@@ -31,11 +31,10 @@ struct Layout{T}
 end # struct Layout
 Layout(vars::Matrix{T}, titles::Matrix{AbstractString}=string.(vars)) where T = Layout{T}(vars, titles)
 
-(Base.size(layout::Layout{T})::NTuple{2,Int}) where T = size(layout.vars)
-(Base.axes(layout::Layout{T}, dim::Int)::Base.OneTo{Int64}) where T = axes(layout.vars, dim)
-(Base.eachindex(layout::Layout{T})::Base.OneTo{Int64}) where T = eachindex(layout.vars)
-(Base.getindex(layout::Layout{T}, inx...)::@NamedTuple{var::T, title::AbstractString}) where T =
-    (var=layout.vars[inx...], title=layout.titles[inx...])
+Base.size(layout::Layout)::NTuple{2,Int} = size(layout.vars)
+Base.axes(layout::Layout, dim::Int)::Base.OneTo{Int64} = axes(layout.vars, dim)
+Base.eachindex(layout::Layout)::Base.OneTo{Int64} = eachindex(layout.vars)
+Base.getindex(layout::Layout, inx...) = (var=layout.vars[inx...], title=layout.titles[inx...]) # -> @NamedTuple{var::T, title::AbstractString}
 
 struct BackendError <: Exception
     requested::Symbol
@@ -43,14 +42,14 @@ struct BackendError <: Exception
 end # struct BackendError
 
 function Base.showerror(io::IO, err::BackendError)::Nothing
-    if err.requested === missingsym
+    if err.requested === :missing
         println(io, "No Makie backend is currently loaded. Please load a backend package first.")
-    else # err.requested !== missingsym
+    else # err.requested !== :missing
         println(
             io,
             "Backend package $(err.requested) is not loaded or unsupported. Try `import $(err.requested)` first."
         )
-        err.loaded === missingsym ||
+        err.loaded === :missing ||
             println(
                 io,
                 "Hint: Another backend package $(err.loaded) is already loaded."
@@ -68,7 +67,7 @@ const miz_layout = Layout(
     AbstractString[
         Mk.L"$E_{\mathrm{w}}$ ($\mathrm{J\,m^{-2}}$)"   Mk.L"$E_{\mathrm{i}}$ ($\mathrm{J\,m^{-2}}$)"   Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"
         Mk.L"$T_{\mathrm{w}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T_{\mathrm{i}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"
-        Mk.L"$\bar{h}$ ($\mathrm{m}$)"                  Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)"        Mk.L"\varphi"
+        Mk.L"$\bar{h}$ ($\mathrm{m}$)"                  Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)"        Mk.L"$\varphi$"
     ]
 )
 
@@ -79,10 +78,17 @@ const classic_layout = Layout(
     ]
 )
 
-const missingsym = gensym(:missing)
-
-default_layout(::Union{MIZModel,WIModel})::Layout{Symbol} = miz_layout
+default_layout(::MIZModel)::Layout{Symbol} = miz_layout
 default_layout(::ClassicModel)::Layout{Symbol} = classic_layout
+function default_layout(::ModelDiff{A,B})::Layout{Symbol} where {A<:AbstractModel, B<:AbstractModel}
+    layout = (A === ClassicModel || B === ClassicModel) ?
+        deepcopy(classic_layout) : deepcopy(miz_layout)
+    foreach(
+        i -> layout.titles[i] = Mk.latexstring(raw"$\Delta ", layout.titles[i][2:end]),
+        eachindex(layout.titles)
+    )
+    return layout
+end # function default_layout
 
 isloaded(::Val)::Bool = false
 
@@ -90,7 +96,7 @@ function find_backend()::Symbol
     for backend in (:GLMakie, :CairoMakie, :WGLMakie)
         isloaded(Val(backend)) && return backend
     end # for backend
-    return missingsym
+    return :missing
 end # function find_backend
 
 init_backend(::Val{S}) where S = throw(BackendError(S, find_backend()))
@@ -118,11 +124,29 @@ GLMakie
 backend()::Union{Module,Missing} = Mk.current_backend()
 backend(bcknd::Symbol)::Module = init_backend(Val(bcknd))
 
+# (isD::Val{[Bool]}, diff::Val{[Bool]}, data::Matrix{Float64}) -> (levels, extendlow, extendhigh)
+get_levels(::Val{false}, ::Val{false}, _)::Tuple{Int,Nothing,Nothing,Mk.Automatic} = (
+    21, nothing, nothing, Mk.automatic
+) # normal
+get_levels(::Val{true}, ::Val{false}, _)::Tuple{Vector{Float64},Nothing,Symbol,Vector{Int}} = (
+    [collect(0:0.5:10); 50; 100], nothing, :auto, [0, 10, 50, 100]
+) # D sol
+get_levels(::Val{true}, ::Val{true}, _)::Tuple{Vector{Float64},Symbol,Symbol,Vector{Int}} = (
+    [-100; -50; collect(-10:10); 50; 100], :auto, :auto, [-100, -50, -10, 10, 50, 100]
+) # D diff
+get_levels(::Val{false}, ::Val{true}, data::Matrix{Float64})::Tuple{Vector{Float64},Nothing,Nothing,Mk.Automatic} = (
+    maximum(abs, filter(!isnan, data))*range(-1, 1; length=21), nothing, nothing, Mk.automatic
+)
+
 function contourf_tiles(
     t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}};
-    xlim::Union{NTuple{2,Real},Nothing}=nothing, tlim::Union{NTuple{2,Real}, Nothing}=nothing, inspect::Bool=false
+    xlim::Union{NTuple{2,Real},Nothing}=nothing,
+    tlim::Union{NTuple{2,Real}, Nothing}=nothing,
+    diff::Bool=false,
+    inspect::Bool=false,
+    figsize::Tuple{Int,Int}=(600, 400)
 )::Mk.Figure where T<:Real
-    fig = Mk.Figure()
+    fig = Mk.Figure(size=figsize)
     for row in axes(layout, 1), col in axes(layout, 2)
         subfig = fig[row,col]
         ax = Mk.Axis(
@@ -130,13 +154,23 @@ function contourf_tiles(
             title=layout[row,col].title,
             xlabel=(row==lastindex(layout, 1) ? Mk.L"$t$ ($\mathrm{y}$)" : ""),
             ylabel=(col==1 ? Mk.L"x" : ""),
+            xticklabelrotation=(T===Int ? 0 : -pi/4),
             limits=(tlim, xlim)
         )
         if all(isnan, layout[row,col].var)
             @warn "All data are NaN at position ($row, $col). Skipping plot."
         else # valid data
-            ctr = Mk.contourf!(ax, t, x, layout[row,col].var; extendlow=:auto, extendhigh=:auto)
-            Mk.Colorbar(subfig[1,2], ctr)
+            isD = occursin(raw"\mathcal{D}", layout[row,col].title)
+            levels, extendlow, extendhigh, ticks = get_levels(Val(isD), Val(diff), layout[row,col].var)
+            ctr = Mk.contourf!(ax, t, x, layout[row,col].var; levels, extendlow, extendhigh)
+            Mk.Colorbar(subfig[1,2], ctr; ticks)
+            if diff
+                Mk.contour!(ax, t, x, layout[row,col].var; levels=[0], color=:black)
+                cbaxis = Mk.Axis(subfig[1,2]; limits=((-1, 1), (-1, 1)))
+                Mk.hidedecorations!(cbaxis)
+                Mk.hidespines!(cbaxis)
+                Mk.hlines!(cbaxis, 0; color=:black, linewidth=2)
+            end # if diff
         end # if all; else
     end # for row, col
     inspect && Mk.DataInspector(fig)
@@ -146,10 +180,10 @@ end # function contourf_tiles
 matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
 
 function limit_size(
-    xs::Vec, ts::Vector{T},
+    xs::Vec, ts::Vector{<:Real},
     xsizelim::Int=1000, tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(xs), trange::NTuple{2,Real}=extrema(ts)
-)::@NamedTuple{xinx::Vector{Int}, tinx::Vector{Int}} where T<:Real
+)::@NamedTuple{xinx::Vector{Int}, tinx::Vector{Int}}
     # find range indices
     tiran = (findfirst(>=(trange[1]), ts), findlast(<=(trange[2]), ts))
     xiran = (findfirst(>=(xrange[1]), xs), findlast(<=(xrange[2]), xs))
@@ -179,7 +213,7 @@ function limit_size(
 end # function limit_size
 
 """
-    plot_raw(sols::Solutions{<:AbstractModel,F,C}, bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_raw(sols::Solutions, bcknd::Symbol=...; kwargs...) -> Makie.Figure
 
 Plot the the solution variables for each time step in `sols.raw` using the specified Makie
 backend `bcknd`. The function will find available backend if not specified.
@@ -195,17 +229,19 @@ backend `bcknd`. The function will find available backend if not specified.
 - `tsizelim::Int`: Maximum number of time steps to plot.
 - `xrange::NTuple{2,Real}`: Range of spatial points to plot.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
+- `figsize::Tuple{Int,Int}`: Size of the figure in pixels.
 """
 function plot_raw(
-    sols::Solutions{M,F,C},
+    sols::Solutions{M},
     bcknd::Symbol=find_backend();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false,
     xsizelim::Int=1000,
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
-    trange::NTuple{2,Real}=extrema(sols.ts)
-)::Mk.Figure where {M<:AbstractModel, F, C}
+    trange::NTuple{2,Real}=extrema(sols.ts),
+    figsize::Tuple{Int,Int}=(600, 400)
+)::Mk.Figure where M<:AbstractModel
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, sols.ts, xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -214,12 +250,12 @@ function plot_raw(
     end # for inx
     return contourf_tiles(
         sols.ts[tinx], sols.spacetime.x[xinx], datatitle;
-        xlim=xrange, tlim=trange, inspect
+        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff, figsize
     )
 end # function plot_raw
 
 """
-    plot_avg(sols::Solutions{<:AbstractModel,F,C}, bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_avg(sols::Solutions, bcknd::Symbol=...; kwargs...) -> Makie.Figure
 
 Plot the annual average of solution variables in `sols.annual.avg` using the specified
 Makie backend `bcknd`. The function will find available backend if not specified.
@@ -235,17 +271,19 @@ Makie backend `bcknd`. The function will find available backend if not specified
 - `tsizelim::Int`: Maximum number of time steps to plot.
 - `xrange::NTuple{2,Real}`: Range of spatial points to plot.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
+- `figsize::Tuple{Int,Int}`: Size of the figure in pixels.
 """
 function plot_avg(
-    sols::Solutions{M,F,C},
+    sols::Solutions{M},
     bcknd::Symbol=find_backend();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false,
     xsizelim::Int=1000,
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
-    trange::NTuple{2,Real}=(1, sols.spacetime.dur)
-)::Mk.Figure where {M<:AbstractModel, F, C}
+    trange::NTuple{2,Real}=(1, sols.spacetime.dur),
+    figsize::Tuple{Int,Int}=(600, 400)
+)::Mk.Figure where M<:AbstractModel
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, collect(1:sols.spacetime.dur), xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -254,17 +292,12 @@ function plot_avg(
     end # for inx
     return contourf_tiles(
         collect(tinx), sols.spacetime.x[xinx], datatitle;
-        xlim=xrange, tlim=trange, inspect
+        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff, figsize
     )
 end # function plot_avg
 
-(ice_area(sols::Solutions{ClassicModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
-    2pi * hemispheric_mean((getproperty(sols.annual, season).E[year].<0), sols.spacetime.x)
-(ice_area(sols::Solutions{MIZModel,F,C}, season::Symbol, year::Int)::Float64) where {F, C} =
-    2pi * hemispheric_mean(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
-
 """
-    plot_seasonal(sols::Solutions{<:AbstractModel,F,false}, bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_seasonal(sols::Solutions, bcknd::Symbol=...; kwargs...) -> Makie.Figure
 
 Using the data from `sols.annual`, plot lines spanned by (`xfunc(sols, year)`,
 `yfunc(sols, season, year)`) for each year and for the seasons `:avg`, `:winter`, and
@@ -287,7 +320,7 @@ annual average are thick solid.
     plot.
 """
 function plot_seasonal(
-    sols::Solutions{<:AbstractModel,F,false},
+    sols::Solutions{<:AbstractModel,F,true},
     bcknd::Symbol=find_backend();
     xfunc::Function=((sols, year) -> hemispheric_mean(sols.annual.avg.T[year], sols.spacetime.x)),
     yfunc::Function=ice_area,
@@ -310,8 +343,8 @@ function plot_seasonal(
         (sols.forcing.domain[2]:sols.forcing.domain[3], sols.forcing.domain[4]:sols.forcing.domain[5]),
         (Mk.Cycled(6), Mk.Cycled(1))
     ), season in (:avg, :winter, :summer)
-        width = 1 # TODO Float64?
-        season === :avg && (width += (domain===:Warming ? 2 : 1)) # TODO Float64?
+        width = 1
+        season === :avg && (width += (domain===:Warming ? 2 : 1))
         push!(
             group,
             Mk.lines!(
