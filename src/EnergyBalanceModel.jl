@@ -176,5 +176,3 @@ PT.@setup_workload begin
 end # PT.@setup_workload begin
 
 end # module EnergyBalanceModel
-
-# TODO reduce deepcopys

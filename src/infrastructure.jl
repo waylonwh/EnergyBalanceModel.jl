@@ -11,7 +11,6 @@ export get_diffop
 export hemispheric_mean, ice_area
 export integrate
 
-# TODO rename
 """
     Vec
 
@@ -155,7 +154,7 @@ struct SpaceTime{F}
 
     function SpaceTime{F}(
         urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int;
-        winter::Float64=0.26125, summer::Float64=0.77375 # TODO definition of "winter" and "summer"
+        winter::Float64=0.26125, summer::Float64=0.77375
     ) where F
         du = (urange[2]-urange[1]) / nx
         u = range(urange[1] + du/2, urange[2] - du/2, nx)
@@ -694,7 +693,22 @@ function hemispheric_mean(vec::Vec, x::Vec)::Float64
     return int.u
 end # function hemispheric_mean
 
-# TODO doc string
+"""
+    ice_area(phi::Vec, x::Vec) -> Float64
+
+Calculate the area covered by sea ice from the sea ice concentration `phi` defined on grid
+`x` by discretised integration using the Simpson's rule.
+
+# Examples
+```julia-repl
+julia> x = sin.(range(0, pi/2, 181))[1:end-1]; # avoid the singularity at x=1
+
+julia> phi = @. 2x - x^2;
+
+julia> ice_area(phi, x)
+1.4075808945373096
+```
+"""
 function ice_area(phi::Vec, x::Vec)::Float64
     int = Intgr.solve(
         Intgr.SampledIntegralProblem(@.(pi*x * phi / 2sqrt(1-x^2)), x), Intgr.SimpsonsRule()
@@ -706,6 +720,21 @@ function ice_area(phi::Vec, x::Vec)::Float64
     return int.u
 end # function ice_area
 
+"""
+    ice_area(sols::Solutions, season::Symbol, year::Int) -> Float64
+
+Calculate the area covered by sea ice for a given season (must be `:winter`, `:summer`, or
+`:avg`) and year from the solutions.
+
+# Examples
+```julia-repl
+julia> sols = run_example();
+[output omitted]
+
+julia> ice_area(sols, :summer, 30)
+0.43981792357403693
+```
+"""
 ice_area(sols::Solutions{ClassicModel}, season::Symbol, year::Int)::Float64 =
     ice_area((getproperty(sols.annual, season).E[year].<0), sols.spacetime.x)
 ice_area(sols::Solutions{MIZModel}, season::Symbol, year::Int)::Float64 =
