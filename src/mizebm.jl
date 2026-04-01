@@ -22,8 +22,10 @@ water_temp_nonan(Ew::Vec, phi::Vec, par::Par)::Vec = condset!(water_temp(Ew, phi
 ice_temp(T0::Vec, par::Par)::Vec = min.(T0, par.Tm)
 
 solveT0(x::Vec, t::Float64, h::Vec, Tg::Vec, Tw::Vec, phi::Vec, f::Float64, par::Par)::Vec =
-    @. (par.Tm * (par.B + par.k/h) + par.cg/par.tau * (Tg - (1-phi)Tw) + $(solar(x, t, :ice, par)) - par.A + f) /
-    (par.B + par.k/h + par.cg/par.tau * phi)
+    @. (
+        $(solar(x, t, :ice, par)) - par.A + f - (1-phi)Tw * (par.B + par.cg/par.tau)
+        + par.Tm * (par.B + par.k/h) + par.cg/par.tau * Tg
+    ) / (phi * (par.B + par.cg/par.tau) + par.k/h)
 
 function stepTg!(
     t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Par
@@ -31,7 +33,7 @@ function stepTg!(
     frez = @. (T0<par.Tm) & (h>0)
     watr = .~frez
     diagphi = SA.spdiagm(phi)
-    invM = SA.spdiagm(inv.(par.B .+ par.k./h + par.cg/par.tau * phi))
+    invM = SA.spdiagm(inv.(phi * (par.B + par.cg/par.tau) .+ par.k./h))
     Tg .= (
             (1+st.dt/par.tau)LA.I -
             st.dt*par.D/par.cg * get_diffop(st) -
@@ -43,7 +45,7 @@ function stepTg!(
                 (
                     diagphi * (
                         par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h))) -
-                        par.cg/par.tau * (LA.I-diagphi)SA.spdiagm(Tw) +
+                        (par.B + par.cg/par.tau) * (LA.I-diagphi)SA.spdiagm(Tw) +
                         SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
                     ) * invM
                 )frez +
