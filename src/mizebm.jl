@@ -35,21 +35,21 @@ function stepTg!(
     diagphi = SA.spdiagm(phi)
     invM = SA.spdiagm(inv.(phi * (par.B + par.cg/par.tau) .+ par.k./h))
     Tg .= (
-            (1+st.dt/par.tau)LA.I -
-            st.dt*par.D/par.cg * get_diffop(st) -
-            (st.dt*par.cg/par.tau^2 * diagphi * invM)SA.spdiagm(frez)
+            (1+st.dt/par.tau)LA.I
+            - st.dt*par.D/par.cg * get_diffop(st)
+            - (st.dt*par.cg/par.tau^2 * diagphi * invM)SA.spdiagm(frez)
         ) \ (
-            Tg +
-            st.dt/par.tau * (
-                (LA.I-diagphi)Tw +
-                (
+            Tg
+            + st.dt/par.tau * (
+                (LA.I-diagphi)Tw
+                + (
                     diagphi * (
-                        par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h))) -
-                        (par.B + par.cg/par.tau) * (LA.I-diagphi)SA.spdiagm(Tw) +
-                        SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
+                        par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h)))
+                        - (par.B + par.cg/par.tau) * (LA.I-diagphi)SA.spdiagm(Tw)
+                        + SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
                     ) * invM
-                )frez +
-                par.Tm * diagphi*watr
+                )frez
+                + par.Tm * diagphi*watr
             )
         )
     return Tg
