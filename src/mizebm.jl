@@ -135,14 +135,14 @@ function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par)::Vec
 end # function D_t
 
 function Infrastructure.initialise(
-    ::MIZModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true
-) # -> Tuple{Collection{Vec}, Solutions{MIZModel,F,V}, Solutions{MIZModel,F,V}}
+) where M<:Union{MIZModel,WIModel} # -> Tuple{Collection{Vec}, Solutions{M,F,V}, Solutions{M,F,V}}
     # create storages
     vars = deepcopy(init)
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
-    sols = Solutions{typeof(model)}(st, forcing, par, init, solvars, lastonly) # final output
-    annusol = Solutions{typeof(model)}(st, forcing, par, init, solvars, true) # for annual means (internal use)
+    sols = Solutions{M}(st, forcing, par, init, solvars, lastonly) # final output
+    annusol = Solutions{M}(st, forcing, par, init, solvars, true) # for annual means (internal use)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)
     vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
