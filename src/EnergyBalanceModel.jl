@@ -57,6 +57,7 @@ module EnergyBalanceModel
 
 export ClassicModel, MIZModel
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
+export Spectrum, bretschneider, monochromatic
 export default_parameters, integrate
 export hemispheric_mean, ice_area
 export Layout, backend, plot_avg, plot_raw, plot_seasonal
@@ -69,7 +70,7 @@ include("wimebm.jl")
 include("classicebm.jl")
 include("plot.jl")
 
-using .ClassicEBM, .Infrastructure, .MIZEBM, .Plot, .Utilities
+using .ClassicEBM, .Infrastructure, .MIZEBM, .Plot, .Utilities, .WIMEBM
 
 """
     run_example(model<:AbstractModel=MIZModel(); plotbackend::Symbol=:GLMakie) -> Solutions{M,sin,false}
@@ -155,6 +156,7 @@ PT.@setup_workload begin
     ms = Tuple(M() for M in IU.subtypes(AbstractModel) if M !== Infrastructure.ModelDiff)
     Fs = (identity, sin)
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
+    spectrum = bretschneider(3.0, 9.5)
     m2s = Dict{AbstractModel,Solutions}()
     redirect_stdout(devnull)
     redirect_stderr(devnull)
@@ -167,13 +169,18 @@ PT.@setup_workload begin
             init = Collection{Vec}(:Tg => T)
             if m isa ClassicModel
                 init.E = par.cw * T
-            else # MIZModel
+            else # MIZModel or WIModel
                 init.Ei = zeros(st.nx)
                 init.Ew = par.cw * T
                 init.h = zeros(st.nx)
                 init.D = zeros(st.nx)
             end # if isa; elseif
-            sol = integrate(m, st, forcing, par, init)
+            local sol
+            try # avoid AssertionError from WIModel
+                sol = integrate(m, st, forcing, par, init; spectrum)
+            catch err
+                err isa AssertionError || err isa InexactError || rethrow(err)
+            end # try; catch err
             F === sin && length(farg) == 1 && (m2s[m] = sol)
         end # for m, F, farg
         m2s[MIZModel()] - m2s[ClassicModel()]
