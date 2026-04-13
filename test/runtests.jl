@@ -33,3 +33,5 @@ end # @testset begin
     @test lastyear_hemi_mean(mizsols, :T) - lastyear_hemi_mean(clasols, :T) < 1.0
     @test lastyear_hemi_mean(mizsols, :E) - lastyear_hemi_mean(clasols, :E) < 10.0
 end # @testset begin
+
+# TODO add tests for WIM
