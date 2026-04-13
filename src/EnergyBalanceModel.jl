@@ -55,7 +55,7 @@ details on data handling and visualisation.
 """
 module EnergyBalanceModel
 
-export ClassicModel, MIZModel
+export ClassicModel, MIZModel, WIModel
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export Spectrum, bretschneider, monochromatic
 export default_parameters, integrate

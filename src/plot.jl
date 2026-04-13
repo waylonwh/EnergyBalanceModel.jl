@@ -78,7 +78,7 @@ const classic_layout = Layout(
     ]
 )
 
-default_layout(::MIZModel)::Layout{Symbol} = miz_layout
+default_layout(::Union{MIZModel,WIModel})::Layout{Symbol} = miz_layout
 default_layout(::ClassicModel)::Layout{Symbol} = classic_layout
 function default_layout(::ModelDiff{A,B})::Layout{Symbol} where {A<:AbstractModel, B<:AbstractModel}
     layout = (A === ClassicModel || B === ClassicModel) ?
@@ -129,10 +129,10 @@ get_levels(::Val{false}, ::Val{false}, _)::Tuple{Int,Nothing,Nothing,Mk.Automati
     21, nothing, nothing, Mk.automatic
 ) # normal
 get_levels(::Val{true}, ::Val{false}, _)::Tuple{Vector{Float64},Nothing,Symbol,Vector{Int}} = (
-    [collect(0:0.5:10); 50; 100], nothing, :auto, [0, 10, 50, 100]
+    [collect(0:2:50); 75; 100], nothing, :auto, collect(0:25:100)
 ) # D sol
 get_levels(::Val{true}, ::Val{true}, _)::Tuple{Vector{Float64},Symbol,Symbol,Vector{Int}} = (
-    [-100; -50; collect(-10:10); 50; 100], :auto, :auto, [-100, -50, -10, 10, 50, 100]
+    [-100; -75; collect(-50:4:50); 75; 100], :auto, :auto, collect(-100:25:100)
 ) # D diff
 get_levels(::Val{false}, ::Val{true}, data::Matrix{Float64})::Tuple{Vector{Float64},Nothing,Nothing,Mk.Automatic} = (
     maximum(abs, filter(!isnan, data))*range(-1, 1; length=21), nothing, nothing, Mk.automatic
