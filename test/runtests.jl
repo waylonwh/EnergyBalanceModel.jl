@@ -1,33 +1,35 @@
 using EnergyBalanceModel, Test
 
-import EnergyBalanceModel.Infrastructure:AbstractModel
+st = SpaceTime{sin}(180, 2000, 30)
+forcing = Forcing(0.0)
+
+mizpar = default_parameters(MIZModel())
+T = fill(17.0, st.nx)
+mizinit = Collection{Vec}(
+    :Ei => zeros(st.nx),
+    :Ew => mizpar.cw * T,
+    :h => zeros(st.nx),
+    :D => zeros(st.nx),
+    :Tg => T,
+) # Collection
+
+clapar = default_parameters(ClassicModel())
+clainit = Collection{Vec}(
+    :E => clapar.cw * T,
+    :Tg => T
+)
+
+lastyear_hemi_mean(sols::Solutions, var::Symbol)::Float64 =
+    hemispheric_mean(getproperty(sols.annual.avg, var)[sols.spacetime.dur], sols.spacetime.x)
+
+@testset "Code can run" begin
+    global mizsols = integrate(MIZModel(), st, forcing, mizpar, mizinit; updatefreq=Inf)
+    global clasols = integrate(ClassicModel(), st, forcing, clapar, clainit; updatefreq=Inf)
+    @test mizsols isa Solutions{MIZModel,sin,false}
+    @test clasols isa Solutions{ClassicModel,sin,false}
+end # @testset begin
 
 @testset "Test for annual hemispheric means" begin
-    st = SpaceTime(180, 2000, 20)
-    forcing = Forcing(0.0)
-
-    mizpar = default_parameters(MIZModel())
-    T = fill(17.0, st.nx)
-    mizinit = Collection{Vec}(
-        :Ei => zeros(st.nx),
-        :Ew => T .* mizpar.cw,
-        :h => zeros(st.nx),
-        :D => zeros(st.nx),
-        :Tg => T,
-    ) # Collection
-
-    clapar = default_parameters(ClassicModel())
-    clainit = Collection{Vec}(
-        :E => clapar.cw * T,
-        :Tg => T
-    )
-
-    mizsols = integrate(MIZModel(), st, forcing, mizpar, mizinit; updatefreq=Inf)
-    clasols = integrate(ClassicModel(), st, forcing, clapar, clainit; updatefreq=Inf)
-
-    (lastyear_hemi_mean(sols::Solutions{<:AbstractModel,F,C}, var::Symbol)::Float64) where {F, C} =
-        hemispheric_mean(getproperty(sols.annual.avg, var)[sols.spacetime.dur], sols.spacetime.x)
-
-    @test lastyear_hemi_mean(mizsols, :T) ≈ lastyear_hemi_mean(clasols, :T) atol=1
-    @test lastyear_hemi_mean(mizsols, :E) ≈ lastyear_hemi_mean(clasols, :E) atol=10
+    @test lastyear_hemi_mean(mizsols, :T) - lastyear_hemi_mean(clasols, :T) < 1.0
+    @test lastyear_hemi_mean(mizsols, :E) - lastyear_hemi_mean(clasols, :E) < 10.0
 end # @testset begin

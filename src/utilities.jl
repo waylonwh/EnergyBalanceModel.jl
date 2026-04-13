@@ -12,7 +12,7 @@ export condset, condset!, crossmean, zeroref!
     ctruncate(x, _...) = x
 end # if <
 
-# progress bar # TODO asynchronous progress bar
+# progress bar
 mutable struct Progress
     title::String
     total::Int
@@ -120,10 +120,8 @@ function output!(prog::Progress, feedargs::Tuple=())::Nothing
     now = time()
     isdone = false
     # clear previous lines
-    while prog.lines > 0
-        print("\033[A\033[2K") # move up one line and clear the line
-        prog.lines -= 1 # !
-    end # while >
+    print(repeat("\033[A\033[2K", prog.lines)) # move up and clear lines
+    prog.lines = 0 # !
     # title
     println(SS.styled"{bold,region,warning:$(prog.title)}")
     prog.lines += 1 # !
@@ -217,22 +215,21 @@ iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
 )
 
 # mean across vectors
-@inline function crossmean(vecvec::Vector{Vector{T}})::Vector{T} where T<:Number
+@inline function crossmean(vecvec::Vector{<:Vector}) # -> Vector{Number}
     @boundscheck all(length.(vecvec) .== length(vecvec[1])) ||
         throw(BoundsError("All vectors must be the same length."))
     return map(xi -> Stats.mean(vecvec[ti][xi] for ti in eachindex(vecvec)), eachindex(vecvec[1]))
 end # function crossmean
 
 # conditional copy in place
-@inline function condset!(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T} where T
+@inline function condset!(to::Vector, from, cond::Function, ref::Vector=to) # -> Vector{T}
     @. to[cond(ref)] = from # !
     return to
 end # function condset!
 
-@inline (condset(to::Vector{T}, from::T, cond::Function, ref::Vector{T}=to)::Vector{T}) where T =
-    condset!(copy(to), from, cond, ref)
+@inline condset(to::Vector, from, cond::Function, ref::Vector=to) = condset!(copy(to), from, cond, ref) # -> Vector{T}
 
 # replace entries with zeros in ref with zeros in place in v
-@inline (zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where T<:Number = condset!(v, zero(T), iszero, ref)
+@inline (zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where T = condset!(v, zero(T), iszero, ref)
 
 end # module Utilities

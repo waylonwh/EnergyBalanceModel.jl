@@ -22,32 +22,34 @@ water_temp_nonan(Ew::Vec, phi::Vec, par::Par)::Vec = condset!(water_temp(Ew, phi
 ice_temp(T0::Vec, par::Par)::Vec = min.(T0, par.Tm)
 
 solveT0(x::Vec, t::Float64, h::Vec, Tg::Vec, Tw::Vec, phi::Vec, f::Float64, par::Par)::Vec =
-    @. (par.Tm * (par.B + par.k/h) + par.cg/par.tau * (Tg - (1-phi)Tw) + $(solar(x, t, :ice, par)) - par.A + f) /
-    (par.B + par.k/h + par.cg/par.tau * phi)
+    @. (
+        $(solar(x, t, :ice, par)) - par.A + f - (1-phi)Tw * (par.B + par.cg/par.tau)
+        + par.Tm * (par.B + par.k/h) + par.cg/par.tau * Tg
+    ) / (phi * (par.B + par.cg/par.tau) + par.k/h)
 
 function stepTg!(
-    t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime{F}, par::Par
-)::Vec where F
+    t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Par
+)::Vec
     frez = @. (T0<par.Tm) & (h>0)
     watr = .~frez
     diagphi = SA.spdiagm(phi)
-    invM = SA.spdiagm(inv.(par.B .+ par.k./h + par.cg/par.tau * phi))
+    invM = SA.spdiagm(inv.(phi * (par.B + par.cg/par.tau) .+ par.k./h))
     Tg .= (
-            (1+st.dt/par.tau)LA.I -
-            st.dt*par.D/par.cg * get_diffop(st) -
-            (st.dt*par.cg/par.tau^2 * diagphi * invM)SA.spdiagm(frez)
+            (1+st.dt/par.tau)LA.I
+            - st.dt*par.D/par.cg * get_diffop(st)
+            - (st.dt*par.cg/par.tau^2 * diagphi * invM)SA.spdiagm(frez)
         ) \ (
-            Tg +
-            st.dt/par.tau * (
-                (LA.I-diagphi)Tw +
-                (
+            Tg
+            + st.dt/par.tau * (
+                (LA.I-diagphi)Tw
+                + (
                     diagphi * (
-                        par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h))) -
-                        par.cg/par.tau * (LA.I-diagphi)SA.spdiagm(Tw) +
-                        SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
+                        par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h)))
+                        - (par.B + par.cg/par.tau) * (LA.I-diagphi)SA.spdiagm(Tw)
+                        + SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
                     ) * invM
-                )frez +
-                par.Tm * diagphi*watr
+                )frez
+                + par.Tm * diagphi*watr
             )
         )
     return Tg
@@ -79,8 +81,8 @@ end # function area_lead
 
 # fluxes
 function vert_flux(
-    t::Float64, surface::Symbol, Tg::Vec, Tbar::Vec, f::Float64, st::SpaceTime{F}, par::Par
-)::Vec where F
+    t::Float64, surface::Symbol, Tg::Vec, Tbar::Vec, f::Float64, st::SpaceTime, par::Par
+)::Vec
     L = @. par.A + par.B * (Tbar - par.Tm) # OLR
     return solar(st.x, t, surface, par) .- L .+ par.cg/par.tau * (Tg-Tbar) .+ par.Fb .+ f
 end # function vert_flux
@@ -123,23 +125,24 @@ end # function average
 Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
 Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1-phi)Fvw - Flat
 h_t(Fvi::Vec, par::Par)::Vec = -1/par.Lf * Fvi
-function D_t(h::Vec, D::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par)::Vec
+function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par)::Vec
     lat_melt = -pi / 2 * par.alpha * wlat(Tw, par)
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
     zeroref!(lat_grow, h)
+    condset!(weld, 0.0, >=(par.Tm), Ti)
     return @. lat_melt + lat_grow + weld
 end # function D_t
 
 function Infrastructure.initialise(
-    model::Union{MIZModel,WIModel}, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec};
+    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true
-)::Tuple{Collection{Vec}, Solutions{typeof(model),F,C}, Solutions{typeof(model),F,C}} where {F, C}
+) where M<:Union{MIZModel,WIModel} # -> Tuple{Collection{Vec}, Solutions{M,F,V}, Solutions{M,F,V}}
     # create storages
     vars = deepcopy(init)
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
-    sols = Solutions{typeof(model)}(st, forcing, par, init, solvars, lastonly) # final output
-    annusol = Solutions{typeof(model)}(st, forcing, par, init, solvars, true) # for annual means (internal use)
+    sols = Solutions{M}(st, forcing, par, init, solvars, lastonly) # final output
+    annusol = Solutions{M}(st, forcing, par, init, solvars, true) # for annual means (internal use)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)
     vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
@@ -151,8 +154,8 @@ end # function initialise
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
 
 function Infrastructure.step!(
-    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par; _...
-)::Collection{Vec} where F
+    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; _...
+)::Collection{Vec}
     # copy next variables to current
     vars.phi = copy(vars.nextphi)
     vars.Tw = copy(vars.nextTw)
@@ -185,12 +188,12 @@ function Infrastructure.step!(
     ) # !
     vars.D = forward_euler(
         average(vars.D, par.Dmin, vars.phi, phip), # new pancakes
-        D_t(lasth, vars.D, vars.Tw, vars.phi, Qlp.Ql, par),
+        D_t(lasth, vars.D, vars.Ti, vars.Tw, vars.phi, Qlp.Ql, par),
         st.dt
     ) # !
     clamp!(vars.h, 0, Inf) # avoid overshooting to negative thickness
     zeroref!(vars.h, vars.Ei) # restrict non-existence
-    clamp!(vars.D, par.Dmin, par.Dmax)
+    clamp!(vars.D, 0, par.Dmax)
     zeroref!(vars.D, vars.Ei) # restrict non-existence
     # update variables for Tg
     vars.nextphi = concentration(vars.Ei, vars.h, par) # !
