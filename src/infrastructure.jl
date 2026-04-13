@@ -4,7 +4,7 @@ using ..Utilities
 
 import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats
 
-export AbstractModel, ClassicModel, MIZModel, ModelDiff
+export AbstractModel, ClassicModel, MIZModel, WIModel, ModelDiff
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec
 export default_parameters, default_parval
 export get_diffop
