@@ -510,6 +510,14 @@ const default_parval = Par(
     :Dmax => 500.0, # largest floe length (m)
     :hmin => 0.1, # new pancake thickness (m)
     :kappa => 0.01 * 31536000, # floe welding parameter (m^2 s^-1)
+    :Y => 5.5, # Effective Young's modulus (GPa)
+    :nu => 0.3, # Poisson's ratio
+    :rhow => 1025.0, # Water density (kg/m^3)
+    :g => 9.81, # Gravitational acceleration (m/s^2),
+    :Ec => 7.05e-5, # Breaking significant strain
+    :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
+    :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
+    :dmn => 20.0, # Chosen minmum floe diameter for the truncated power-law FSD in WIM (m)
 ) # Par
 
 # parameters used in each model
@@ -519,6 +527,10 @@ const classicmodel_parvars = Set{Symbol}(
 const mizmodel_parvars = push!(
     copy(classicmodel_parvars),
     :Tm, :m1, :m2, :alpha, :rl, :Dmin, :Dmax, :hmin, :kappa
+)
+const wimodel_parvars = push!(
+    deepcopy(mizmodel_parvars),
+    :Y, :nu, :rhow, :g, :Ec, :Gamma, :gamma, :dmn
 )
 
 # Create a parameter dictionary from default values for a given Set
