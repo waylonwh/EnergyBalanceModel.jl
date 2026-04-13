@@ -154,7 +154,7 @@ end # function initialise
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
 
 function Infrastructure.step!(
-    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par
+    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; _...
 )::Collection{Vec}
     # copy next variables to current
     vars.phi = copy(vars.nextphi)

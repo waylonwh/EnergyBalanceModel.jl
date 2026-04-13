@@ -779,7 +779,8 @@ Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
     model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0
+    lastonly::Bool=true, updatefreq::Float64=1.0,
+    spectrum#=::Union{Spectrum,Nothing}=#=nothing
 ) where M<:AbstractModel # -> Solutions{M,F,C}
     # initialise
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)

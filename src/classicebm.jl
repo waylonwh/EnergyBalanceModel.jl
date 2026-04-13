@@ -45,7 +45,7 @@ function Infrastructure.initialise(
 end # function initialise
 
 function Infrastructure.step!(
-    ::ClassicModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par
+    ::ClassicModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; _...
 )::Collection{Vec}
     # get static variables
     stat = get_statics(st, par)
