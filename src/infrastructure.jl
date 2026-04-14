@@ -111,15 +111,6 @@ See also [`Collection`](@ref).
 const Par = Collection{Float64}
 
 """
-    Par
-
-Alias for `Collection{Float64}` to represent model parameters.
-
-See also [`Collection`](@ref).
-"""
-const Par = Collection{Float64}
-
-"""
     SpaceTime{F}(urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375)
 
 Defines the spatial and temporal grid for the model.
