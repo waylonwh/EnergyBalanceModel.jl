@@ -27,9 +27,10 @@ function bretschneider(
     return Spectrum(freq, @. 1.25 * Hs^2 * T^5 / (8pi * Tp^4) * exp(-1.25(T/Tp)^4))
 end # function bretschneider
 
-monochromatic(A::Float64, T::Float64)::Spectrum = Spectrum(
-    [2pi/T-1e-2, 2pi/T, 2pi/T+1e-2], [0.0, A^2/2, 0.0]
-)
+monochromatic(
+    Hs::Float64, Tp::Float64, freq::Vec=collect(range(2pi/(Tp+0.1), 2pi/(Tp-0.1); step=1e-3));
+    eps::Float64=1e-6
+)::Spectrum = Spectrum(freq, @. Hs^2 / 16 * exp(-(freq - 2pi/Tp)^2 / 2eps) / sqrt(2pi * eps))
 
 function dispersion_relation(
     k::ComplexF64, omega::Float64, gamma::Float64, h::Float64, par::Par
