@@ -9,7 +9,7 @@ export Collection, Forcing, Par, Solutions, SpaceTime, Vec, AbstractSpectrum
 export default_parameters, default_parval
 export get_diffop
 export hemispheric_mean, ice_area
-export integrate
+export create_storages, integrate
 
 """
     Vec
@@ -347,6 +347,9 @@ function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
     end # if <, elseif*3, else
 end # function (forcing::Forcing{false})
 
+# Spectrum for WIM
+abstract type AbstractSpectrum end
+
 """
     Solutions{M,F,V}
 
@@ -383,6 +386,7 @@ struct Solutions{M<:AbstractModel,F,V}
     annual::@NamedTuple{
         winter::Collection{Vector{Vec}}, summer::Collection{Vector{Vec}}, avg::Collection{Vector{Vec}}
     } # seasonal peak and annual avg
+    spectrum_ref::Ref{AbstractSpectrum} # spectrum used for WIModel, if applicable
 
     function Solutions{M}(
         st::SpaceTime{F}, forcing::Forcing{V}, par::Par, init::Collection{Vec},
@@ -413,7 +417,8 @@ struct Solutions{M<:AbstractModel,F,V}
                 winter=deepcopy(seasonaltemp),
                 summer=deepcopy(seasonaltemp),
                 avg=deepcopy(seasonaltemp)
-            ) # ( # seasonal
+            ), # ( # seasonal
+            Ref{AbstractSpectrum}() # spectrum_ref
         ) # new
     end # function Solutions
 end # struct Solutions{M,F,V}
@@ -452,7 +457,7 @@ function Base.:-(
         )
     end # for season, var
     return diffsol
-end # function Base.diff
+end # function Base.:-
 
 Base.show(io::IO, sols::Solutions)::Nothing = print(
     io,
@@ -474,6 +479,8 @@ function Base.show(io::IO, ::MIME"text/plain", sols::Solutions)::Nothing
     print(io, "  with forcing ", repr(sols.forcing))
     return nothing
 end # function Base.show
+
+get_spectrum(sol::Solutions{WIModel}) = sol.spectrum_ref[] # -> Spectrum
 
 # default parameter values
 const default_parval = Par(
@@ -520,7 +527,7 @@ const mizmodel_parvars = push!(
     :Tm, :m1, :m2, :alpha, :rl, :Dmin, :Dmax, :hmin, :kappa
 )
 const wimodel_parvars = push!(
-    deepcopy(mizmodel_parvars),
+    copy(mizmodel_parvars),
     :Y, :nu, :rhow, :g, :Ec, :Gamma, :gamma, :dmn
 )
 
@@ -557,9 +564,6 @@ for model in IU.subtypes(AbstractModel)
     namelower = lowercase(split(string(model), '.')[end])
     @eval default_parameters(::$model)::Par = default_parameters($(Symbol(namelower, "_parvars")))
 end # for model
-
-# Spectrum for WIM
-abstract type AbstractSpectrum end
 
 # calculate diffusion operator matrix
 @persistent(
@@ -767,34 +771,15 @@ ice_area(sols::Solutions{MIZModel}, season::Symbol, year::Int)::Float64 =
 function step! end
 function initialise end
 
-const tfeed = t -> string("t = ", round(t; digits=2))
-
-# Common template for integration function
-@generated function _integrate(
-    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool, updatefreq::Float64, spectrum::Union{<:AbstractSpectrum,Nothing}=nothing
-) where M<:AbstractModel # -> Solutions{M,F,C}
-    step_call = :(step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par))
-    M === WIModel && insert!(step_call.args, 2, Expr(:parameters, :spectrum))
-    return quote
-        # initialise
-        vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
-        if isfinite(updatefreq)
-            progress::Progress = Progress(
-                length(st.T), string("Integrating ", M.name.name), updatefreq;
-                infofeed=tfeed
-            )
-            update!(progress; feedargs=(0,))
-        end # if isfinite
-        # loop over time
-        for ti in eachindex(st.T)
-            $step_call
-            savesol!(sols, annusol, vars, ti)
-            isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
-        end # for ti
-        return sols
-    end # quote
-end # function _integrate
+function create_storages(
+    ::M, solvars::Set{Symbol}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    lastonly::Bool
+) where M<:AbstractModel # -> Tuple{Collection{Vec},Solutions{M,F,C},Solutions{M,F,C}}
+    vars = deepcopy(init)
+    sols = Solutions{M}(st, forcing, par, init, solvars, lastonly)
+    annusol = Solutions{M}(st, forcing, par, init, solvars, true) # for calculating annual means
+    return (vars, sols, annusol)
+end # function create_storages
 
 """
     integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{ClassicModel,F,C}
@@ -813,15 +798,48 @@ frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
 
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
-integrate(
-    model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+function integrate(
+    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true, updatefreq::Float64=1.0
-) = _integrate(model, st, forcing, par, init; lastonly, updatefreq) # -> Solutions{M,F,C}
+) where M<:Union{MIZModel,ClassicModel} # -> Solutions{M,F,C}
+    # initialise
+    vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
+    if isfinite(updatefreq)
+        progress::Progress = Progress(
+            length(st.T), string("Integrating ", M.name.name), updatefreq;
+            infofeed=(t -> string("t = ", round(t; digits=2)))
+        )
+        update!(progress; feedargs=(0,))
+    end # if isfinite
+    # loop over time
+    for ti in eachindex(st.T)
+        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par)
+        savesol!(sols, annusol, vars, ti)
+        isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
+    end # for ti
+    return sols
+end # function integrate
 
-integrate(
+function integrate(
     model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::AbstractSpectrum
-) = _integrate(model, st, forcing, par, init; lastonly, updatefreq, spectrum) # -> Solutions{WIModel,F,C}
-
+) # -> Solutions{WIModel,F,C}
+    # initialise
+    vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly, spectrum)
+    if isfinite(updatefreq)
+        progress::Progress = Progress(
+            length(st.T), "Integrating WIModel", updatefreq;
+            infofeed=(t -> string("t = ", round(t; digits=2)))
+        )
+        update!(progress; feedargs=(0,))
+    end # if isfinite
+    # loop over time
+    for ti in eachindex(st.T)
+        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
+        savesol!(sols, annusol, vars, ti)
+        isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
+    end # for ti
+    return sols
+end # function integrate
 
 end # module Infrastructure

@@ -158,8 +158,8 @@ PT.@setup_workload begin
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
     spectrum = bretschneider(3.0, 9.5)
     m2s = Dict{AbstractModel,Solutions}()
-    redirect_stdout(devnull)
-    redirect_stderr(devnull)
+    # redirect_stdout(devnull)
+    # redirect_stderr(devnull)
     PT.@compile_workload begin
         for m in ms, F in Fs, farg in fs_args
             st = SpaceTime{F}(10, 10, 1)

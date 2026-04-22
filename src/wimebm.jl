@@ -3,6 +3,8 @@ module WIMEBM # EnergyBalanceModel.
 
 using ..Infrastructure, ..Utilities
 
+import EnergyBalanceModel.MIZEBM
+
 import Integrals as Intgr
 import NonlinearSolve as NlinSol
 
@@ -18,8 +20,6 @@ end # struct Spectrum
 Spectrum(freq::Vec, density::Vec) = length(freq) == length(density) ?
     Spectrum(freq, 2pi ./ freq, density) :
     throw(ArgumentError("Frequency and density vectors must be of the same length."))
-
-Base.copy(S::Spectrum)::Spectrum = Spectrum(S.freq, S.period, S.density)
 
 function bretschneider(
     Hs::Float64, Tp::Float64, freq::Vec=collect(range(2pi/23.8, 2pi/2.5; step=7.5e-2))
@@ -154,31 +154,52 @@ function updateD!(newD::Float64, xi::Int, vars::Collection{Vec}, l::Float64=1.0,
     return nothing
 end # function updateD!
 
+function Infrastructure.initialise(
+    model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    lastonly::Bool=true, spectrum::Spectrum
+) # -> Tuple{Collection{Vec}, Solutions{WIModel,F,V}, Solutions{WIModel,F,V}}
+    vars, sols, annusol = MIZEBM._initialise(model, st, forcing, par, init; lastonly)
+    sols.spectrum_ref[] = deepcopy(spectrum) # store spectrum in sols for later reference
+    annusol.spectrum_ref[] = deepcopy(spectrum)
+    vars.Ewave = zeros(st.nx)
+    vars.lambda = Vec(undef, st.nx)
+    return (vars, sols, annusol)
+end # function Infrastructure.initialise
+
 function Infrastructure.step!(
-    ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime{F}, par::Par; spectrum::Spectrum
-)::Collection{Vec} where F
+    ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; spectrum::Spectrum
+)::Collection{Vec}
     Infrastructure.step!(MIZModel(), t, f, vars, st, par) # thermodynamics
     edgeinx = findfirst(>(0), vars.h)
-    (isnothing(edgeinx) || wave_strain(spectrum, vars.h[edgeinx], par) < par.Ec) &&
-        return vars # no ice or no breakup
-    S = copy(spectrum) # protect input spectrum
+    if isnothing(edgeinx) # no ice
+        vars.Ewave .= 0.0
+        vars.lambda .= wave_period(spectrum)
+        return vars
+    elseif edgeinx > 1 # at least once cell has no ice
+        vars.Ewave[1:edgeinx-1] .= 0.0
+        vars.lambda[1:edgeinx-1] .= wave_period(spectrum)
+    end # if isnothing, elseif
+    # attenuate spectrum
+    spect = spectrum
     for xi in edgeinx:st.nx
         L = grid_length(st, xi)
-        attedS = attenuate(S, L, vars.h[xi], vars.phi[xi], par)
-        if wave_strain(attedS, vars.h[xi], par) > par.Ec # full breakup
-            dmx = 1/2 * wave_length(attedS, vars.h[xi], par)
-            dbar = mean_size(dmx, par)
+        atted_spect = attenuate(spect, L, vars.h[xi], vars.phi[xi], par)
+        atted_strain = wave_strain(atted_spect, vars.h[xi], par)
+        half_atted_spect = attenuate(atted_spect, L/2, vars.h[xi], vars.phi[xi], par)
+        half_atted_lambda = wave_length(half_atted_spect, vars.h[xi], par)
+        if atted_strain > par.Ec # full breakup
+            dbar = mean_size(1/2*half_atted_lambda, par)
             updateD!(dbar, xi, vars)
-            S = copy(attedS) # update spectrum for next grid cell
-        elseif wave_strain(S, vars.h[xi], par) < par.Ec # no breakup for higher h
-            break
-        else # partial breakup
-            l = fracture_distance(S, vars.h[xi], vars.phi[xi], L, par)
-            attedS = attenuate(S, l, vars.h[xi], vars.phi[xi], par)
-            frontd = mean_size(1/2*wave_length(spectrum, vars.h[xi], par), par)
+        elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
+            l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
+            half_partial_atted_spect = attenuate(spect, l/2, vars.h[xi], vars.phi[xi], par)
+            half_partial_atted_lambda = wave_length(half_partial_atted_spect, vars.h[xi], par)
+            frontd = mean_size(1/2*half_partial_atted_lambda, par)
             updateD!(frontd, xi, vars, l, L)
-            break # last cell to break
         end # if >, else
+        spect = atted_spect # update spectrum
+        vars.Ewave[xi] = wave_strain(half_atted_spect, vars.h[xi], par)
+        vars.lambda[xi] = half_atted_lambda
     end # for xi
     return vars
 end # function Infrastructure.step!

@@ -2,7 +2,7 @@ module Plot
 
 using ..Infrastructure, ..Utilities
 
-import Makie as Mk
+import InteractiveUtils as IU, Makie as Mk
 
 export Layout, backend
 export plot_avg, plot_raw, plot_seasonal
@@ -58,7 +58,14 @@ function Base.showerror(io::IO, err::BackendError)::Nothing
     return nothing
 end # function Base.showerror
 
-const miz_layout = Layout(
+const classicmodel_layout = Layout(
+    [:E  :T  :h],
+    AbstractString[
+        Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"  Mk.L"$h$ ($\mathrm{m}$)"
+    ]
+)
+
+const mizmodel_layout = Layout(
     [
         :Ew  :Ei  :E
         :Tw  :Ti  :T
@@ -71,18 +78,26 @@ const miz_layout = Layout(
     ]
 )
 
-const classic_layout = Layout(
-    [:E  :T  :h],
+const wimodel_layout = Layout(
+    [
+        :E   :Ewave  :lambda
+        :Tw  :Ti     :T
+        :h   :D      :phi
+    ],
     AbstractString[
-        Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"  Mk.L"$h$ ($\mathrm{m}$)"
+        Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"                Mk.L"$E_{\mathrm{wave}}$"                       Mk.L"$\lambda$ ($\mathrm{m}$)"
+        Mk.L"$T_{\mathrm{w}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T_{\mathrm{i}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"
+        Mk.L"$\bar{h}$ ($\mathrm{m}$)"                  Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)"        Mk.L"$\varphi$"
     ]
 )
 
-default_layout(::Union{MIZModel,WIModel})::Layout{Symbol} = miz_layout
-default_layout(::ClassicModel)::Layout{Symbol} = classic_layout
+for model in filter(!=(ModelDiff), IU.subtypes(AbstractModel))
+    namelower = lowercase(split(string(model), '.')[end])
+    @eval default_layout(::$model)::Layout{Symbol} = $(Symbol(namelower, "_layout"))
+end # for model
 function default_layout(::ModelDiff{A,B})::Layout{Symbol} where {A<:AbstractModel, B<:AbstractModel}
     layout = (A === ClassicModel || B === ClassicModel) ?
-        deepcopy(classic_layout) : deepcopy(miz_layout)
+        deepcopy(classicmodel_layout) : deepcopy(mizmodel_layout)
     foreach(
         i -> layout.titles[i] = Mk.latexstring(raw"$\Delta ", layout.titles[i][2:end]),
         eachindex(layout.titles)
@@ -186,7 +201,7 @@ function limit_size(
     xs::Vec, ts::Vector{<:Real},
     xsizelim::Int=1000, tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(xs), trange::NTuple{2,Real}=extrema(ts)
-)::@NamedTuple{xinx::Vector{Int}, tinx::Vector{Int}}
+)::NTuple{2,Vector{Int}}
     # find range indices
     tiran = (findfirst(>=(trange[1]), ts), findlast(<=(trange[2]), ts))
     xiran = (findfirst(>=(xrange[1]), xs), findlast(<=(xrange[2]), xs))
@@ -205,14 +220,14 @@ function limit_size(
         throw(ArgumentError("Number of points limits must be greater than 1."))
     # limit sizes
     xinx = (xiran[2]-xiran[1]+1) > xsizelim ?
-           round.(Int, range(xiran[1], xiran[2], xsizelim)) : # reduce x size
-           collect(xiran[1]:xiran[2]) # within the space size limit
+            round.(Int, range(xiran[1], xiran[2], xsizelim)) : # reduce x size
+            collect(xiran[1]:xiran[2]) # within the space size limit
     tinx = (tiran[2]-tiran[1]+1) > tsizelim ?
-           round.(Int, range(tiran[1], tiran[2], tsizelim)) : # reduce time size
-           collect(tiran[1]:tiran[2]) # within the time size limit
+            round.(Int, range(tiran[1], tiran[2], tsizelim)) : # reduce time size
+            collect(tiran[1]:tiran[2]) # within the time size limit
     length(tinx)length(xinx) > 1_000_000 &&
         @warn "Number of points to plot $(length(tinx)length(xinx)). This may lead to performance issues."
-    return (; xinx, tinx)
+    return (xinx, tinx)
 end # function limit_size
 
 """

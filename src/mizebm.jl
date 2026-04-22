@@ -93,22 +93,22 @@ function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Par)::Vec
     return Flat
 end # function lat_flux
 
-function redistributeE(rEi::Vec, rEw::Vec)::@NamedTuple{Ei::Vec, Ew::Vec, psiEidt::Vec, psiEwdt::Vec}
+function redistributeE(rEi::Vec, rEw::Vec)::NTuple{4,Vec}
     cEi = clamp.(rEi, -Inf, 0)
     cEw = clamp.(rEw, 0, Inf)
     psiEidt = rEi .- cEi # +
     psiEwdt = rEw .- cEw # -
     Ei = cEi .+ psiEwdt # -
     Ew = cEw .+ psiEidt # +
-    return (; Ei, Ew, psiEidt, psiEwdt)
+    return (Ei, Ew, psiEidt, psiEwdt)
 end # function redistributeE
 
 # redistribution functions
-function split_psiEw(psiEw::Vec, phi::Vec, Al::Vec)::@NamedTuple{Ql::Vec, Qp::Vec}
+function split_psiEw(psiEw::Vec, phi::Vec, Al::Vec)::Tuple{Vec,Vec}
     Ql = @. Al / (1-phi) * psiEw
     condset!(Ql, 0.0, isone, phi) # fix rounding errors
     Qp = psiEw - Ql
-    return (; Ql, Qp)
+    return (Ql, Qp)
 end # function split_psiEw
 
 dphip(Qp::Vec, par::Par)::Vec = @. -Qp / (par.Lf * par.hmin) # change rate of φ due to pancakes
@@ -136,30 +136,36 @@ end # function D_t
 
 forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
 
-function Infrastructure.initialise(
-    ::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool=true
-) where M<:Union{MIZModel,WIModel} # -> Tuple{Collection{Vec}, Solutions{M,F,V}, Solutions{M,F,V}}
+# common template of initialise function for MIZModel and WIModel
+function _initialise(
+    model::Union{MIZModel,WIModel}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    lastonly::Bool
+) # -> Tuple{Collection{Vec}, Solutions{M,F,V}, Solutions{M,F,V}}
     # create storages
-    vars = deepcopy(init)
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
-    sols = Solutions{M}(st, forcing, par, init, solvars, lastonly) # final output
-    annusol = Solutions{M}(st, forcing, par, init, solvars, true) # for annual means (internal use)
+    model isa WIModel && push!(solvars, :Ewave, :lambda) # add wave variables for WIModel
+    vars, sols, annusol = create_storages(model, solvars, st, forcing, par, init; lastonly)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)
     vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
     vars.nextT0 = solveT0(st.x, st.T[1], vars.h, vars.Tg, vars.nextTw, vars.nextphi, forcing(st.T[1]), par)
     condset!(vars.nextTw, 0.0, isnan) # eliminate NaNs for calculations
     return (vars, sols, annusol)
-end # function Infrastructure.initialise
+end # function _initialise
+
+Infrastructure.initialise(
+    model::MIZModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    lastonly::Bool=true
+) = _initialise(model, st, forcing, par, init; lastonly)
+    # -> Tuple{Collection{Vec}, Solutions{MIZModel,F,V}, Solutions{MIZModel,F,V}}
 
 function Infrastructure.step!(
     ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par
 )::Collection{Vec}
-    # copy next variables to current
-    vars.phi = copy(vars.nextphi)
-    vars.Tw = copy(vars.nextTw)
-    T0 = copy(vars.nextT0)
+    # assign next variables to current
+    vars.phi = vars.nextphi
+    vars.Tw = vars.nextTw
+    T0 = vars.nextT0
     # compute diagnostic variables
     vars.Ti = ice_temp(T0, par)
     condset!(vars.Ti, 0.0, isnan) # eliminate NaNs for calculations
@@ -172,15 +178,15 @@ function Infrastructure.step!(
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
     rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)
-    Epsidt = redistributeE(rEi, rEw)
-    vars.Ei = Epsidt.Ei # !
-    vars.Ew = Epsidt.Ew # !
+    Ei, Ew, _, psiEwdt = redistributeE(rEi, rEw)
+    vars.Ei = Ei # !
+    vars.Ew = Ew # !
     vars.E = weighted_avg(vars.Ei, vars.Ew, vars.phi) # !
     # update floe size and thickness
     Al = area_lead(vars.D, vars.phi, vars.n, par)
-    Qlp = split_psiEw(Epsidt.psiEwdt/st.dt, vars.phi, Al)
-    phip = st.dt * dphip(Qlp.Qp, par)
-    lasth = copy(vars.h) # save for D
+    Ql, Qp = split_psiEw(psiEwdt/st.dt, vars.phi, Al)
+    phip = st.dt * dphip(Qp, par)
+    lasth = vars.h # save for D
     vars.h = forward_euler(
         average(vars.h, par.hmin, vars.phi, phip), # new pancakes
         h_t(Fvi, par),
@@ -188,7 +194,7 @@ function Infrastructure.step!(
     ) # !
     vars.D = forward_euler(
         average(vars.D, par.Dmin, vars.phi, phip), # new pancakes
-        D_t(lasth, vars.D, vars.Ti, vars.Tw, vars.phi, Qlp.Ql, par),
+        D_t(lasth, vars.D, vars.Ti, vars.Tw, vars.phi, Ql, par),
         st.dt
     ) # !
     clamp!(vars.h, 0, Inf) # avoid overshooting to negative thickness
