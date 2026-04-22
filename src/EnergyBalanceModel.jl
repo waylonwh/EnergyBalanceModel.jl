@@ -177,7 +177,9 @@ PT.@setup_workload begin
             end # if isa; elseif
             local sol
             try # avoid AssertionError from WIModel
-                sol = integrate(m, st, forcing, par, init; spectrum)
+                m isa WIModel ?
+                    sol = integrate(m, st, forcing, par, init; spectrum) :
+                    sol = integrate(m, st, forcing, par, init)
             catch err
                 err isa AssertionError || err isa InexactError || rethrow(err)
             end # try; catch err

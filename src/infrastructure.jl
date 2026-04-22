@@ -767,6 +767,8 @@ ice_area(sols::Solutions{MIZModel}, season::Symbol, year::Int)::Float64 =
 function step! end
 function initialise end
 
+const tfeed = t -> string("t = ", round(t; digits=2))
+
 # Common template for integration function
 @generated function _integrate(
     model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
@@ -780,7 +782,7 @@ function initialise end
         if isfinite(updatefreq)
             progress::Progress = Progress(
                 length(st.T), string("Integrating ", M.name.name), updatefreq;
-                infofeed=(t -> string("t = ", round(t; digits=2)))
+                infofeed=tfeed
             )
             update!(progress; feedargs=(0,))
         end # if isfinite
@@ -818,8 +820,7 @@ integrate(
 
 integrate(
     model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0,
-    spectrum::AbstractSpectrum=nothing
+    lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::AbstractSpectrum
 ) = _integrate(model, st, forcing, par, init; lastonly, updatefreq, spectrum) # -> Solutions{WIModel,F,C}
 
 
