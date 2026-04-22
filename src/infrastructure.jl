@@ -5,7 +5,7 @@ using ..Utilities
 import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats
 
 export AbstractModel, ClassicModel, MIZModel, WIModel, ModelDiff
-export Collection, Forcing, Par, Solutions, SpaceTime, Vec
+export Collection, Forcing, Par, Solutions, SpaceTime, Vec, AbstractSpectrum
 export default_parameters, default_parval
 export get_diffop
 export hemispheric_mean, ice_area
@@ -40,7 +40,6 @@ Singleton type representing the wave ice interaction model, as an extension of t
 [`MIZModel`](@ref).
 """
 struct WIModel <: AbstractModel end
-# TODO make WIModel <: MIZModel <: AbstractModel
 
 """
     ClassicModel <: AbstractModel
@@ -559,6 +558,9 @@ for model in IU.subtypes(AbstractModel)
     @eval default_parameters(::$model)::Par = default_parameters($(Symbol(namelower, "_parvars")))
 end # for model
 
+# Spectrum for WIM
+abstract type AbstractSpectrum end
+
 # calculate diffusion operator matrix
 @persistent(
     diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
@@ -765,8 +767,36 @@ ice_area(sols::Solutions{MIZModel}, season::Symbol, year::Int)::Float64 =
 function step! end
 function initialise end
 
+# Common template for integration function
+@generated function _integrate(
+    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    lastonly::Bool, updatefreq::Float64, spectrum::Union{<:AbstractSpectrum,Nothing}=nothing
+) where M<:AbstractModel # -> Solutions{M,F,C}
+    step_call = :(step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par))
+    M === WIModel && insert!(step_call.args, 2, Expr(:parameters, :spectrum))
+    return quote
+        # initialise
+        vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
+        if isfinite(updatefreq)
+            progress::Progress = Progress(
+                length(st.T), string("Integrating ", M.name.name), updatefreq;
+                infofeed=(t -> string("t = ", round(t; digits=2)))
+            )
+            update!(progress; feedargs=(0,))
+        end # if isfinite
+        # loop over time
+        for ti in eachindex(st.T)
+            $step_call
+            savesol!(sols, annusol, vars, ti)
+            isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
+        end # for ti
+        return sols
+    end # quote
+end # function _integrate
+
 """
-    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+    integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{ClassicModel,F,C}
+    integrate(model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
@@ -781,27 +811,16 @@ frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
 
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
-function integrate(
-    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+integrate(
+    model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    lastonly::Bool=true, updatefreq::Float64=1.0
+) = _integrate(model, st, forcing, par, init; lastonly, updatefreq) # -> Solutions{M,F,C}
+
+integrate(
+    model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true, updatefreq::Float64=1.0,
-    spectrum#=::Union{Spectrum,Nothing}=#=nothing
-) where M<:AbstractModel # -> Solutions{M,F,C}
-    # initialise
-    vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
-    if isfinite(updatefreq)
-        progress::Progress = Progress(
-            length(st.T), string("Integrating ", M.name.name), updatefreq;
-            infofeed=(t -> string("t = ", round(t; digits=2)))
-        )
-        update!(progress; feedargs=(0,))
-    end # if isfinite
-    # loop over time
-    for ti in eachindex(st.T)
-        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
-        savesol!(sols, annusol, vars, ti)
-        isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
-    end # for ti
-    return sols
-end # function integrate
+    spectrum::AbstractSpectrum=nothing
+) = _integrate(model, st, forcing, par, init; lastonly, updatefreq, spectrum) # -> Solutions{WIModel,F,C}
+
 
 end # module Infrastructure

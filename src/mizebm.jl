@@ -134,6 +134,8 @@ function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par)::Vec
     return @. lat_melt + lat_grow + weld
 end # function D_t
 
+forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
+
 function Infrastructure.initialise(
     ::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true
@@ -149,12 +151,10 @@ function Infrastructure.initialise(
     vars.nextT0 = solveT0(st.x, st.T[1], vars.h, vars.Tg, vars.nextTw, vars.nextphi, forcing(st.T[1]), par)
     condset!(vars.nextTw, 0.0, isnan) # eliminate NaNs for calculations
     return (vars, sols, annusol)
-end # function initialise
-
-forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
+end # function Infrastructure.initialise
 
 function Infrastructure.step!(
-    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; _...
+    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par
 )::Collection{Vec}
     # copy next variables to current
     vars.phi = copy(vars.nextphi)

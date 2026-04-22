@@ -1,3 +1,4 @@
+# TODO docs & and docs for each submodule
 module WIMEBM # EnergyBalanceModel.
 
 using ..Infrastructure, ..Utilities
@@ -8,7 +9,7 @@ import NonlinearSolve as NlinSol
 export Spectrum
 export bretschneider, monochromatic
 
-struct Spectrum
+struct Spectrum <: AbstractSpectrum
     freq::Vec
     period::Vec
     density::Vec
