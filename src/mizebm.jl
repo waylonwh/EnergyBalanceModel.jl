@@ -135,7 +135,7 @@ function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par)::Vec
 end # function D_t
 
 function Infrastructure.initialise(
-    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    ::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true
 ) where M<:Union{MIZModel,WIModel} # -> Tuple{Collection{Vec}, Solutions{M,F,V}, Solutions{M,F,V}}
     # create storages
