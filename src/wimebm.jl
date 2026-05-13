@@ -169,12 +169,12 @@ end # function Infrastructure.initialise
 function Infrastructure.step!(
     ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; spectrum::Spectrum
 )::Collection{Vec}
-    Infrastructure.step!(MIZModel(), t, f, vars, st, par) # thermodynamics
+    breakup = falses(st.nx) # track which cells are breaking
     edgeinx = findfirst(>(0), vars.h)
     if isnothing(edgeinx) # no ice
         vars.Ewave .= 0.0
         vars.lambda .= wave_period(spectrum)
-        return vars
+        edgeinx = st.nx + 1 # skip loop
     elseif edgeinx > 1 # at least once cell has no ice
         vars.Ewave[1:edgeinx-1] .= 0.0
         vars.lambda[1:edgeinx-1] .= wave_period(spectrum)
@@ -190,17 +190,20 @@ function Infrastructure.step!(
         if atted_strain > par.Ec # full breakup
             dbar = mean_size(1/2*half_atted_lambda, par)
             updateD!(dbar, xi, vars)
+            breakup[xi] = true
         elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
             l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
             half_partial_atted_spect = attenuate(spect, l/2, vars.h[xi], vars.phi[xi], par)
             half_partial_atted_lambda = wave_length(half_partial_atted_spect, vars.h[xi], par)
             frontd = mean_size(1/2*half_partial_atted_lambda, par)
             updateD!(frontd, xi, vars, l, L)
+            breakup[xi] = true
         end # if >, else
         spect = atted_spect # update spectrum
         vars.Ewave[xi] = wave_strain(half_atted_spect, vars.h[xi], par)
         vars.lambda[xi] = half_atted_lambda
     end # for xi
+    Infrastructure.step!(MIZModel(), t, f, vars, st, par) # thermodynamics
     return vars
 end # function Infrastructure.step!
 
