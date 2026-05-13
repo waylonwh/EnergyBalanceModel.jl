@@ -232,10 +232,12 @@ function limit_size(
 end # function limit_size
 
 """
-    plot_raw(sols::Solutions, bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_raw(sols::Solutions, into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(), bcknd::Symbol=...; kwargs...) -> Makie.Figure
 
-Plot the the solution variables for each time step in `sols.raw` using the specified Makie
-backend `bcknd`. The function will find available backend if not specified.
+Plot the the solution variables for each time step in `sols.raw` into the specified Makie
+figure or grid position using the specified Makie backend `bcknd`. If `into` is not
+specified, a new figure will be created. The function will find available backend if not
+specified.
 
 # Keyword Arguments
 - `layout::Layout{Symbol}`: Layout structure specifying which variables to plot and their
@@ -248,7 +250,6 @@ backend `bcknd`. The function will find available backend if not specified.
 - `tsizelim::Int`: Maximum number of time steps to plot.
 - `xrange::NTuple{2,Real}`: Range of spatial points to plot.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
-- `figsize::Tuple{Int,Int}`: Size of the figure in pixels.
 """ # TODO update doc
 function plot_raw(
     sols::Solutions{M},
@@ -274,10 +275,12 @@ function plot_raw(
 end # function plot_raw
 
 """
-    plot_avg(sols::Solutions, bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_avg(sols::Solutions, into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(), bcknd::Symbol=...; kwargs...) -> Makie.Figure
 
-Plot the annual average of solution variables in `sols.annual.avg` using the specified
-Makie backend `bcknd`. The function will find available backend if not specified.
+Plot the annual average of solution variables in `sols.annual.avg` into the specified Makie
+figure or grid position using the specified Makie backend `bcknd`. If `into` is not
+specified, a new figure will be created. The function will find available backend if not
+specified.
 
 # Keyword Arguments
 - `layout::Layout{Symbol}`: Layout structure specifying which variables to plot and their
@@ -290,7 +293,6 @@ Makie backend `bcknd`. The function will find available backend if not specified
 - `tsizelim::Int`: Maximum number of time steps to plot.
 - `xrange::NTuple{2,Real}`: Range of spatial points to plot.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
-- `figsize::Tuple{Int,Int}`: Size of the figure in pixels.
 """
 function plot_avg(
     sols::Solutions{M},
@@ -316,12 +318,13 @@ function plot_avg(
 end # function plot_avg
 
 """
-    plot_seasonal(sols::Solutions, bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_seasonal(sols::Solutions, fig::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(), bcknd::Symbol=...; kwargs...) -> Makie.Figure
 
 Using the data from `sols.annual`, plot lines spanned by (`xfunc(sols, year)`,
 `yfunc(sols, season, year)`) for each year and for the seasons `:avg`, `:winter`, and
-`:summer`. By default, `xfunc` computes the hemispheric mean temperature from
-`sols.annual.avg.T`, while `yfunc` computes the ice-covered area using either
+`:summer` into the specified Makie figure or grid position `fig`. If `fig` is not specified,
+a new figure will be created. By default, `xfunc` computes the hemispheric mean temperature
+from `sols.annual.avg.T`, while `yfunc` computes the ice-covered area using either
 concentration `phi` (if it exists) or enthalpy `E`. Lines during the warming period defined
 in `sols.forcing` are coloured red, and those during the cooling period are coloured blue.
 Lines for the summer peak are dashed, those for winter are thin solid, and those for the
@@ -351,7 +354,6 @@ function plot_seasonal(
 ) where F # -> Union{Mk.Figure,Mk.GridPosition}
     backend(bcknd)
     xdata = xfunc.(Ref(sols), 1:sols.spacetime.dur)
-    fig = Mk.Figure()
     ax = Mk.Axis(fig[1,1]; title, xlabel, ylabel)
     groups = (
         Warming=Vector{Mk.Lines{Tuple{Vector{Mk.Point{2,Float64}}}}}(),
