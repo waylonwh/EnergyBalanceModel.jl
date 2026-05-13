@@ -1,6 +1,6 @@
 name = "EnergyBalanceModel"
 uuid = "68dbb056-390c-4f33-8773-0304cbd749ae"
-version = "0.6.1+T0" # build T0: storing T0 in the solution for main.tex
+version = "0.1.2-PRE.1+T0" # build T0: storing T0 in the solution for main.tex
 authors = ["Waylon Wu <me@waylonwu.net>", "Navid C. Constantinou <navidcy@users.noreply.github.com>"]
 
 [deps]
