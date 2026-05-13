@@ -139,14 +139,15 @@ get_levels(::Val{false}, ::Val{true}, data::Matrix{Float64})::Tuple{Vector{Float
 )
 
 function contourf_tiles(
-    t::Vector{T}, x::Vec, layout::Layout{Matrix{Float64}};
+    t::Vector{T},
+    x::Vec,
+    layout::Layout{Matrix{Float64}},
+    fig::Union{Mk.Figure,Mk.GridPosition};
     xlim::Union{NTuple{2,Real},Nothing}=nothing,
     tlim::Union{NTuple{2,Real}, Nothing}=nothing,
     diff::Bool=false,
-    inspect::Bool=false,
-    figsize::Tuple{Int,Int}=(600, 400)
-)::Mk.Figure where T<:Real
-    fig = Mk.Figure(size=figsize)
+    inspect::Bool=false
+) where T<:Real # -> Union{Mk.Figure,Mk.GridPosition}
     for row in axes(layout, 1), col in axes(layout, 2)
         subfig = fig[row,col]
         ax = Mk.Axis(
@@ -234,15 +235,15 @@ specified.
 """
 function plot_raw(
     sols::Solutions{M},
+    into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(),
     bcknd::Symbol=find_backend();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false,
     xsizelim::Int=1000,
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
-    trange::NTuple{2,Real}=extrema(sols.ts),
-    figsize::Tuple{Int,Int}=(600, 400)
-)::Mk.Figure where M<:AbstractModel
+    trange::NTuple{2,Real}=extrema(sols.ts)
+) where M<:AbstractModel # -> Union{Mk.Figure,Mk.GridPosition}
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, sols.ts, xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -250,8 +251,8 @@ function plot_raw(
         datatitle.vars[linx] = matricify(getindex.(getproperty(sols.raw, layout[linx].var)[tinx], Ref(xinx)))
     end # for inx
     return contourf_tiles(
-        sols.ts[tinx], sols.spacetime.x[xinx], datatitle;
-        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff, figsize
+        sols.ts[tinx], sols.spacetime.x[xinx], datatitle, into;
+        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff
     )
 end # function plot_raw
 
@@ -277,6 +278,7 @@ specified.
 """
 function plot_avg(
     sols::Solutions{M},
+    into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(),
     bcknd::Symbol=find_backend();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false,
@@ -284,8 +286,7 @@ function plot_avg(
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
     trange::NTuple{2,Real}=(1, sols.spacetime.dur),
-    figsize::Tuple{Int,Int}=(600, 400)
-)::Mk.Figure where M<:AbstractModel
+) where M<:AbstractModel # -> Union{Mk.Figure,Mk.GridPosition}
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, collect(1:sols.spacetime.dur), xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
@@ -293,8 +294,8 @@ function plot_avg(
         datatitle.vars[linx] = matricify(getindex.(getproperty(sols.annual.avg, layout[linx].var)[tinx], Ref(xinx)))
     end # for inx
     return contourf_tiles(
-        collect(tinx), sols.spacetime.x[xinx], datatitle;
-        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff, figsize
+        collect(tinx), sols.spacetime.x[xinx], datatitle, into;
+        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff
     )
 end # function plot_avg
 
@@ -324,6 +325,7 @@ annual average are thick solid.
 """
 function plot_seasonal(
     sols::Solutions{<:AbstractModel,F,true},
+    fig::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(),
     bcknd::Symbol=find_backend();
     xfunc::Function=((sols, year) -> hemispheric_mean(sols.annual.avg.T[year], sols.spacetime.x)),
     yfunc::Function=ice_area,
@@ -331,7 +333,7 @@ function plot_seasonal(
     xlabel::AbstractString=Mk.L"$\tilde{T}$ ($\mathrm{\degree\!C}$)",
     ylabel::AbstractString=Mk.L"A_i",
     inspect::Bool=false
-)::Mk.Figure where F
+) where F # -> Union{Mk.Figure,Mk.GridPosition}
     backend(bcknd)
     xdata = xfunc.(Ref(sols), 1:sols.spacetime.dur)
     ax = Mk.Axis(fig[1,1]; title, xlabel, ylabel)
