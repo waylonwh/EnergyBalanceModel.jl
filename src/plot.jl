@@ -398,7 +398,7 @@ function precompile(bcnd::Module)::Nothing
         bcnd.activate!()
         PT.@compile_workload begin
             for t in (ints, floats)
-                contourf_tiles(t, x, layout; inspect=true)
+                contourf_tiles(t, x, layout, Mk.Figure(); inspect=true)
             end # for t
         end # PT.@compile_workload begin
     end # PT.@setup_workload begin
