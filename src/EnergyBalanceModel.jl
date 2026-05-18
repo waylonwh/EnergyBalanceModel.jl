@@ -23,7 +23,7 @@ julia> par = default_parameters(MIZModel());
 
 julia> T = fill(17.0, st.nx);
 
-julia> init = Collection{Vec}(
+julia> init = Collection{Vector{Float64}}(
            :Ei => zeros(st.nx),
            :Ew => T .* par.cw,
            :h => zeros(st.nx),
@@ -56,7 +56,7 @@ details on data handling and visualisation.
 module EnergyBalanceModel
 
 export ClassicModel, MIZModel, WIModel
-export Collection, Forcing, Par, Solutions, SpaceTime, Vec
+export Collection, Forcing, Par, Solutions, SpaceTime
 export Spectrum, bretschneider, monochromatic
 export default_parameters, integrate
 export hemispheric_mean, ice_area
@@ -113,22 +113,23 @@ Solutions{ClassicModel, sin, false} with:
 """
 function run_example(
     model::M=MIZModel(); plotbackend::Symbol=Plot.find_backend()
-)::Solutions{M,sin,false} where M<:AbstractModel
+)::Solutions{M,sin,false} where {M<:AbstractModel}
     st = SpaceTime{sin}(180, 2000, 50)
-    forcing = Forcing(0.0)
-    par = default_parameters(model)
-    T = fill(17.0, st.nx)
-    init = Collection{Vec}(:Tg => T)
+    FT = eltype(st.x)
+    forcing = Forcing(FT(0.0))
+    par = default_parameters(model, FT)
+    T = fill(FT(17.0), st.nx)
+    init = Collection{Vector{FT}}(:Tg => T)
     if M === ClassicModel
         init.E = par.cw * T
     else # MIZModel or WIModel
-        init.Ei = zeros(st.nx)
+        init.Ei = zeros(FT, st.nx)
         init.Ew = par.cw * T
-        init.h = zeros(st.nx)
-        init.D = zeros(st.nx)
+        init.h = zeros(FT, st.nx)
+        init.D = zeros(FT, st.nx)
     end # if ===; elseif
     if M === WIModel
-        spectrum = bretschneider(3.0, 9.5)
+        spectrum = bretschneider(FT(3.0), FT(9.5))
         sols = integrate(model, st, forcing, par, init; spectrum)
     else # no waves
         sols = integrate(model, st, forcing, par, init)
@@ -151,29 +152,34 @@ end # function run_example
 
 import PrecompileTools as PT
 
-PT.@setup_workload begin
-    import InteractiveUtils as IU
-    ms = Tuple(M() for M in IU.subtypes(AbstractModel) if M !== Infrastructure.ModelDiff)
-    Fs = (identity, sin)
-    fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
-    spectrum = bretschneider(3.0, 9.5)
-    m2s = Dict{AbstractModel,Solutions}()
+    PT.@setup_workload begin
+        import InteractiveUtils as IU
+        ms = Tuple(M() for M in IU.subtypes(AbstractModel) if M !== Infrastructure.ModelDiff)
+        Fs = (identity, sin)
+        fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
+        spectrum = bretschneider(3.0, 9.5)
+        m2s = Dict{AbstractModel,Solutions}()
     redirect_stdout(devnull)
     redirect_stderr(devnull)
     PT.@compile_workload begin
         for m in ms, F in Fs, farg in fs_args
             st = SpaceTime{F}(10, 10, 1)
-            forcing = Forcing(farg...)
-            par = default_parameters(m)
-            T = fill(0.0, st.nx)
-            init = Collection{Vec}(:Tg => T)
+            FT = eltype(st.x)
+            forcing = length(farg) == 1 ?
+                Forcing(FT(farg[1])) :
+                Forcing(
+                    FT(farg[1]), FT(farg[2]), FT(farg[3]), farg[4], Tuple(FT.(farg[5]))
+                )
+            par = default_parameters(m, FT)
+            T = fill(zero(FT), st.nx)
+            init = Collection{Vector{FT}}(:Tg => T)
             if m isa ClassicModel
                 init.E = par.cw * T
             else # MIZModel or WIModel
-                init.Ei = zeros(st.nx)
+                init.Ei = zeros(FT, st.nx)
                 init.Ew = par.cw * T
-                init.h = zeros(st.nx)
-                init.D = zeros(st.nx)
+                init.h = zeros(FT, st.nx)
+                init.D = zeros(FT, st.nx)
             end # if isa; elseif
             local sol
             try # avoid AssertionError from WIModel
