@@ -20,7 +20,7 @@ mutable struct Progress
     last::Int # last printed progress
     started::Float64 # start time
     updated::Float64 # last external update time
-    freq::Float64 # external update frequency
+    freq::Real # external update frequency
     infofeed::Function # Function(done::Bool, args...)::String
     width::Int # number of characters wide, including progress texts
     barwidth::Int # width of the progress bar
@@ -30,7 +30,7 @@ mutable struct Progress
 
     function Progress(
         total::Int,
-        title::String="Progress", freq::Float64=1.0;
+        title::String="Progress", freq::Real=1.0;
         width::Int=50, infofeed::Function=Returns("")
     )
         barwidth = width - (ndigits(total) * 2 + 1) - 2 - 5 - 3 # current/total [=> ] xx.x%
@@ -105,7 +105,7 @@ macro isdebugging() # -> Bool
 end # macro isdebugging
 
 # Progress operations
-function display_time(time::Float64)::String
+function display_time(time::Real)::String
     if isfinite(time) # remaining time unknown
         timeint = round(Int, time)
         min = fld(timeint, 60)
