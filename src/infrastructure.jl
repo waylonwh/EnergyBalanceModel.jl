@@ -122,7 +122,7 @@ A convenience constructor for `SpaceTime{identity}` with `urange=(0.0, 1.0)`.
 
     SpaceTime{sin}(nx::Int, nt::Int, dur::Int; kwargs...)
 
-A convenience constructor for `SpaceTime{sin}` with `urange=(0.0, π/2)`.
+A convenience constructor for `SpaceTime{sin}` with `urange=(0.0, π*(1//2))`.
 
 # Examples
 ```julia-repl
@@ -174,11 +174,11 @@ struct SpaceTime{F,T<:AbstractFloat}
 end # struct SpaceTime{F}
 
 SpaceTime{identity}(nx::Int, nt::Int, dur::Int; kwargs...) = SpaceTime{identity}((0.0, 1.0), nx, nt, dur; kwargs...)
-SpaceTime{sin}(nx::Int, nt::Int, dur::Int; kwargs...) = SpaceTime{sin}((0.0, pi/2), nx, nt, dur; kwargs...)
+SpaceTime{sin}(nx::Int, nt::Int, dur::Int; kwargs...) = SpaceTime{sin}((0.0, pi*(1//2)), nx, nt, dur; kwargs...)
 SpaceTime{identity,T}(nx::Int, nt::Int, dur::Int; kwargs...) where {T<:AbstractFloat} =
     SpaceTime{identity}((zero(T), one(T)), nx, nt, dur; kwargs...)
 SpaceTime{sin,T}(nx::Int, nt::Int, dur::Int; kwargs...) where {T<:AbstractFloat} =
-    SpaceTime{sin}((zero(T), T(pi)/2), nx, nt, dur; kwargs...)
+    SpaceTime{sin}((zero(T), T(pi)*(1//2)), nx, nt, dur; kwargs...)
 SpaceTime(args...; kwargs...) = SpaceTime{identity}(args...; kwargs...)
 
 Base.show(io::IO, st::SpaceTime)::Nothing = print(
@@ -718,7 +718,7 @@ rule.
 
 # Examples
 ```julia-repl
-julia> x = sin.(range(0, pi/2, 180));
+julia> x = sin.(range(0, pi*(1//2), 180));
 
 julia> vec = @. 7.5 + 20(1 - 2x^2);
 
@@ -745,7 +745,7 @@ Calculate the area covered by sea ice from the sea ice concentration `phi` defin
 
 # Examples
 ```julia-repl
-julia> x = sin.(range(0, pi/2, 181))[1:end-1]; # avoid the singularity at x=1
+julia> x = sin.(range(0, pi*(1//2), 181))[1:end-1]; # avoid the singularity at x=1
 
 julia> phi = @. 2x - x^2;
 

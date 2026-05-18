@@ -163,11 +163,11 @@ function grid_length(st::SpaceTime{F,T}, i::Int)::T where {F,T<:AbstractFloat}
     if i == 1 # first grid
         dtheta = one(T)/2 * (asin(st.x[1]) + asin(st.x[2]))
     elseif i == st.nx # last grid
-        dtheta = T(pi)/2 - one(T)/2 * (asin(st.x[st.nx-1]) + asin(st.x[st.nx]))
+        dtheta = T(pi)*(1//2) - one(T)*(1//2) * (asin(st.x[st.nx-1]) + asin(st.x[st.nx]))
     else # middle grids
         dtheta = one(T)/2 * (asin(st.x[i+1]) - asin(st.x[i-1]))
     end
-    return dtheta / (T(pi)/2) * T(1e7)
+    return dtheta / (T(pi)*(1//2)) * T(1e7)
 end # function grid_length
 
 function updateD!(
