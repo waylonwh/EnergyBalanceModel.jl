@@ -144,28 +144,28 @@ const dlevels = [400(range(0, 400, 20) ./ 400).^2; 450]
 get_levels(::Val{false}, ::Val{false}, _)::Tuple{Int,Nothing,Nothing,Mk.Automatic} = (
     21, nothing, nothing, Mk.automatic
 ) # normal
-get_levels(::Val{true}, ::Val{false}, _)::Tuple{Vector{Float64},Nothing,Symbol,Vector{Int}} = (
+get_levels(::Val{true}, ::Val{false}, _) = (
     dlevels, nothing, :auto, collect(0:100:400)
 ) # D sol
-get_levels(::Val{true}, ::Val{true}, _)::Tuple{Vector{Float64},Symbol,Symbol,Vector{Int}} = (
+get_levels(::Val{true}, ::Val{true}, _) = (
     sort!(unique!(d -> isequal(-0.0, d) ? abs(d) : identity(d), [-dlevels; dlevels])),
     :auto, :auto, collect(-400:100:400)
 ) # D diff
-get_levels(::Val{false}, ::Val{true}, data::Matrix{Float64})::Tuple{Vector{Float64},Nothing,Nothing,Mk.Automatic} = (
+get_levels(::Val{false}, ::Val{true}, data::AbstractMatrix{<:Real}) = (
     maximum(abs, filter(!isnan, data))*range(-1, 1; length=21),
     nothing, nothing, Mk.automatic
 ) # normal diff
 
 function contourf_tiles(
     t::Vector{T},
-    x::Vec,
-    layout::Layout{Matrix{Float64}},
+    x::Vector,
+    layout::Layout{<:AbstractMatrix},
     fig::Union{Mk.Figure,Mk.GridPosition};
     xlim::Union{NTuple{2,Real},Nothing}=nothing,
     tlim::Union{NTuple{2,Real}, Nothing}=nothing,
     diff::Bool=false,
     inspect::Bool=false
-) where T<:Real # -> Union{Mk.Figure,Mk.GridPosition}
+) where {T<:Real} # -> Union{Mk.Figure,Mk.GridPosition}
     for row in axes(layout, 1), col in axes(layout, 2)
         subfig = fig[row,col]
         ax = Mk.Axis(
@@ -196,10 +196,12 @@ function contourf_tiles(
     return fig
 end # function contourf_tiles
 
-matricify(vecvec::Vector{Vec})::Matrix{Float64} = permutedims(reduce(hcat, vecvec))
+function matricify(vecvec::Vector{Vector{T}}) where {T<:AbstractFloat}
+    return permutedims(reduce(hcat, vecvec))
+end
 
 function limit_size(
-    xs::Vec, ts::Vector{<:Real},
+    xs::Vector, ts::Vector{<:Real},
     xsizelim::Int=1000, tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(xs), trange::NTuple{2,Real}=extrema(ts)
 )::NTuple{2,Vector{Int}}
@@ -261,10 +263,11 @@ function plot_raw(
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
     trange::NTuple{2,Real}=extrema(sols.ts)
-) where M<:AbstractModel # -> Union{Mk.Figure,Mk.GridPosition}
+) where {M<:AbstractModel} # -> Union{Mk.Figure,Mk.GridPosition}
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, sols.ts, xsizelim, tsizelim, xrange, trange)
-    datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
+    FT = eltype(sols.spacetime.x)
+    datatitle = Layout(Matrix{Matrix{FT}}(undef, size(layout)), layout.titles)
     @simd for linx in eachindex(layout)
         datatitle.vars[linx] = matricify(getindex.(getproperty(sols.raw, layout[linx].var)[tinx], Ref(xinx)))
     end # for inx
@@ -304,10 +307,11 @@ function plot_avg(
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
     trange::NTuple{2,Real}=(1, sols.spacetime.dur),
-) where M<:AbstractModel # -> Union{Mk.Figure,Mk.GridPosition}
+) where {M<:AbstractModel} # -> Union{Mk.Figure,Mk.GridPosition}
     backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, collect(1:sols.spacetime.dur), xsizelim, tsizelim, xrange, trange)
-    datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
+    FT = eltype(sols.spacetime.x)
+    datatitle = Layout(Matrix{Matrix{FT}}(undef, size(layout)), layout.titles)
     @simd for linx in eachindex(layout)
         datatitle.vars[linx] = matricify(getindex.(getproperty(sols.annual.avg, layout[linx].var)[tinx], Ref(xinx)))
     end # for inx
@@ -356,8 +360,8 @@ function plot_seasonal(
     xdata = xfunc.(Ref(sols), 1:sols.spacetime.dur)
     ax = Mk.Axis(fig[1,1]; title, xlabel, ylabel)
     groups = (
-        Warming=Vector{Mk.Lines{Tuple{Vector{Mk.Point{2,Float64}}}}}(),
-        Cooling=Vector{Mk.Lines{Tuple{Vector{Mk.Point{2,Float64}}}}}()
+        Warming=Vector{Any}(),
+        Cooling=Vector{Any}()
     )
     for (domain, group, inx, colour) in zip(
         keys(groups),

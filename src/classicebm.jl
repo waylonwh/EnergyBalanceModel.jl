@@ -5,22 +5,26 @@ using ..Infrastructure, ..Utilities
 import LinearAlgebra as LA, SparseArrays as SA
 
 @persistent(
-    cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
-    S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64,
+    cg_tau = 0.0,
+    dt_tau = 0.0,
+    dc = 0.0,
+    kappa = SA.spzeros(Float64, 0, 0),
+    S = zeros(Float64, 0, 0),
+    M = 0.0,
+    aw = Float64[],
+    kLf = 0.0,
     id::UInt = UInt(0),
-    @inline function get_statics(st::SpaceTime, par::Par)::@NamedTuple{
-        cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
-        S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64
-    }
+    @inline function get_statics(st::SpaceTime, par::Par)
+        T = eltype(st.x)
         if id != hash((st, par)) # recompute only if st or par changed
             # Difinitions for implicit scheme for Tg
             cg_tau = par.cg / par.tau
             dt_tau = st.dt / par.tau
             dc = dt_tau * cg_tau
-            kappa = (1+dt_tau) * LA.I(st.nx) - st.dt * par.D * get_diffop(st) / par.cg
+            kappa = (one(T)+dt_tau) * LA.I(st.nx) - st.dt * par.D * get_diffop(st) / par.cg
             # Seasonal forcing [WE15 Eq. (3)]
-            S = repeat(par.S0 .- par.S2 * st.x.^2, 1, st.nt) -
-                repeat(par.S1 * cos.(2pi*st.t'), st.nx, 1) .* repeat(st.x, 1, st.nt)
+            S = repeat(par.S0 .- par.S2 .* st.x.^2, 1, st.nt) -
+                repeat(par.S1 * cos.(T(2pi) * st.t'), st.nx, 1) .* repeat(st.x, 1, st.nt)
             S = hcat(S, S[:,1])
             # Further definitions
             M = par.B + cg_tau
@@ -34,14 +38,15 @@ import LinearAlgebra as LA, SparseArrays as SA
 ) # @persistent
 
 Infrastructure.initialise(
-    model::ClassicModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    model::ClassicModel, st::SpaceTime{F,T}, forcing::Forcing{T,C}, par::Par{T}, init::Collection{Vector{T}};
     lastonly::Bool=true
-) = create_storages(model, Set{Symbol}((:E, :T, :h)), st, forcing, par, init; lastonly)
-    # -> Tuple{Collection{Vec},Solutions{ClassicModel,F,V},Solutions{ClassicModel,F,V}}
+) where {F,C,T<:AbstractFloat} =
+    create_storages(model, Set{Symbol}((:E, :T, :h)), st, forcing, par, init; lastonly)
+    # -> Tuple{Collection{Vector},Solutions{ClassicModel,F,V},Solutions{ClassicModel,F,V}}
 
 function Infrastructure.step!(
-    ::ClassicModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par
-)::Collection{Vec}
+    ::ClassicModel, t::T, f::T, vars::Collection{Vector{T}}, st::SpaceTime{F,T}, par::Par{T}
+)::Collection{Vector{T}} where {F,T<:AbstractFloat}
     # get static variables
     stat = get_statics(st, par)
     # get time index

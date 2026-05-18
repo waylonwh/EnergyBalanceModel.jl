@@ -6,30 +6,48 @@ import LinearAlgebra as LA
 import SparseArrays as SA
 
 # solar radiation absorbed on ice and water
-solar(x::Vec, t::Float64, ::Val{:ice}, par::Par)::Vec =
-    @. par.ai * (par.S0 - par.S1 * x * cos(2pi * t) - par.S2 * x^2)
-solar(x::Vec, t::Float64, ::Val{:water}, par::Par)::Vec =
-    @. (par.a0 - par.a2 * x^2) * (par.S0 - par.S1 * x * cos(2pi * t) - par.S2 * x^2)
-solar(x::Vec, t::Float64, surface::Symbol, par::Par)::Vec = solar(x, t, Val(surface), par)
+function solar(x::Vector{T}, t::T, ::Val{:ice}, par::Par{T})::Vector{T} where {T<:AbstractFloat}
+    return @. par.ai * (par.S0 - par.S1 * x * cos(T(2pi) * t) - par.S2 * x^2)
+end
+
+function solar(x::Vector{T}, t::T, ::Val{:water}, par::Par{T})::Vector{T} where {T<:AbstractFloat}
+    return @. (par.a0 - par.a2 * x^2) * (par.S0 - par.S1 * x * cos(T(2pi) * t) - par.S2 * x^2)
+end
+
+function solar(x::Vector{T}, t::T, surface::Symbol, par::Par{T})::Vector{T} where {T<:AbstractFloat}
+    return solar(x, t, Val(surface), par)
+end
 
 # phi-weighted average
-weighted_avg(vi::Vec, vw::Vec, phi::Vec)::Vec = @. vi*phi + (1-phi)vw
+function weighted_avg(vi::Vector{T}, vw::Vector{T}, phi::Vector{T}) where {T<:AbstractFloat}
+    return @. vi*phi + (1-phi)vw
+end
 
 # temperatures
-water_temp(Ew::Vec, phi::Vec, par::Par)::Vec = @. par.Tm + Ew / ((1-phi)par.cw)
-water_temp_nonan(Ew::Vec, phi::Vec, par::Par)::Vec = condset!(water_temp(Ew, phi, par), 0.0, isone, phi)
+function water_temp(Ew::Vector{T}, phi::Vector{T}, par::Par{T}) where {T<:AbstractFloat}
+    return @. par.Tm + Ew / ((1-phi)par.cw)
+end
 
-ice_temp(T0::Vec, par::Par)::Vec = min.(T0, par.Tm)
+function water_temp_nonan(Ew::Vector{T}, phi::Vector{T}, par::Par{T}) where {T<:AbstractFloat}
+    return condset!(water_temp(Ew, phi, par), zero(T), isone, phi)
+end
 
-solveT0(x::Vec, t::Float64, h::Vec, Tg::Vec, Tw::Vec, phi::Vec, f::Float64, par::Par)::Vec =
-    @. (
+function ice_temp(T0::Vector{T}, par::Par{T}) where {T<:AbstractFloat}
+    return min.(T0, par.Tm)
+end
+
+function solveT0(
+    x::Vector{T}, t::T, h::Vector{T}, Tg::Vector{T}, Tw::Vector{T}, phi::Vector{T}, f::T, par::Par{T}
+) where {T<:AbstractFloat}
+    return @. (
         $(solar(x, t, :ice, par)) - par.A + f - (1-phi)Tw * (par.B + par.cg/par.tau)
         + par.Tm * (par.B + par.k/h) + par.cg/par.tau * Tg
     ) / (phi * (par.B + par.cg/par.tau) + par.k/h)
+end
 
 function stepTg!(
-    t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Par
-)::Vec
+    t::T, Tg::Vector{T}, h::Vector{T}, T0::Vector{T}, Tw::Vector{T}, phi::Vector{T}, f::T, st::SpaceTime{F,T}, par::Par{T}
+)::Vector{T} where {F,T<:AbstractFloat}
     frez = @. (T0<par.Tm) & (h>0)
     watr = .~frez
     diagphi = SA.spdiagm(phi)
@@ -56,46 +74,48 @@ function stepTg!(
 end # function stepTg!
 
 # lateral melt rate
-wlat(Tw::Vec, par::Par)::Vec = @. par.m1 * (Tw - par.Tm^par.m2)
+function wlat(Tw::Vector{T}, par::Par{T}) where {T<:AbstractFloat}
+    return @. par.m1 * (Tw - par.Tm^par.m2)
+end
 
 # concentration
-function concentration(Ei::Vec, h::Vec, par::Par)::Vec
+function concentration(Ei::Vector{T}, h::Vector{T}, par::Par{T})::Vector{T} where {T<:AbstractFloat}
     phi = @. -Ei / (par.Lf * h)
     zeroref!(phi, h)
-    condset!(phi, 1.0, >(1)) # correct concentration
+    condset!(phi, one(T), >(one(T))) # correct concentration
     # phi = @. Float64(Ei<0) # reproducing WE15
 end # function concentration
 
 # floe number
-function num(D::Vec, phi::Vec, par::Par)::Vec
+function num(D::Vector{T}, phi::Vector{T}, par::Par{T})::Vector{T} where {T<:AbstractFloat}
     n = @. phi / (par.alpha * D^2)
     zeroref!(n, D)
     return n
 end # function num
 
 # lead region area
-function area_lead(D::Vec, phi::Vec, n::Vec, par::Par)::Vec
+function area_lead(D::Vector{T}, phi::Vector{T}, n::Vector{T}, par::Par{T})::Vector{T} where {T<:AbstractFloat}
     ring = @. par.alpha * n * ((D + 2par.rl)^2 - D^2)
-    return min.(ring, 1 .- phi)
+    return min.(ring, one(T) .- phi)
 end # function area_lead
 
 # fluxes
 function vert_flux(
-    t::Float64, surface::Symbol, Tg::Vec, Tbar::Vec, f::Float64, st::SpaceTime, par::Par
-)::Vec
+    t::T, surface::Symbol, Tg::Vector{T}, Tbar::Vector{T}, f::T, st::SpaceTime{F,T}, par::Par{T}
+)::Vector{T} where {F,T<:AbstractFloat}
     L = @. par.A + par.B * (Tbar - par.Tm) # OLR
     return solar(st.x, t, surface, par) .- L .+ par.cg/par.tau * (Tg-Tbar) .+ par.Fb .+ f
 end # function vert_flux
 
-function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Par)::Vec
-    Flat = @. phi * h * par.Lf * $(wlat(Tw, par)) * pi / (par.alpha*D)
+function lat_flux(h::Vector{T}, D::Vector{T}, Tw::Vector{T}, phi::Vector{T}, par::Par{T})::Vector{T} where {T<:AbstractFloat}
+    Flat = @. phi * h * par.Lf * $(wlat(Tw, par)) * T(pi) / (par.alpha*D)
     zeroref!(Flat, D)
     return Flat
 end # function lat_flux
 
-function redistributeE(rEi::Vec, rEw::Vec)::NTuple{4,Vec}
-    cEi = clamp.(rEi, -Inf, 0)
-    cEw = clamp.(rEw, 0, Inf)
+function redistributeE(rEi::Vector{T}, rEw::Vector{T})::NTuple{4,Vector{T}} where {T<:AbstractFloat}
+    cEi = clamp.(rEi, -T(Inf), zero(T))
+    cEw = clamp.(rEw, zero(T), T(Inf))
     psiEidt = rEi .- cEi # +
     psiEwdt = rEw .- cEw # -
     Ei = cEi .+ psiEwdt # -
@@ -104,16 +124,18 @@ function redistributeE(rEi::Vec, rEw::Vec)::NTuple{4,Vec}
 end # function redistributeE
 
 # redistribution functions
-function split_psiEw(psiEw::Vec, phi::Vec, Al::Vec)::Tuple{Vec,Vec}
+function split_psiEw(psiEw::Vector{T}, phi::Vector{T}, Al::Vector{T})::Tuple{Vector{T},Vector{T}} where {T<:AbstractFloat}
     Ql = @. Al / (1-phi) * psiEw
-    condset!(Ql, 0.0, isone, phi) # fix rounding errors
+    condset!(Ql, zero(T), isone, phi) # fix rounding errors
     Qp = psiEw - Ql
     return (Ql, Qp)
 end # function split_psiEw
 
-dphip(Qp::Vec, par::Par)::Vec = @. -Qp / (par.Lf * par.hmin) # change rate of φ due to pancakes
+function dphip(Qp::Vector{T}, par::Par{T}) where {T<:AbstractFloat}
+    return @. -Qp / (par.Lf * par.hmin) # change rate of φ due to pancakes
+end
 
-function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
+function average(f::Vector{T}, fn::T, n::Vector{T}, dn::Vector{T})::Vector{T} where {T<:AbstractFloat}
     total = n .+ dn
     avgd = @. (n*f + dn*fn) / total
     zeroref!(avgd, total)
@@ -122,25 +144,39 @@ function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
 end # function average
 
 # differential equations
-Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
-Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1-phi)Fvw - Flat
-h_t(Fvi::Vec, par::Par)::Vec = -1/par.Lf * Fvi
-function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par)::Vec
-    lat_melt = -pi / 2 * par.alpha * wlat(Tw, par)
+function Ei_t(phi::Vector{T}, Fvi::Vector{T}, Flat::Vector{T}) where {T<:AbstractFloat}
+    return @. phi * Fvi + Flat
+end
+
+function Ew_t(phi::Vector{T}, Fvw::Vector{T}, Flat::Vector{T}) where {T<:AbstractFloat}
+    return @. (1-phi)Fvw - Flat
+end
+
+function h_t(Fvi::Vector{T}, par::Par{T}) where {T<:AbstractFloat}
+    return -one(T)/par.Lf * Fvi
+end
+function D_t(h::Vector{T}, D::Vector{T}, Ti::Vector{T}, Tw::Vector{T}, phi::Vector{T}, Ql::Vector{T}, par::Par{T})::Vector{T} where {T<:AbstractFloat}
+    lat_melt = -T(pi) / T(2) * par.alpha * wlat(Tw, par)
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
     zeroref!(lat_grow, h)
-    condset!(weld, 0.0, >=(par.Tm), Ti)
+    condset!(weld, zero(T), >=(par.Tm), Ti)
     return @. lat_melt + lat_grow + weld
 end # function D_t
 
-forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
+function forward_euler(var::Vector{T}, grad::Vector{T}, dt::T) where {T<:AbstractFloat}
+    return @. var + grad*dt
+end
 
 # common template of initialise function for MIZModel and WIModel
 function _initialise(
-    model::Union{MIZModel,WIModel}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    model::Union{MIZModel,WIModel},
+    st::SpaceTime{F,T},
+    forcing::Forcing{T,C},
+    par::Par{T},
+    init::Collection{Vector{T}};
     lastonly::Bool
-) # -> Tuple{Collection{Vec}, Solutions{M,F,V}, Solutions{M,F,V}}
+) where {F,C,T<:AbstractFloat} # -> Tuple{Collection{Vector}, Solutions{M,F,V}, Solutions{M,F,V}}
     # create storages
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
     model isa WIModel && push!(solvars, :Ewave, :lambda) # add wave variables for WIModel
@@ -149,26 +185,26 @@ function _initialise(
     vars.nextphi = concentration(vars.Ei, vars.h, par)
     vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
     vars.nextT0 = solveT0(st.x, st.T[1], vars.h, vars.Tg, vars.nextTw, vars.nextphi, forcing(st.T[1]), par)
-    condset!(vars.nextTw, 0.0, isnan) # eliminate NaNs for calculations
+    condset!(vars.nextTw, zero(T), isnan) # eliminate NaNs for calculations
     return (vars, sols, annusol)
 end # function _initialise
 
 Infrastructure.initialise(
-    model::MIZModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    model::MIZModel, st::SpaceTime{F,T}, forcing::Forcing{T,C}, par::Par{T}, init::Collection{Vector{T}};
     lastonly::Bool=true
-) = _initialise(model, st, forcing, par, init; lastonly)
-    # -> Tuple{Collection{Vec}, Solutions{MIZModel,F,V}, Solutions{MIZModel,F,V}}
+) where {F,C,T<:AbstractFloat} = _initialise(model, st, forcing, par, init; lastonly)
+    # -> Tuple{Collection{Vector}, Solutions{MIZModel,F,V}, Solutions{MIZModel,F,V}}
 
 function Infrastructure.step!(
-    ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par
-)::Collection{Vec}
+    ::MIZModel, t::T, f::T, vars::Collection{Vector{T}}, st::SpaceTime{F,T}, par::Par{T}
+)::Collection{Vector{T}} where {F,T<:AbstractFloat}
     # assign next variables to current
     vars.phi = vars.nextphi
     vars.Tw = vars.nextTw
     T0 = vars.nextT0
     # compute diagnostic variables
     vars.Ti = ice_temp(T0, par)
-    condset!(vars.Ti, 0.0, isnan) # eliminate NaNs for calculations
+    condset!(vars.Ti, zero(T), isnan) # eliminate NaNs for calculations
     vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi)
     vars.n = num(vars.D, vars.phi, par)
     # calculate fluxes
@@ -197,9 +233,9 @@ function Infrastructure.step!(
         D_t(lasth, vars.D, vars.Ti, vars.Tw, vars.phi, Ql, par),
         st.dt
     ) # !
-    clamp!(vars.h, 0, Inf) # avoid overshooting to negative thickness
+    clamp!(vars.h, zero(T), T(Inf)) # avoid overshooting to negative thickness
     zeroref!(vars.h, vars.Ei) # restrict non-existence
-    clamp!(vars.D, 0, par.Dmax)
+    clamp!(vars.D, zero(T), par.Dmax)
     zeroref!(vars.D, vars.Ei) # restrict non-existence
     # update variables for Tg
     vars.nextphi = concentration(vars.Ei, vars.h, par) # !
@@ -207,8 +243,8 @@ function Infrastructure.step!(
     vars.nextT0 = solveT0(st.x, t, vars.h, vars.Tg, vars.nextTw, vars.nextphi, f, par)
     vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.nextT0, vars.nextTw, vars.nextphi, f, st, par) # !
     # set NaNs to no existence
-    condset!(vars.Ti, NaN, iszero, vars.Ei)
-    condset!(vars.Tw, NaN, >(0.95), vars.phi)
+    condset!(vars.Ti, T(NaN), iszero, vars.Ei)
+    condset!(vars.Tw, T(NaN), >(T(0.95)), vars.phi)
     return vars
 end # function Infrastructure.step!
 
