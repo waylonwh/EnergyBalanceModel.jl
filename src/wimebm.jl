@@ -173,11 +173,11 @@ function Infrastructure.step!(
     edgeinx = findfirst(>(0), vars.h)
     if isnothing(edgeinx) # no ice
         vars.Ewave .= 0.0
-        vars.lambda .= wave_period(spectrum)
+        vars.lambda .= wave_length(spectrum, 0.0, par)
         return vars
     elseif edgeinx > 1 # at least once cell has no ice
         vars.Ewave[1:edgeinx-1] .= 0.0
-        vars.lambda[1:edgeinx-1] .= wave_period(spectrum)
+        vars.lambda[1:edgeinx-1] .= wave_length(spectrum, 0.0, par)
     end # if isnothing, elseif
     # attenuate spectrum
     spect = spectrum
@@ -185,7 +185,7 @@ function Infrastructure.step!(
         L = grid_length(st, xi)
         atted_spect = attenuate(spect, L, vars.h[xi], vars.phi[xi], par)
         atted_strain = wave_strain(atted_spect, vars.h[xi], par)
-        half_atted_spect = attenuate(atted_spect, L/2, vars.h[xi], vars.phi[xi], par)
+        half_atted_spect = attenuate(spect, L/2, vars.h[xi], vars.phi[xi], par)
         half_atted_lambda = wave_length(half_atted_spect, vars.h[xi], par)
         if atted_strain > par.Ec # full breakup
             dbar = mean_size(1/2*half_atted_lambda, par)
