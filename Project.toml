@@ -27,7 +27,7 @@ WebGLExt = "WGLMakie"
 [compat]
 CairoMakie = "0.15.6"
 GLMakie = "0.13.6"
-Integrals = "4.10.0"
+Integrals = "5.4.1"
 InteractiveUtils = "1.10.10"
 LinearAlgebra = "1.10.10"
 Makie = "0.24.6"
