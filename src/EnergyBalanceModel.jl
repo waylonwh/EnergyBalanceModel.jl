@@ -111,9 +111,7 @@ Solutions{ClassicModel, sin, false} with:
   with forcing Forcing{false}(0.0) (constant forcing)
 ```
 """
-function run_example(
-    model::M=MIZModel(); plotbackend::Symbol=Plot.find_backend()
-)::Solutions{M,sin,false} where M<:AbstractModel
+function run_example(model::M=MIZModel())::Solutions{M,sin,false} where M<:AbstractModel
     st = SpaceTime{sin}(180, 2000, 50)
     forcing = Forcing(0.0)
     par = default_parameters(model)
@@ -134,7 +132,7 @@ function run_example(
         sols = integrate(model, st, forcing, par, init)
     end # if ===; else
     try # plot results
-        fig = plot_raw(sols, plotbackend)
+        fig = plot_raw(sols)
         display(fig)
     catch err
         if err isa Plot.BackendError
@@ -153,39 +151,30 @@ import PrecompileTools as PT
 
 PT.@setup_workload begin
     import InteractiveUtils as IU
-    ms = Tuple(M() for M in IU.subtypes(AbstractModel) if M !== Infrastructure.ModelDiff)
     Fs = (identity, sin)
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
-    spectrum = bretschneider(3.0, 9.5)
-    m2s = Dict{AbstractModel,Solutions}()
+    m2s = Dict{Type{<:AbstractModel},Solutions}()
     redirect_stdout(devnull)
     redirect_stderr(devnull)
     PT.@compile_workload begin
-        for m in ms, F in Fs, farg in fs_args
+        for M in (ClassicModel, MIZModel), F in Fs, farg in fs_args
             st = SpaceTime{F}(10, 10, 1)
             forcing = Forcing(farg...)
-            par = default_parameters(m)
+            par = default_parameters(M())
             T = fill(0.0, st.nx)
             init = Collection{Vec}(:Tg => T)
-            if m isa ClassicModel
+            if M === ClassicModel
                 init.E = par.cw * T
-            else # MIZModel or WIModel
+            else # MIZModel
                 init.Ei = zeros(st.nx)
                 init.Ew = par.cw * T
                 init.h = zeros(st.nx)
                 init.D = zeros(st.nx)
             end # if isa; elseif
-            local sol
-            try # avoid AssertionError from WIModel
-                m isa WIModel ?
-                    sol = integrate(m, st, forcing, par, init; spectrum) :
-                    sol = integrate(m, st, forcing, par, init)
-            catch err
-                err isa AssertionError || err isa InexactError || rethrow(err)
-            end # try; catch err
-            F === sin && length(farg) == 1 && (m2s[m] = sol)
+            sol = integrate(M(), st, forcing, par, init)
+            F === sin && length(farg) == 1 && (m2s[M] = sol)
         end # for m, F, farg
-        m2s[MIZModel()] - m2s[ClassicModel()]
+        m2s[MIZModel] - m2s[ClassicModel]
     end # PT.@compile_workload begin
 end # PT.@setup_workload begin
 

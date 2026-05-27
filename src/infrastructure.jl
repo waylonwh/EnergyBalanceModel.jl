@@ -2,7 +2,7 @@ module Infrastructure # EnergyBalanceModel.
 
 using ..Utilities
 
-import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats
+import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats, StyledStrings as SS
 
 export AbstractModel, ClassicModel, MIZModel, WIModel, ModelDiff
 export Collection, Forcing, Par, Solutions, SpaceTime, Vec, AbstractSpectrum
@@ -825,7 +825,12 @@ function integrate(
     lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::AbstractSpectrum
 ) # -> Solutions{WIModel,F,C}
     # initialise
+    println(SS.styled"{warning:Caching wavenumber...}")
+    startat = time()
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly, spectrum)
+    took = time() - startat
+    print("\033[A\033[2K")
+    println(SS.styled"{success:Wavenumber cached} in $(round(took; digits=2)) s\n")
     if isfinite(updatefreq)
         progress::Progress = Progress(
             length(st.T), "Integrating WIModel", updatefreq;

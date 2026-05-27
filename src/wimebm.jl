@@ -5,6 +5,7 @@ using ..Infrastructure, ..Utilities
 
 import EnergyBalanceModel.MIZEBM
 
+import InteractiveUtils as IU
 import Integrals as Intgr
 import NonlinearSolve as NlinSol
 
@@ -20,6 +21,18 @@ end # struct Spectrum
 Spectrum(freq::Vec, density::Vec) = length(freq) == length(density) ?
     Spectrum(freq, 2pi ./ freq, density) :
     throw(ArgumentError("Frequency and density vectors must be of the same length."))
+
+struct WavenumberCache{T<:AbstractFloat}
+    gamma::T
+    abstol::T
+    par_hash::UInt
+    freqs::Vector{T}
+    dh::T
+    hmax::T
+    wavenumber::Matrix{Complex{T}} # freqs × hs
+end
+
+const _wavenumber_ice_cache_ref = Ref{NTuple{2,WavenumberCache}}()
 
 function bretschneider(
     Hs::Float64, Tp::Float64, freq::Vec=collect(range(2pi/23.8, 2pi/2.5; step=7.5e-2))
@@ -42,23 +55,49 @@ function dispersion_relation(
     return lhs - rhs
 end # function dispersion_relation
 
+function get_cache(freqs::AbstractVector, h::T, gamma::T, abstol::T, par::Collection{T})::WavenumberCache{T} where T <: AbstractFloat
+    index = iszero(gamma) ? 1 : 2
+    cache = _wavenumber_ice_cache_ref[][index]
+    if (
+        !(cache isa WavenumberCache{T}) ||
+        cache.abstol != abstol ||
+        cache.gamma != gamma ||
+        cache.par_hash != hash(par) ||
+        cache.freqs != freqs ||
+        h > cache.hmax + 1
+    )
+        @warn "Wavenumber cache miss. Recomputing."
+        cache = cache_wavenumber(freqs, par, 1//10^4, max(10, h+1); abstol)[index]
+    end # if ||
+    return cache
+end # function get_cache
+
+function interpolate_wavenumber(h::AbstractFloat, cache::WavenumberCache) # -> Union{Nothing,Vector{Complex}}
+    h > cache.hmax && ArgumentError("h is out of bounds for wavenumber cache.")
+    col = floor(Int, h / cache.dh) + 1
+    weight = h % cache.dh / cache.dh
+    interp = @. weight * cache.wavenumber[:,col]
+    interp .+= @. (1-weight) * cache.wavenumber[:,col+1]
+    return interp
+end # function interpolate_wavenumber
+
 function wavenumber_ice(
     omega::Float64, h::Float64, par::Par, gamma::Float64=0.0;
-    init::ComplexF64=omega^2/par.g + 0im, abstol::Float64=1e-10
+    abstol::Float64=1e-10, # init::ComplexF64=omega^2/par.g + 0im
 )::ComplexF64
     prob = NlinSol.NonlinearProblem{false}(
-        (k, _) -> dispersion_relation(k, omega, gamma, h, par), init
+        (k, _) -> dispersion_relation(k, omega, gamma, h, par), omega^2/par.g + 0im
     )
     sol = NlinSol.solve(
         prob, NlinSol.NewtonRaphson(; autodiff=NlinSol.AutoFiniteDiff()); abstol
     )
-    (real(sol.u) < 0 || imag(sol.u) < 0 || abs(sol.resid) > 1) && abs(init) < 100  &&
-        return wavenumber_ice(omega, h, par, gamma; init=10init) # try another initial guess
+    # (real(sol.u) < 0 || imag(sol.u) < 0 || abs(sol.resid) > 1) && abs(init) < 100  &&
+    #     return wavenumber_ice(omega, h, par, gamma; init=10init) # try another initial guess
     stalledsol = sol.retcode === NlinSol.ReturnCode.Stalled && abs(sol.resid) < 10abstol
-    NlinSol.SciMLBase.successful_retcode(sol) || stalledsol ||
+    NlinSol.SciMLBase.successful_retcode(sol) || # stalledsol ||
         @warn(
             "Nonlinear solver did not converge when solving for wavenumber. Result may be inaccurate.",
-            sol.retcode, sol.resid
+            sol.retcode, sol.resid, sol.u, omega, h
         )
     @isdebugging() && stalledsol && (
         isdefined(@__MODULE__, :_stalled_kice_sols) ?
@@ -67,9 +106,30 @@ function wavenumber_ice(
     return sol.u
 end # function wavenumber_ice
 
-function moment(S::Spectrum, n::Int; coeff::Function=one)::Float64
+function wavenumber_ice(
+    omegas::AbstractVector, h::T, par::Collection{T}, gamma::T=zero(T); abstol::T=T(1e-10)
+)::Vector{Complex{T}} where T <: AbstractFloat
+    cache = get_cache(omegas, h, gamma, abstol, par)
+    return h < cache.hmax ?
+        interpolate_wavenumber(h, cache) :
+        wavenumber_ice.(omegas, h, Ref(par), gamma; abstol)
+end # function wavenumber_ice
+
+function cache_wavenumber(
+    freqs::AbstractVector, par::Collection{T}, dh::Real, hmax::Real; abstol::T=T(1e-10)
+)::NTuple{2,WavenumberCache{T}} where T <: AbstractFloat
+    hvec = Vector{T}(0:dh:hmax)
+    tup = (
+        WavenumberCache(zero(T), abstol, hash(par), freqs, T(dh), T(hmax), wavenumber_ice.(freqs, hvec', Ref(par), zero(T); abstol)),
+        WavenumberCache(par.Gamma, abstol, hash(par), freqs, T(dh), T(hmax), wavenumber_ice.(freqs, hvec', Ref(par), par.Gamma; abstol))
+    )
+    @eval const _wavenumber_ice_cache_ref = Ref($tup)
+    return tup
+end # function cache_wavenumber
+
+function moment(S::Spectrum, n::Int; coeff::Vector=ones(length(S.freq)))::Float64
     int = Intgr.solve(
-        Intgr.SampledIntegralProblem(@.(coeff(S.freq) * S.freq^n * S.density), S.freq),
+        Intgr.SampledIntegralProblem(@.(coeff * S.freq^n * S.density), S.freq),
         Intgr.SimpsonsRule()
     )
     Intgr.SciMLBase.successful_retcode(int) ||
@@ -80,19 +140,13 @@ end # function moment
 moment_elevation(S::Spectrum, n::Int)::Float64 = moment(S, n)
 
 moment_strain(S::Spectrum, n::Int, h::Float64, par::Par)::Float64 = moment(
-    S, n; coeff=(freq -> real(wavenumber_ice(freq, h, par, 0.0))^4 * h^2/4)
+    S, n; coeff=real.(wavenumber_ice(S.freq, h, par, 0.0)).^4 * h^2/4
 )
 
-@persistent(
-    alpha1::Vector{Float64}, input::UInt=0x0,
-    function attenuate(S::Spectrum, L::Float64, h::Float64, phi::Float64, par::Par)::Spectrum
-        if input != hash((S.freq, h, par))
-            alpha1 = imag.(wavenumber_ice.(S.freq, h, Ref(par), par.Gamma))
-            input = hash((S.freq, h, par))
-        end # if !=
-        return Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * L))
-    end # function attenuate
-) # @persistent
+function attenuate(S::Spectrum, L::Float64, h::Float64, phi::Float64, par::Par)::Spectrum
+    alpha1 = imag.(wavenumber_ice(S.freq, h, par, par.Gamma))
+    return Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * L))
+end # function attenuate) # @persistent
 
 wave_period(S::Spectrum)::Float64 = 2pi * sqrt(moment_elevation(S, 0) / moment_elevation(S, 2))
 
@@ -163,6 +217,7 @@ function Infrastructure.initialise(
     annusol.spectrum_ref[] = deepcopy(spectrum)
     vars.Ewave = zeros(st.nx)
     vars.lambda = Vec(undef, st.nx)
+    cache_wavenumber(spectrum.freq, par, 1//10^4, 10)
     return (vars, sols, annusol)
 end # function Infrastructure.initialise
 

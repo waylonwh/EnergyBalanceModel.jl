@@ -38,7 +38,6 @@ Base.getindex(layout::Layout, inx...) = (var=layout.vars[inx...], title=layout.t
 
 struct BackendError <: Exception
     requested::Symbol
-    loaded::Symbol
 end # struct BackendError
 
 function Base.showerror(io::IO, err::BackendError)::Nothing
@@ -49,11 +48,6 @@ function Base.showerror(io::IO, err::BackendError)::Nothing
             io,
             "Backend package $(err.requested) is not loaded or unsupported. Try `import $(err.requested)` first."
         )
-        err.loaded === :missing ||
-            println(
-                io,
-                "Hint: Another backend package $(err.loaded) is already loaded."
-            )
     end # if ===; else
     return nothing
 end # function Base.showerror
@@ -107,14 +101,7 @@ end # function default_layout
 
 isloaded(::Val)::Bool = false
 
-function find_backend()::Symbol
-    for backend in (:GLMakie, :CairoMakie, :WGLMakie)
-        isloaded(Val(backend)) && return backend
-    end # for backend
-    return :missing
-end # function find_backend
-
-init_backend(::Val{S}) where S = throw(BackendError(S, find_backend()))
+init_backend(::Val{S}) where S = throw(BackendError(S))
 
 """
     backend() -> Union{Module,Missing}
@@ -232,12 +219,11 @@ function limit_size(
 end # function limit_size
 
 """
-    plot_raw(sols::Solutions, into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(), bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_raw(sols::Solutions, into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(); kwargs...) -> Makie.Figure
 
 Plot the the solution variables for each time step in `sols.raw` into the specified Makie
-figure or grid position using the specified Makie backend `bcknd`. If `into` is not
-specified, a new figure will be created. The function will find available backend if not
-specified.
+figure or grid position. If `into` is not specified, a new figure will be created. The
+function will find available backend if not specified.
 
 # Keyword Arguments
 - `layout::Layout{Symbol}`: Layout structure specifying which variables to plot and their
@@ -254,7 +240,6 @@ specified.
 function plot_raw(
     sols::Solutions{M},
     into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(),
-    bcknd::Symbol=find_backend();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false,
     xsizelim::Int=1000,
@@ -262,7 +247,6 @@ function plot_raw(
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
     trange::NTuple{2,Real}=extrema(sols.ts)
 ) where M<:AbstractModel # -> Union{Mk.Figure,Mk.GridPosition}
-    backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, sols.ts, xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for linx in eachindex(layout)
@@ -275,12 +259,11 @@ function plot_raw(
 end # function plot_raw
 
 """
-    plot_avg(sols::Solutions, into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(), bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_avg(sols::Solutions, into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(); kwargs...) -> Makie.Figure
 
 Plot the annual average of solution variables in `sols.annual.avg` into the specified Makie
-figure or grid position using the specified Makie backend `bcknd`. If `into` is not
-specified, a new figure will be created. The function will find available backend if not
-specified.
+figure or grid position. If `into` is not specified, a new figure will be created. The
+function will find available backend if not specified.
 
 # Keyword Arguments
 - `layout::Layout{Symbol}`: Layout structure specifying which variables to plot and their
@@ -297,7 +280,6 @@ specified.
 function plot_avg(
     sols::Solutions{M},
     into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(),
-    bcknd::Symbol=find_backend();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false,
     xsizelim::Int=1000,
@@ -305,7 +287,6 @@ function plot_avg(
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
     trange::NTuple{2,Real}=(1, sols.spacetime.dur),
 ) where M<:AbstractModel # -> Union{Mk.Figure,Mk.GridPosition}
-    backend(bcknd)
     xinx, tinx = limit_size(sols.spacetime.x, collect(1:sols.spacetime.dur), xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for linx in eachindex(layout)
@@ -318,7 +299,7 @@ function plot_avg(
 end # function plot_avg
 
 """
-    plot_seasonal(sols::Solutions, fig::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(), bcknd::Symbol=...; kwargs...) -> Makie.Figure
+    plot_seasonal(sols::Solutions, fig::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(); kwargs...) -> Makie.Figure
 
 Using the data from `sols.annual`, plot lines spanned by (`xfunc(sols, year)`,
 `yfunc(sols, season, year)`) for each year and for the seasons `:avg`, `:winter`, and
@@ -344,7 +325,6 @@ annual average are thick solid.
 function plot_seasonal(
     sols::Solutions{<:AbstractModel,F,true},
     fig::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(),
-    bcknd::Symbol=find_backend();
     xfunc::Function=((sols, year) -> hemispheric_mean(sols.annual.avg.T[year], sols.spacetime.x)),
     yfunc::Function=ice_area,
     title::AbstractString="Ice covered area",
@@ -352,7 +332,6 @@ function plot_seasonal(
     ylabel::AbstractString=Mk.L"A_i",
     inspect::Bool=false
 ) where F # -> Union{Mk.Figure,Mk.GridPosition}
-    backend(bcknd)
     xdata = xfunc.(Ref(sols), 1:sols.spacetime.dur)
     ax = Mk.Axis(fig[1,1]; title, xlabel, ylabel)
     groups = (
@@ -387,7 +366,7 @@ end # function plot_seasonal
 
 import PrecompileTools as PT
 
-function precompile(bcnd::Module)::Nothing
+function precompile(bcknd::Module)::Nothing
     PT.@setup_workload begin
         ints = collect(1:10)
         floats = collect(0.1:0.1:1.0)
@@ -395,7 +374,7 @@ function precompile(bcnd::Module)::Nothing
         layout = Layout(
             reshape([rand(10, 10)], 1, 1), reshape(AbstractString[Mk.L"title"], 1, 1)
         )
-        bcnd.activate!()
+        bcknd.activate!()
         PT.@compile_workload begin
             for t in (ints, floats)
                 contourf_tiles(t, x, layout, Mk.Figure(); inspect=true)
