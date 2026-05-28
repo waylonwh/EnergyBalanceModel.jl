@@ -23,10 +23,7 @@ Spectrum(freq::Vec, density::Vec) = length(freq) == length(density) ?
     throw(ArgumentError("Frequency and density vectors must be of the same length."))
 
 struct WavenumberCache{T<:AbstractFloat}
-    gamma::T
-    abstol::T
-    par_hash::UInt
-    freqs::Vector{T}
+    key::UInt # hash of (T, freqs, Gamma, abstal, par)
     dh::T
     hmax::T
     wavenumber::Matrix{Complex{T}} # freqs × hs
@@ -55,19 +52,14 @@ function dispersion_relation(
     return lhs - rhs
 end # function dispersion_relation
 
-function get_cache(freqs::AbstractVector, h::T, gamma::T, abstol::T, par::Collection{T})::WavenumberCache{T} where T <: AbstractFloat
+function get_cache(
+    freqs::AbstractVector, h::T, gamma::T, abstol::T, par::Collection{T}
+)::WavenumberCache{T} where T <: AbstractFloat
     index = iszero(gamma) ? 1 : 2
     cache = _wavenumber_ice_cache_ref[][index]
-    if (
-        !(cache isa WavenumberCache{T}) ||
-        cache.abstol != abstol ||
-        cache.gamma != gamma ||
-        cache.par_hash != hash(par) ||
-        cache.freqs != freqs ||
-        h > cache.hmax + 1
-    )
+    if hash((T, freqs, gamma, abstol, par)) != cache.key || h > cache.hmax + 1
         @warn "Wavenumber cache miss. Recomputing."
-        cache = cache_wavenumber(freqs, par, 1//10^4, max(10, h+1); abstol)[index]
+        cache = cache_wavenumber!(freqs, par, 1//10^4, max(10, h+1); abstol)[index]
     end # if ||
     return cache
 end # function get_cache
@@ -76,8 +68,8 @@ function interpolate_wavenumber(h::AbstractFloat, cache::WavenumberCache) # -> U
     h > cache.hmax && ArgumentError("h is out of bounds for wavenumber cache.")
     col = floor(Int, h / cache.dh) + 1
     weight = h % cache.dh / cache.dh
-    interp = @. weight * cache.wavenumber[:,col]
-    interp .+= @. (1-weight) * cache.wavenumber[:,col+1]
+    interp = weight * cache.wavenumber[:,col]
+    @. interp += (1-weight) * cache.wavenumber[:,col+1]
     return interp
 end # function interpolate_wavenumber
 
@@ -115,13 +107,18 @@ function wavenumber_ice(
         wavenumber_ice.(omegas, h, Ref(par), gamma; abstol)
 end # function wavenumber_ice
 
-function cache_wavenumber(
+function cache_wavenumber!(
     freqs::AbstractVector, par::Collection{T}, dh::Real, hmax::Real; abstol::T=T(1e-10)
 )::NTuple{2,WavenumberCache{T}} where T <: AbstractFloat
     hvec = Vector{T}(0:dh:hmax)
     tup = (
-        WavenumberCache(zero(T), abstol, hash(par), freqs, T(dh), T(hmax), wavenumber_ice.(freqs, hvec', Ref(par), zero(T); abstol)),
-        WavenumberCache(par.Gamma, abstol, hash(par), freqs, T(dh), T(hmax), wavenumber_ice.(freqs, hvec', Ref(par), par.Gamma; abstol))
+        WavenumberCache(
+            hash((T, freqs, zero(T), abstol, par)), T(dh), T(hmax),
+            wavenumber_ice.(freqs, hvec', Ref(par), zero(T); abstol)
+        ),
+        WavenumberCache(
+            hash((T, freqs, par.Gamma, abstol, par)), T(dh), T(hmax),
+            wavenumber_ice.(freqs, hvec', Ref(par), par.Gamma; abstol))
     )
     @eval const _wavenumber_ice_cache_ref = Ref($tup)
     return tup
@@ -217,7 +214,7 @@ function Infrastructure.initialise(
     annusol.spectrum_ref[] = deepcopy(spectrum)
     vars.Ewave = zeros(st.nx)
     vars.lambda = Vec(undef, st.nx)
-    cache_wavenumber(spectrum.freq, par, 1//10^4, 10)
+    cache_wavenumber!(spectrum.freq, par, 1//10^4, 10)
     return (vars, sols, annusol)
 end # function Infrastructure.initialise
 
