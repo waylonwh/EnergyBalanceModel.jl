@@ -56,7 +56,7 @@ function get_cache(
     freqs::AbstractVector, h::T, gamma::T, abstol::T, par::Collection{T}
 )::WavenumberCache{T} where T <: AbstractFloat
     index = iszero(gamma) ? 1 : 2
-    cache = _wavenumber_ice_cache_ref[][index]
+    cache = _wavenumber_ice_cache_ref[][index]::WavenumberCache{T}
     if hash((T, freqs, gamma, abstol, par)) != cache.key || h > cache.hmax + 1
         @warn "Wavenumber cache miss. Recomputing."
         cache = cache_wavenumber!(freqs, par, 1//10^4, max(10, h+1); abstol)[index]
@@ -120,7 +120,7 @@ function cache_wavenumber!(
             hash((T, freqs, par.Gamma, abstol, par)), T(dh), T(hmax),
             wavenumber_ice.(freqs, hvec', Ref(par), par.Gamma; abstol))
     )
-    @eval const _wavenumber_ice_cache_ref = Ref($tup)
+    _wavenumber_ice_cache_ref[] = tup
     return tup
 end # function cache_wavenumber
 

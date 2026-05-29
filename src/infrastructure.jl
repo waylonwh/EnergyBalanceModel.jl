@@ -825,12 +825,20 @@ function integrate(
     lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::AbstractSpectrum
 ) # -> Solutions{WIModel,F,C}
     # initialise
-    println(SS.styled"{warning:Caching wavenumber...}")
-    startat = time()
-    vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly, spectrum)
-    took = time() - startat
-    print("\033[A\033[2K")
-    println(SS.styled"{success:Wavenumber cached} in $(round(took; digits=2)) s\n")
+    print(SS.styled"{warning:Caching wavenumber...}", lpad("", 10))
+    start = time()
+    task = Threads.@spawn initialise(model, st, forcing, par, init; lastonly, spectrum)
+    timer = Timer(
+        _ -> print("\e[10D", lpad(string(round(time()-start; digits=1)), 8), " s"),
+        0.1; interval=0.1
+    )
+    vars, sols, annusol = fetch(task)
+    close(timer)
+    println(
+        "\r\e[2K",
+        SS.styled"{success:Wavenumber cached}",
+        " in ", round(time()-start; digits=2), " s\n"
+    )
     if isfinite(updatefreq)
         progress::Progress = Progress(
             length(st.T), "Integrating WIModel", updatefreq;
