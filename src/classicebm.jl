@@ -33,19 +33,14 @@ import LinearAlgebra as LA, SparseArrays as SA
     end # function get_statics
 ) # @persistent
 
-function Infrastructure.initialise(
-    ::ClassicModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+Infrastructure.initialise(
+    model::ClassicModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true
-) # -> Tuple{Collection{Vec},Solutions{ClassicModel,F,V},Solutions{ClassicModel,F,V}}
-    vars = deepcopy(init)
-    solvars = Set{Symbol}((:E, :T, :h))
-    sols = Solutions{ClassicModel}(st, forcing, par, init, solvars, lastonly)
-    annusol = Solutions{ClassicModel}(st, forcing, par, init, solvars, true) # for calculating annual means
-    return (vars, sols, annusol)
-end # function initialise
+) = create_storages(model, Set{Symbol}((:E, :T, :h)), st, forcing, par, init; lastonly)
+    # -> Tuple{Collection{Vec},Solutions{ClassicModel,F,V},Solutions{ClassicModel,F,V}}
 
 function Infrastructure.step!(
-    ::ClassicModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; _...
+    ::ClassicModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par
 )::Collection{Vec}
     # get static variables
     stat = get_statics(st, par)
