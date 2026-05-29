@@ -236,7 +236,7 @@ function will find available backend if not specified.
 - `tsizelim::Int`: Maximum number of time steps to plot.
 - `xrange::NTuple{2,Real}`: Range of spatial points to plot.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
-""" # TODO update doc
+"""
 function plot_raw(
     sols::Solutions{M},
     into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(),

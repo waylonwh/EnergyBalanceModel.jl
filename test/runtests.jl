@@ -41,4 +41,14 @@ end # @testset begin
     @test lastyear_hemi_mean(mizsols, :E) - lastyear_hemi_mean(clasols, :E) < 10.0
 end # @testset begin
 
-# TODO add tests for WIM
+@testset "WIM" begin
+    spectrum = bretschneider(3.0, 9.5)
+    wimsols = integrate(WIModel(), st, forcing, wimpar, mizinit; spectrum, updatefreq=Inf)
+    @test wimsols isa Solutions{WIModel,sin,false}
+    @test EnergyBalanceModel.WIMEBM._wavenumber_ice_cache_ref[][2].key == hash(
+        (Float64, spectrum.freq, wimpar.Gamma, 1e-10, wimpar)
+    )
+    @test wimsols.spectrum_ref[].density == spectrum.density
+    @test hasproperty(wimsols.raw, :Ewave) && hasproperty(wimsols.raw, :lambda)
+    # @test lastyear_hemi_mean(wimsols, :T) - lastyear_hemi_mean(mizsols, :T) < 1.0
+end
