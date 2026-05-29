@@ -2,14 +2,14 @@ module Infrastructure # EnergyBalanceModel.
 
 using ..Utilities
 
-import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats
+import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats, StyledStrings as SS
 
-export AbstractModel, ClassicModel, MIZModel, ModelDiff
-export Collection, Forcing, Par, Solutions, SpaceTime, Vec
+export AbstractModel, ClassicModel, MIZModel, WIModel, ModelDiff
+export Collection, Forcing, Par, Solutions, SpaceTime, Vec, AbstractSpectrum
 export default_parameters, default_parval
 export get_diffop
 export hemispheric_mean, ice_area
-export integrate
+export create_storages, integrate
 
 """
     Vec
@@ -32,6 +32,14 @@ Singleton type representing the extended idealised climate model with a marginal
 (MIZ).
 """
 struct MIZModel <: AbstractModel end
+
+"""
+    WIModel <: AbstractModel
+
+Singleton type representing the wave ice interaction model, as an extension of the
+[`MIZModel`](@ref).
+"""
+struct WIModel <: AbstractModel end
 
 """
     ClassicModel <: AbstractModel
@@ -339,6 +347,9 @@ function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
     end # if <, elseif*3, else
 end # function (forcing::Forcing{false})
 
+# Spectrum for WIM
+abstract type AbstractSpectrum end
+
 """
     Solutions{M,F,V}
 
@@ -375,6 +386,7 @@ struct Solutions{M<:AbstractModel,F,V}
     annual::@NamedTuple{
         winter::Collection{Vector{Vec}}, summer::Collection{Vector{Vec}}, avg::Collection{Vector{Vec}}
     } # seasonal peak and annual avg
+    spectrum_ref::Ref{AbstractSpectrum} # spectrum used for WIModel, if applicable
 
     function Solutions{M}(
         st::SpaceTime{F}, forcing::Forcing{V}, par::Par, init::Collection{Vec},
@@ -405,7 +417,8 @@ struct Solutions{M<:AbstractModel,F,V}
                 winter=deepcopy(seasonaltemp),
                 summer=deepcopy(seasonaltemp),
                 avg=deepcopy(seasonaltemp)
-            ) # ( # seasonal
+            ), # ( # seasonal
+            Ref{AbstractSpectrum}() # spectrum_ref
         ) # new
     end # function Solutions
 end # struct Solutions{M,F,V}
@@ -444,7 +457,7 @@ function Base.:-(
         )
     end # for season, var
     return diffsol
-end # function Base.diff
+end # function Base.:-
 
 Base.show(io::IO, sols::Solutions)::Nothing = print(
     io,
@@ -466,6 +479,8 @@ function Base.show(io::IO, ::MIME"text/plain", sols::Solutions)::Nothing
     print(io, "  with forcing ", repr(sols.forcing))
     return nothing
 end # function Base.show
+
+get_spectrum(sol::Solutions{WIModel}) = sol.spectrum_ref[] # -> Spectrum
 
 # default parameter values
 const default_parval = Par(
@@ -492,7 +507,15 @@ const default_parval = Par(
     :Dmin => 1.0, # new pancake size (m)
     :Dmax => 500.0, # largest floe length (m)
     :hmin => 0.1, # new pancake thickness (m)
-    :kappa => 0.01 * 31536000, # floe welding parameter (m^2 s^-1)
+    :kappa => 0.01 * 31536000, # floe welding parameter (m^2 y^-1)
+    :Y => 5.5e9, # Effective Young's modulus (Pa)
+    :nu => 0.3, # Poisson's ratio
+    :rhow => 1025.0, # Water density (kg/m^3)
+    :g => 9.81, # Gravitational acceleration (m/s^2),
+    :Ec => 7.05e-5, # Breaking significant strain
+    :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
+    :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
+    :dmn => 20.0, # Chosen minmum floe diameter for the truncated power-law FSD in WIM (m)
 ) # Par
 
 # parameters used in each model
@@ -502,6 +525,10 @@ const classicmodel_parvars = Set{Symbol}(
 const mizmodel_parvars = push!(
     copy(classicmodel_parvars),
     :Tm, :m1, :m2, :alpha, :rl, :Dmin, :Dmax, :hmin, :kappa
+)
+const wimodel_parvars = push!(
+    copy(mizmodel_parvars),
+    :Y, :nu, :rhow, :g, :Ec, :Gamma, :gamma, :dmn
 )
 
 # Create a parameter dictionary from default values for a given Set
@@ -744,14 +771,26 @@ ice_area(sols::Solutions{MIZModel}, season::Symbol, year::Int)::Float64 =
 function step! end
 function initialise end
 
+function create_storages(
+    ::M, solvars::Set{Symbol}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    lastonly::Bool
+) where M<:AbstractModel # -> Tuple{Collection{Vec},Solutions{M,F,C},Solutions{M,F,C}}
+    vars = deepcopy(init)
+    sols = Solutions{M}(st, forcing, par, init, solvars, lastonly)
+    annusol = Solutions{M}(st, forcing, par, init, solvars, true) # for calculating annual means
+    return (vars, sols, annusol)
+end # function create_storages
+
 """
-    integrate(model::M<:AbstractModel, st::SpaceTime{F}, forcing::Forcing{C}, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+    integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{ClassicModel,F,C}
+    integrate(model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
 `Solutions` object. Use `default_parameters` to get default model parameters. For
 `MIZModel`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D` and `:Tg`; for
-`ClassicModel`, `init` must contain `:E` and `:Tg`.
+`ClassicModel`, `init` must contain `:E` and `:Tg`. A keyword argument `spectrum` must be
+specified for `WIModel` to indicate the spectrum of the incident wave field.
 
 When `lastonly=true`, only the last year of the solution is stored for each time step,
 otherwise the full solution is stored. A progress bar is displayed and updated with
@@ -762,7 +801,7 @@ Refer to the documentation of the module `EnergyBalanceModel` for an example.
 function integrate(
     model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
     lastonly::Bool=true, updatefreq::Float64=1.0
-) where M<:AbstractModel # -> Solutions{M,F,C}
+) where M<:Union{MIZModel,ClassicModel} # -> Solutions{M,F,C}
     # initialise
     vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
     if isfinite(updatefreq)
@@ -775,6 +814,45 @@ function integrate(
     # loop over time
     for ti in eachindex(st.T)
         step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par)
+        savesol!(sols, annusol, vars, ti)
+        isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
+    end # for ti
+    return sols
+end # function integrate
+
+function integrate(
+    model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::AbstractSpectrum
+) # -> Solutions{WIModel,F,C}
+    # initialise
+    if isfinite(updatefreq)
+        print(SS.styled"{bold,warning:Caching wavenumber...}", lpad("", 10))
+        start = time()
+    end # if isfinite
+    task = Threads.@spawn initialise(model, st, forcing, par, init; lastonly, spectrum)
+    isfinite(updatefreq) && (
+        timer = Timer(
+            _ -> print("\e[10D", lpad(string(round(time()-start; digits=1)), 8), " s"),
+            0.1; interval=0.1
+        )
+    )
+    vars, sols, annusol = fetch(task)
+    if isfinite(updatefreq)
+        close(timer)
+        println(
+            "\r\e[2K",
+            SS.styled"{bold,success:Wavenumber cached}",
+            " in ", round(time()-start; digits=2), " s\n"
+        )
+        progress::Progress = Progress(
+            length(st.T), "Integrating WIModel", updatefreq;
+            infofeed=(t -> string("t = ", round(t; digits=2)))
+        )
+        update!(progress; feedargs=(0,))
+    end # if isfinite
+    # loop over time
+    for ti in eachindex(st.T)
+        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
         savesol!(sols, annusol, vars, ti)
         isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
     end # for ti
