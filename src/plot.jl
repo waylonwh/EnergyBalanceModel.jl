@@ -239,7 +239,7 @@ function will find available backend if not specified.
 """
 function plot_raw(
     sols::Solutions{M},
-    into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(),
+    into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false,
     xsizelim::Int=1000,
@@ -279,7 +279,7 @@ function will find available backend if not specified.
 """
 function plot_avg(
     sols::Solutions{M},
-    into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(),
+    into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure();
     layout::Layout{Symbol}=default_layout(M()),
     inspect::Bool=false,
     xsizelim::Int=1000,
@@ -324,7 +324,7 @@ annual average are thick solid.
 """
 function plot_seasonal(
     sols::Solutions{<:AbstractModel,F,true},
-    fig::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure(),
+    fig::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure();
     xfunc::Function=((sols, year) -> hemispheric_mean(sols.annual.avg.T[year], sols.spacetime.x)),
     yfunc::Function=ice_area,
     title::AbstractString="Ice covered area",
