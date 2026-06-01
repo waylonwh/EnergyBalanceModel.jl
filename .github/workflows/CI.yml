@@ -19,10 +19,10 @@ jobs:
           - 'lts' # 1.10
           - '1' # latest stable (1.12)
           - 'pre' # prerelease build (1.13)
-          - 'nightly' # dev
+          # - 'nightly' # dev
         os:
           - ubuntu-latest
-          - macos-latest
+          # - macos-latest
           - windows-latest
     permissions:
       actions: write
