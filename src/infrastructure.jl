@@ -5,12 +5,12 @@ using ..Utilities
 import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats, StyledStrings as SS
 
 export AbstractModel, ClassicModel, MIZModel, WIModel, ModelDiff
-export Collection, Forcing, Par, Solutions, SpaceTime, Vec
+export Collection, Forcing, Par, Solutions, SpaceTime, Vec, EBMProblem
 export Spectrum, bretschneider, monochromatic
 export default_parameters, default_parval
 export get_diffop
 export hemispheric_mean, ice_area
-export create_storages, integrate
+export create_storages, integrate, solve
 
 """
     Vec
@@ -653,6 +653,151 @@ for model in IU.subtypes(AbstractModel)
     @eval default_parameters(::$model)::Par = default_parameters($(Symbol(namelower, "_parvars")))
 end # for model
 
+"""
+    EBMProblem(model::AbstractModel, ::Type{FT}=Float64; st, forcing, parameters, initconds, spectrum) -> EBMProblem{FT}
+
+Bundle a `model` together with everything needed to integrate it — the space-time domain,
+the climate forcing, the model parameters, the initial conditions, and (for `WIModel`) the
+incident wave spectrum — into a single `EBMProblem` that can be passed to `solve`.
+
+The floating-point type `FT` (default `Float64`) sets the precision used throughout the
+problem. Every other input is supplied as a keyword argument; each one is optional and falls
+back to a sensible default, so `EBMProblem(model)` produces a fully-specified, runnable
+problem. The keyword arguments are:
+- `st`: the `SpaceTime` domain, or a `NamedTuple` of overrides for its fields `nx`, `nt`,
+  `dur`, and `F` (e.g. `st=(; nx=90, dur=100)`). Defaults to `SpaceTime{sin}(180, 2000,
+  50)`.
+- `forcing`: a `Forcing`, a `Number` (used as a constant forcing), or a `NamedTuple` of the
+  fields accepted by `Forcing`. Defaults to no forcing, `Forcing(0)`.
+- `parameters`: a `Collection` of parameters, or a `NamedTuple` of overrides applied on top
+  of `default_parameters(model)`. Defaults to `default_parameters(model)`.
+- `initconds`: a `Collection` of initial conditions, or a `Vector` giving a starting
+  temperature field `T` (from which the remaining variables are derived). Defaults to a
+  uniform temperature of 17°C with no ice.
+- `spectrum`: a `Spectrum` describing the incident wave field. Only valid for `WIModel`,
+  where it defaults to `bretschneider(3, 9.5)`; supplying it for any other model is an
+  error.
+
+# Examples
+```julia-repl
+julia> EBMProblem(WIModel())
+EBMProblem{Float64} with:
+  model:      WIModel
+  spacetime:  SpaceTime{sin}(180, 2000, 50)
+  forcing:    Forcing(0.0) (constant forcing)
+  parameters: 32 entries
+  initconds:  5 variables: Set([:Tg, :Ei, :D, :h, :Ew])
+  spectrum:   Spectrum(30 components)
+
+julia> EBMProblem(WIModel(); st=(dur=100,))
+EBMProblem{Float64} with:
+  model:      WIModel
+  spacetime:  SpaceTime{sin}(180, 2000, 100)
+  forcing:    Forcing(0.0) (constant forcing)
+  parameters: 32 entries
+  initconds:  5 variables: Set([:Tg, :Ei, :D, :h, :Ew])
+  spectrum:   Spectrum(30 components)
+```
+"""
+mutable struct EBMProblem{T<:AbstractFloat}
+    model::AbstractModel
+    st::SpaceTime
+    forcing::Forcing
+    parameters::Collection{T}
+    initconds::Collection{Vec}
+    spectrum::Union{Spectrum,Nothing}
+
+    function EBMProblem{FT}(
+        model::AbstractModel,
+        st::SpaceTime=SpaceTime{sin}(180, 2000, 50),
+        forcing::Forcing=Forcing(zero(FT)),
+        parameters::Collection{FT}=default_parameters(model),
+        initconds::Union{Collection{Vector{FT}},Nothing}=nothing;
+        spectrum::Union{Spectrum,Nothing}=nothing
+    ) where FT<:AbstractFloat
+        if isnothing(initconds)
+            T = fill(FT(17), st.nx)
+            initconds = Collection{Vector{FT}}(
+                :Ei => zeros(FT, st.nx),
+                :Ew => T .* parameters.cw,
+                :h => zeros(FT, st.nx),
+                :D => zeros(FT, st.nx),
+                :Tg => T,
+            ) # Collection{Vector{FT}}
+        end
+        model isa WIModel || isnothing(spectrum) ||
+            throw(ArgumentError("Spectrum should only be provided for WIModel."))
+        model isa WIModel && isnothing(spectrum) &&
+            (spectrum = bretschneider(FT(3), FT(9.5)))
+        return new{FT}(model, st, forcing, parameters, initconds, spectrum)
+    end # function EBMProblem{FT}
+end # mutable struct EBMProblem
+
+function EBMProblem(
+    model::AbstractModel, ::Type{FT}=Float64;
+    st::Union{SpaceTime,NamedTuple}=(; ),
+    forcing::Union{Forcing,Number,NamedTuple}=0,
+    parameters::Union{Collection{FT},NamedTuple}=(; ),
+    initconds::Union{Collection{Vector{FT}},Vector{FT},Nothing}=nothing,
+    spectrum::Union{Spectrum,Nothing}=nothing
+)::EBMProblem{FT} where FT<:AbstractFloat
+    if !(st isa SpaceTime)
+        nx = get(st, :nx, 180)
+        st_inst = SpaceTime{get(st, :F, sin)}(nx, get(st, :nt, 2000), get(st, :dur, 50))
+    else # st isa SpaceTime
+        nx = st.nx
+        st_inst = st
+    end # if !, else
+    if forcing isa Forcing
+        forcing_inst = forcing
+    else # forcing isa Number or NamedTuple
+        forcing_inst =
+            forcing isa Number ?
+                Forcing(FT(forcing)) :
+                Forcing(forcing.base, forcing.peak, forcing.cool, forcing.holdyrs, forcing.rates)
+    end # if isa, else
+    if parameters isa Collection
+        parameters_inst = parameters
+    else # parameters isa NamedTuple
+        parameters_inst = default_parameters(model)
+        foreach(k -> (parameters_inst[k] = parameters[k]), propertynames(parameters))
+    end # if isa, else
+    if initconds isa Collection
+        initconds_inst = initconds
+    elseif initconds isa Vector
+        initconds_inst = Collection{Vector{FT}}(
+            :Ei => zeros(FT, nx), :Ew => initconds .* parameters_inst.cw,
+            :h => zeros(FT, nx), :D => zeros(FT, nx), :Tg => initconds,
+        )
+    else # initconds isa nothing
+        T = fill(FT(17), nx)
+        initconds_inst = Collection{Vector{FT}}(
+            :Ei => zeros(FT, nx), :Ew => T .* parameters_inst.cw,
+            :h => zeros(FT, nx), :D => zeros(FT, nx), :Tg => T,
+        )
+    end # if isa, elseif, else
+    return EBMProblem{FT}(model, st_inst, forcing_inst, parameters_inst, initconds_inst; spectrum)
+end # function EBMProblem
+
+Base.show(io::IO, prob::EBMProblem)::Nothing = print(
+    io, typeof(prob), '(', typeof(prob.model), ", ", prob.st, ", ", repr(prob.forcing), ')'
+)
+
+function Base.show(io::IO, ::MIME"text/plain", prob::EBMProblem)::Nothing
+    println(io, typeof(prob), " with:")
+    println(io, "  model:      ", typeof(prob.model))
+    println(io, "  spacetime:  ", prob.st)
+    println(io, "  forcing:    ", repr(prob.forcing))
+    println(io, "  parameters: ", length(prob.parameters), " entries")
+    println(io, "  initconds:  ", length(prob.initconds), " variables: ", propertynames(prob.initconds))
+    if !isnothing(prob.spectrum)
+        print(io, "  spectrum:   ", prob.spectrum)
+    else
+        print(io, "  spectrum:   nothing")
+    end # if !isnothing
+    return nothing
+end # function Base.show
+
 # calculate diffusion operator matrix
 @persistent(
     diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
@@ -928,5 +1073,45 @@ function integrate(
     end # for ti
     return sols
 end # function integrate
+
+"""
+    solve(prob::EBMProblem; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+
+Integrate the `EBMProblem` `prob` and return the results in a `Solutions` object. This is
+the high-level entry point that dispatches to the appropriate `integrate` method for the
+problem's model, forwarding the spectrum automatically when the model is a `WIModel`.
+
+When `lastonly=true`, only the last year of the solution is stored for each timestep,
+otherwise the full solution is stored. A progress bar is displayed and updated with
+frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
+
+# Examples
+```julia-repl
+julia> problem = EBMProblem(WIModel());
+
+julia> sols = solve(problem)
+Wavenumber cached in 7.29 s
+
+Integrating WIModel
+ 100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
+ 0:39/-0:00 2575.71/sec                     Done ✓
+ t = 50.0
+Solutions{WIModel, sin, false} with:
+  12 solution variables: Set([:Ti, :n, :D, :h, :lambda, :phi, :Ew, :E, :Tw, :T, :Ei, :Ewave])
+  on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
+  and 2000 timesteps: 49.00025:0.0005:49.99975
+  with forcing Forcing(0.0) (constant forcing)
+```
+"""
+solve(prob::EBMProblem; lastonly::Bool=true, updatefreq::Float64=1.0) =
+    prob.model isa WIModel ?
+        integrate(
+            prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
+            lastonly, updatefreq, spectrum=prob.spectrum
+        ) :
+        integrate(
+            prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
+            lastonly, updatefreq
+        )
 
 end # module Infrastructure
