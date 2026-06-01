@@ -189,6 +189,9 @@ function Infrastructure.step!(
     Fvi = vert_flux(t, :ice, vars.Tg, vars.T, f, st, par)
     Fvw = vert_flux(t, :water, vars.Tg, vars.T, f, st, par)
     Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
+    vars.Fvi = Fvi # !
+    vars.Fvw = Fvw # !
+    vars.Flat = Flat # !
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
     rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)
@@ -199,6 +202,8 @@ function Infrastructure.step!(
     # update floe size and thickness
     Al = area_lead(vars.D, vars.phi, vars.n, par)
     Ql, Qp = split_psiEw(psiEwdt/st.dt, vars.phi, Al)
+    vars.Ql = Ql # !
+    vars.Qp = Qp # !
     phip = st.dt * dphip(Qp, par)
     lasth = vars.h # save for D
     vars.h = forward_euler(
