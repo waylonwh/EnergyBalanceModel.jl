@@ -5,11 +5,12 @@ using ..Utilities
 import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats, StyledStrings as SS
 
 export AbstractModel, ClassicModel, MIZModel, WIModel, ModelDiff
-export Collection, Forcing, Par, Solutions, SpaceTime, Vec, AbstractSpectrum
+export Collection, Forcing, Par, Solutions, SpaceTime, Vec, EBMProblem
+export Spectrum, bretschneider, monochromatic
 export default_parameters, default_parval
 export get_diffop
 export hemispheric_mean, ice_area
-export create_storages, integrate
+export create_storages, integrate, solve
 
 """
     Vec
@@ -75,6 +76,9 @@ julia> parameters.D
 julia> getproperty(parameters, :A)
 193.0
 
+julia> parameters[:A]
+193.0
+
 julia> parameters.F = 0.0; parameters.F
 0.0
 ```
@@ -87,6 +91,9 @@ end # struct Collection
 Base.getproperty(coll::Collection, key::Symbol) = getindex(getfield(coll, :dict), key) # -> V
 Base.setproperty!(coll::Collection, key::Symbol, val) = setindex!(getfield(coll, :dict), val, key) # -> Dict{Symbol,V}
 Base.propertynames(coll::Collection)::Set{Symbol} = Set(keys(getfield(coll, :dict)))
+Base.getindex(coll::Collection, key::Symbol) = getproperty(coll, key) # -> V
+Base.setindex!(coll::Collection, val, key::Symbol) = setproperty!(coll, key, val) # -> Dict{Symbol,V}
+Base.keys(coll::Collection)::Set{Symbol} = propertynames(coll)
 Base.iterate(coll::Collection) = iterate(getfield(coll, :dict)) # -> Tuple{Pair{Symbol,V},Int} or Nothing
 Base.iterate(coll::Collection, state::Int) = iterate(getfield(coll, :dict), state) # -> Tuple{Pair{Symbol,V},Int} or Nothing
 Base.length(coll::Collection)::Int = length(getfield(coll, :dict))
@@ -96,7 +103,7 @@ function uniqueunion(ca::Collection{A}, cb::Collection{B}) where {A, B}
     vtype = typejoin(A, B)
     vtype === Any && (vtype = Union{A, B})
     overlap = intersect(propertynames(ca), propertynames(cb))
-    return all(key -> getproperty(ca, key) === getproperty(cb, key), overlap) ?
+    return all(key -> ca[key] === cb[key], overlap) ?
         Collection{vtype}() : Collection{vtype}(union(ca, cb))
 end # function uniqueunion
 
@@ -348,7 +355,97 @@ function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
 end # function (forcing::Forcing{false})
 
 # Spectrum for WIM
-abstract type AbstractSpectrum end
+"""
+    Spectrum(freq::Vec, density::Vec)
+
+Represents a wave energy spectrum for the wave-ice interaction model ([`WIModel`](@ref)).
+
+The angular frequencies `freq` (rad s⁻¹) and the corresponding spectral energy `density`
+must be vectors of the same length. The wave periods are computed as `2π ./ freq` and stored
+in the `period` field.
+
+# Fields
+- `freq::Vec`: angular frequencies (rad s⁻¹)
+- `period::Vec`: wave periods (s), derived as `2π ./ freq`
+- `density::Vec`: spectral energy density at each frequency
+
+See also [`bretschneider`](@ref) and [`monochromatic`](@ref) for convenience constructors.
+
+# Examples
+```julia-repl
+julia> Spectrum([0.5, 1.0, 1.5], [0.2, 0.5, 0.1])
+Spectrum([0.5, 1.0, 1.5], [12.566370614359172, 6.283185307179586, 4.1887902047863905], [0.2, 0.5, 0.1])
+```
+"""
+struct Spectrum
+    freq::Vec
+    period::Vec
+    density::Vec
+end # struct Spectrum
+
+Spectrum(freq::Vec, density::Vec) = length(freq) == length(density) ?
+    Spectrum(freq, 2pi ./ freq, density) :
+    throw(ArgumentError("Frequency and density vectors must be of the same length."))
+
+Base.show(io::IO, S::Spectrum)::Nothing = print(
+    io, "Spectrum(", length(S.freq), " components)"
+)
+
+function Base.show(io::IO, ::MIME"text/plain", S::Spectrum)::Nothing
+    println(io, "Spectrum with ", length(S.freq), " frequency components:")
+    println(io, "  ω ∈ [", round(minimum(S.freq); digits=3), ", ", round(maximum(S.freq); digits=3), "] rad s⁻¹")
+    println(io, "  T ∈ [", round(minimum(S.period); digits=2), ", ", round(maximum(S.period); digits=2), "] s")
+    print(io, "  peak density at T = ", round(S.period[argmax(S.density)]; digits=2), " s")
+    return nothing
+end # function Base.show
+
+"""
+    bretschneider(Hs::Float64, Tp::Float64, freq::Vec=collect(range(2π/23.8, 2π/2.5; step=7.5e-2))) -> Spectrum
+
+Construct a Bretschneider wave [`Spectrum`](@ref) with significant wave height `Hs` (m) and
+peak period `Tp` (s), evaluated at the angular frequencies `freq` (rad s⁻¹).
+
+The spectral energy density is given by
+``S(T) = \\frac{1.25 H_s^2 T^5}{8\\pi T_p^4} \\exp\\!\\left[-1.25 (T/T_p)^4\\right]``,
+where ``T = 2\\pi / \\omega`` is the wave period.
+
+# Examples
+```julia-repl
+julia> S = bretschneider(3.0, 9.5);
+
+julia> length(S.freq)
+14
+```
+"""
+function bretschneider(
+    Hs::Float64, Tp::Float64, freq::Vec=collect(range(2pi/23.8, 2pi/2.5; step=7.5e-2))
+)::Spectrum
+    T = 2pi ./ freq
+    return Spectrum(freq, @. 1.25 * Hs^2 * T^5 / (8pi * Tp^4) * exp(-1.25(T/Tp)^4))
+end # function bretschneider
+
+"""
+    monochromatic(Hs::Float64, Tp::Float64, freq::Vec=collect(range(2π/(Tp+0.1), 2π/(Tp-0.1); step=1e-3)); eps::Float64=1e-6) -> Spectrum
+
+Construct an approximately monochromatic wave [`Spectrum`](@ref) with significant wave
+height `Hs` (m) and peak period `Tp` (s).
+
+The energy is concentrated near the peak angular frequency ``2\\pi / T_p`` using a narrow
+Gaussian of variance `eps`, so that the total energy matches that of a monochromatic wave of
+height `Hs`. Smaller `eps` produces a sharper peak.
+
+# Examples
+```julia-repl
+julia> S = monochromatic(3.0, 9.5);
+
+julia> isapprox(S.freq[argmax(S.density)], 2pi / 9.5; atol=1e-3)
+true
+```
+"""
+monochromatic(
+    Hs::Float64, Tp::Float64, freq::Vec=collect(range(2pi/(Tp+0.1), 2pi/(Tp-0.1); step=1e-3));
+    eps::Float64=1e-6
+)::Spectrum = Spectrum(freq, @. Hs^2 / 16 * exp(-(freq - 2pi/Tp)^2 / 2eps) / sqrt(2pi * eps))
 
 """
     Solutions{M,F,V}
@@ -386,7 +483,7 @@ struct Solutions{M<:AbstractModel,F,V}
     annual::@NamedTuple{
         winter::Collection{Vector{Vec}}, summer::Collection{Vector{Vec}}, avg::Collection{Vector{Vec}}
     } # seasonal peak and annual avg
-    spectrum_ref::Ref{AbstractSpectrum} # spectrum used for WIModel, if applicable
+    spectrum_ref::Ref{Spectrum} # spectrum used for WIModel, if applicable
 
     function Solutions{M}(
         st::SpaceTime{F}, forcing::Forcing{V}, par::Par, init::Collection{Vec},
@@ -401,10 +498,10 @@ struct Solutions{M<:AbstractModel,F,V}
         end # if lastonly, else
         # construct raw solution storage
         solraw = Collection{Vector{Vec}}()
-        foreach(var -> setproperty!(solraw, var, Vector{Vec}(undef, length(ts))), vars)
+        foreach(var -> (solraw[var] = Vector{Vec}(undef, length(ts))), vars)
         # construct seasonal solution storage template
         seasonaltemp = Collection{Vector{Vec}}()
-        foreach(var -> setproperty!(seasonaltemp, var, Vector{Vec}(undef, st.dur)), vars)
+        foreach(var -> (seasonaltemp[var] = Vector{Vec}(undef, st.dur)), vars)
         return new{M,F,V}(
             st, # spacetime
             ts,
@@ -418,7 +515,7 @@ struct Solutions{M<:AbstractModel,F,V}
                 summer=deepcopy(seasonaltemp),
                 avg=deepcopy(seasonaltemp)
             ), # ( # seasonal
-            Ref{AbstractSpectrum}() # spectrum_ref
+            Ref{Spectrum}() # spectrum_ref
         ) # new
     end # function Solutions
 end # struct Solutions{M,F,V}
@@ -443,18 +540,9 @@ function Base.:-(
     diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly)
     xinx = findall(in(diffsol.ts), sx.ts)
     yinx = findall(in(diffsol.ts), sy.ts)
-    foreach(
-        var -> setproperty!(
-            diffsol.raw, var,
-            getproperty(sx.raw, var)[xinx] .- getproperty(sy.raw, var)[yinx]
-        ),
-        vars
-    ) # foreach
+    foreach(var -> (diffsol.raw[var] = sx.raw[var][xinx] .- sy.raw[var][yinx]), vars)
     for season in 1:3, var in vars
-        setproperty!(
-            diffsol.annual[season], var,
-            getproperty(sx.annual[season], var)[1:st.dur] .- getproperty(sy.annual[season], var)[1:st.dur]
-        )
+        diffsol.annual[season][var] = sx.annual[season][var][1:st.dur] .- sy.annual[season][var][1:st.dur]
     end # for season, var
     return diffsol
 end # function Base.:-
@@ -480,7 +568,7 @@ function Base.show(io::IO, ::MIME"text/plain", sols::Solutions)::Nothing
     return nothing
 end # function Base.show
 
-get_spectrum(sol::Solutions{WIModel}) = sol.spectrum_ref[] # -> Spectrum
+get_spectrum(sol::Solutions{WIModel})::Spectrum = sol.spectrum_ref[] # -> Spectrum
 
 # default parameter values
 const default_parval = Par(
@@ -565,6 +653,151 @@ for model in IU.subtypes(AbstractModel)
     @eval default_parameters(::$model)::Par = default_parameters($(Symbol(namelower, "_parvars")))
 end # for model
 
+"""
+    EBMProblem(model::AbstractModel, ::Type{FT}=Float64; st, forcing, parameters, initconds, spectrum) -> EBMProblem{FT}
+
+Bundle a `model` together with everything needed to integrate it — the space-time domain,
+the climate forcing, the model parameters, the initial conditions, and (for `WIModel`) the
+incident wave spectrum — into a single `EBMProblem` that can be passed to `solve`.
+
+The floating-point type `FT` (default `Float64`) sets the precision used throughout the
+problem. Every other input is supplied as a keyword argument; each one is optional and falls
+back to a sensible default, so `EBMProblem(model)` produces a fully-specified, runnable
+problem. The keyword arguments are:
+- `st`: the `SpaceTime` domain, or a `NamedTuple` of overrides for its fields `nx`, `nt`,
+  `dur`, and `F` (e.g. `st=(; nx=90, dur=100)`). Defaults to `SpaceTime{sin}(180, 2000,
+  50)`.
+- `forcing`: a `Forcing`, a `Number` (used as a constant forcing), or a `NamedTuple` of the
+  fields accepted by `Forcing`. Defaults to no forcing, `Forcing(0)`.
+- `parameters`: a `Collection` of parameters, or a `NamedTuple` of overrides applied on top
+  of `default_parameters(model)`. Defaults to `default_parameters(model)`.
+- `initconds`: a `Collection` of initial conditions, or a `Vector` giving a starting
+  temperature field `T` (from which the remaining variables are derived). Defaults to a
+  uniform temperature of 17°C with no ice.
+- `spectrum`: a `Spectrum` describing the incident wave field. Only valid for `WIModel`,
+  where it defaults to `bretschneider(3, 9.5)`; supplying it for any other model is an
+  error.
+
+# Examples
+```julia-repl
+julia> EBMProblem(WIModel())
+EBMProblem{Float64} with:
+  model:      WIModel
+  spacetime:  SpaceTime{sin}(180, 2000, 50)
+  forcing:    Forcing(0.0) (constant forcing)
+  parameters: 32 entries
+  initconds:  5 variables: Set([:Tg, :Ei, :D, :h, :Ew])
+  spectrum:   Spectrum(30 components)
+
+julia> EBMProblem(WIModel(); st=(dur=100,))
+EBMProblem{Float64} with:
+  model:      WIModel
+  spacetime:  SpaceTime{sin}(180, 2000, 100)
+  forcing:    Forcing(0.0) (constant forcing)
+  parameters: 32 entries
+  initconds:  5 variables: Set([:Tg, :Ei, :D, :h, :Ew])
+  spectrum:   Spectrum(30 components)
+```
+"""
+mutable struct EBMProblem{T<:AbstractFloat}
+    model::AbstractModel
+    st::SpaceTime
+    forcing::Forcing
+    parameters::Collection{T}
+    initconds::Collection{Vec}
+    spectrum::Union{Spectrum,Nothing}
+
+    function EBMProblem{FT}(
+        model::AbstractModel,
+        st::SpaceTime=SpaceTime{sin}(180, 2000, 50),
+        forcing::Forcing=Forcing(zero(FT)),
+        parameters::Collection{FT}=default_parameters(model),
+        initconds::Union{Collection{Vector{FT}},Nothing}=nothing;
+        spectrum::Union{Spectrum,Nothing}=nothing
+    ) where FT<:AbstractFloat
+        if isnothing(initconds)
+            T = fill(FT(17), st.nx)
+            initconds = Collection{Vector{FT}}(
+                :Ei => zeros(FT, st.nx),
+                :Ew => T .* parameters.cw,
+                :h => zeros(FT, st.nx),
+                :D => zeros(FT, st.nx),
+                :Tg => T,
+            ) # Collection{Vector{FT}}
+        end
+        model isa WIModel || isnothing(spectrum) ||
+            throw(ArgumentError("Spectrum should only be provided for WIModel."))
+        model isa WIModel && isnothing(spectrum) &&
+            (spectrum = bretschneider(FT(3), FT(9.5)))
+        return new{FT}(model, st, forcing, parameters, initconds, spectrum)
+    end # function EBMProblem{FT}
+end # mutable struct EBMProblem
+
+function EBMProblem(
+    model::AbstractModel, ::Type{FT}=Float64;
+    st::Union{SpaceTime,NamedTuple}=(; ),
+    forcing::Union{Forcing,Number,NamedTuple}=0,
+    parameters::Union{Collection{FT},NamedTuple}=(; ),
+    initconds::Union{Collection{Vector{FT}},Vector{FT},Nothing}=nothing,
+    spectrum::Union{Spectrum,Nothing}=nothing
+)::EBMProblem{FT} where FT<:AbstractFloat
+    if !(st isa SpaceTime)
+        nx = get(st, :nx, 180)
+        st_inst = SpaceTime{get(st, :F, sin)}(nx, get(st, :nt, 2000), get(st, :dur, 50))
+    else # st isa SpaceTime
+        nx = st.nx
+        st_inst = st
+    end # if !, else
+    if forcing isa Forcing
+        forcing_inst = forcing
+    else # forcing isa Number or NamedTuple
+        forcing_inst =
+            forcing isa Number ?
+                Forcing(FT(forcing)) :
+                Forcing(forcing.base, forcing.peak, forcing.cool, forcing.holdyrs, forcing.rates)
+    end # if isa, else
+    if parameters isa Collection
+        parameters_inst = parameters
+    else # parameters isa NamedTuple
+        parameters_inst = default_parameters(model)
+        foreach(k -> (parameters_inst[k] = parameters[k]), propertynames(parameters))
+    end # if isa, else
+    if initconds isa Collection
+        initconds_inst = initconds
+    elseif initconds isa Vector
+        initconds_inst = Collection{Vector{FT}}(
+            :Ei => zeros(FT, nx), :Ew => initconds .* parameters_inst.cw,
+            :h => zeros(FT, nx), :D => zeros(FT, nx), :Tg => initconds,
+        )
+    else # initconds isa nothing
+        T = fill(FT(17), nx)
+        initconds_inst = Collection{Vector{FT}}(
+            :Ei => zeros(FT, nx), :Ew => T .* parameters_inst.cw,
+            :h => zeros(FT, nx), :D => zeros(FT, nx), :Tg => T,
+        )
+    end # if isa, elseif, else
+    return EBMProblem{FT}(model, st_inst, forcing_inst, parameters_inst, initconds_inst; spectrum)
+end # function EBMProblem
+
+Base.show(io::IO, prob::EBMProblem)::Nothing = print(
+    io, typeof(prob), '(', typeof(prob.model), ", ", prob.st, ", ", repr(prob.forcing), ')'
+)
+
+function Base.show(io::IO, ::MIME"text/plain", prob::EBMProblem)::Nothing
+    println(io, typeof(prob), " with:")
+    println(io, "  model:      ", typeof(prob.model))
+    println(io, "  spacetime:  ", prob.st)
+    println(io, "  forcing:    ", repr(prob.forcing))
+    println(io, "  parameters: ", length(prob.parameters), " entries")
+    println(io, "  initconds:  ", length(prob.initconds), " variables: ", propertynames(prob.initconds))
+    if !isnothing(prob.spectrum)
+        print(io, "  spectrum:   ", prob.spectrum)
+    else
+        print(io, "  spectrum:   nothing")
+    end # if !isnothing
+    return nothing
+end # function Base.show
+
 # calculate diffusion operator matrix
 @persistent(
     diffop::SA.SparseMatrixCSC{Float64,Int64} = SA.spzeros(Float64, 0, 0),
@@ -620,14 +853,14 @@ function annual_mean(annusol::Solutions)::Collection{Vec}
     # calculate annual mean for each variable except temperatures
     means = Collection{Vec}()
     for var in propertynames(annusol.raw)
-        vecvec = getproperty(annusol.raw, var)
+        vecvec = annusol.raw[var]
         @boundscheck length(vecvec) == annusol.spacetime.nt ||
             throw(
                 ArgumentError(
                     "Length of raw solution vector for $var does not match the number of timesteps per year, when calculating annual mean."
                 )
             ) # throw
-        setproperty!(means, var, crossmean(vecvec))
+        means[var] = crossmean(vecvec)
     end # for var
     return means
 end # function annual_mean
@@ -656,39 +889,21 @@ function savesol!(
     year = ceil(Int, sols.spacetime.T[tinx])
     ti = mod1(tinx, sols.spacetime.nt) # index of time in the year
     # save raw data to annual
-    foreach(
-        var -> getproperty(annusol.raw, var)[ti] = getproperty(varscp, var), # !
-        propertynames(annusol.raw)
-    )
+    foreach(var -> annusol.raw[var][ti] = varscp[var], propertynames(annusol.raw))
     # save raw data
     if !sols.lastonly # save all raw data
-        foreach(
-            var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), tinx),
-            propertynames(sols.raw)
-        )
+        foreach(var -> (sols.raw[var][tinx] = varscp[var]), propertynames(sols.raw))
     elseif tinx > length(sols.spacetime.T) - sols.spacetime.nt # save the raw data of the last year
-        foreach(
-            var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti),
-            propertynames(sols.raw)
-        )
+        foreach(var -> (sols.raw[var][ti] = varscp[var]), propertynames(sols.raw))
     end # if !, elseif
     # save seasonal data
     if ti == sols.spacetime.winter.inx
-        foreach(
-            var -> setindex!(getproperty(sols.annual.winter, var), getproperty(varscp, var), year),
-            propertynames(sols.annual.winter)
-        )
+        foreach(var -> (sols.annual.winter[var][year] = varscp[var]), propertynames(sols.annual.winter))
     elseif ti == sols.spacetime.summer.inx
-        foreach(
-            var -> setindex!(getproperty(sols.annual.summer, var), getproperty(varscp, var), year),
-            propertynames(sols.annual.summer)
-        )
+        foreach(var -> (sols.annual.summer[var][year] = varscp[var]), propertynames(sols.annual.summer))
     elseif ti == sols.spacetime.nt # calculate annual average
         means = annual_mean(annusol)
-        foreach(
-            var -> setindex!(getproperty(sols.annual.avg, var), getproperty(means, var), year),
-            propertynames(sols.annual.avg)
-        )
+        foreach(var -> (sols.annual.avg[var][year] = means[var]), propertynames(sols.annual.avg))
     end # if ==, elseif*2
     return sols
 end # function savesol!
@@ -822,7 +1037,7 @@ end # function integrate
 
 function integrate(
     model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::AbstractSpectrum
+    lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum
 ) # -> Solutions{WIModel,F,C}
     # initialise
     if isfinite(updatefreq)
@@ -858,5 +1073,45 @@ function integrate(
     end # for ti
     return sols
 end # function integrate
+
+"""
+    solve(prob::EBMProblem; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+
+Integrate the `EBMProblem` `prob` and return the results in a `Solutions` object. This is
+the high-level entry point that dispatches to the appropriate `integrate` method for the
+problem's model, forwarding the spectrum automatically when the model is a `WIModel`.
+
+When `lastonly=true`, only the last year of the solution is stored for each timestep,
+otherwise the full solution is stored. A progress bar is displayed and updated with
+frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
+
+# Examples
+```julia-repl
+julia> problem = EBMProblem(WIModel());
+
+julia> sols = solve(problem)
+Wavenumber cached in 7.29 s
+
+Integrating WIModel
+ 100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
+ 0:39/-0:00 2575.71/sec                     Done ✓
+ t = 50.0
+Solutions{WIModel, sin, false} with:
+  12 solution variables: Set([:Ti, :n, :D, :h, :lambda, :phi, :Ew, :E, :Tw, :T, :Ei, :Ewave])
+  on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
+  and 2000 timesteps: 49.00025:0.0005:49.99975
+  with forcing Forcing(0.0) (constant forcing)
+```
+"""
+solve(prob::EBMProblem; lastonly::Bool=true, updatefreq::Float64=1.0) =
+    prob.model isa WIModel ?
+        integrate(
+            prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
+            lastonly, updatefreq, spectrum=prob.spectrum
+        ) :
+        integrate(
+            prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
+            lastonly, updatefreq
+        )
 
 end # module Infrastructure

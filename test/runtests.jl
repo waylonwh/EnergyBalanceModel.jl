@@ -5,7 +5,7 @@ forcing = Forcing(0.0)
 
 mizpar = default_parameters(MIZModel())
 T = fill(17.0, st.nx)
-mizinit = Collection{Vec}(
+mizinit = Collection{Vector{Float64}}(
     :Ei => zeros(st.nx),
     :Ew => mizpar.cw * T,
     :h => zeros(st.nx),
@@ -14,7 +14,7 @@ mizinit = Collection{Vec}(
 ) # Collection
 
 clapar = default_parameters(ClassicModel())
-clainit = Collection{Vec}(
+clainit = Collection{Vector{Float64}}(
     :E => clapar.cw * T,
     :Tg => T
 )
