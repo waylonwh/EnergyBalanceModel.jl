@@ -75,6 +75,9 @@ julia> parameters.D
 julia> getproperty(parameters, :A)
 193.0
 
+julia> parameters[:A]
+193.0
+
 julia> parameters.F = 0.0; parameters.F
 0.0
 ```
@@ -87,6 +90,9 @@ end # struct Collection
 Base.getproperty(coll::Collection, key::Symbol) = getindex(getfield(coll, :dict), key) # -> V
 Base.setproperty!(coll::Collection, key::Symbol, val) = setindex!(getfield(coll, :dict), val, key) # -> Dict{Symbol,V}
 Base.propertynames(coll::Collection)::Set{Symbol} = Set(keys(getfield(coll, :dict)))
+Base.getindex(coll::Collection, key::Symbol) = getproperty(coll, key) # -> V
+Base.setindex!(coll::Collection, val, key::Symbol) = setproperty!(coll, key, val) # -> Dict{Symbol,V}
+Base.keys(coll::Collection)::Set{Symbol} = propertynames(coll)
 Base.iterate(coll::Collection) = iterate(getfield(coll, :dict)) # -> Tuple{Pair{Symbol,V},Int} or Nothing
 Base.iterate(coll::Collection, state::Int) = iterate(getfield(coll, :dict), state) # -> Tuple{Pair{Symbol,V},Int} or Nothing
 Base.length(coll::Collection)::Int = length(getfield(coll, :dict))
@@ -96,7 +102,7 @@ function uniqueunion(ca::Collection{A}, cb::Collection{B}) where {A, B}
     vtype = typejoin(A, B)
     vtype === Any && (vtype = Union{A, B})
     overlap = intersect(propertynames(ca), propertynames(cb))
-    return all(key -> getproperty(ca, key) === getproperty(cb, key), overlap) ?
+    return all(key -> ca[key] === cb[key], overlap) ?
         Collection{vtype}() : Collection{vtype}(union(ca, cb))
 end # function uniqueunion
 
@@ -401,10 +407,10 @@ struct Solutions{M<:AbstractModel,F,V}
         end # if lastonly, else
         # construct raw solution storage
         solraw = Collection{Vector{Vec}}()
-        foreach(var -> setproperty!(solraw, var, Vector{Vec}(undef, length(ts))), vars)
+        foreach(var -> (solraw[var] = Vector{Vec}(undef, length(ts))), vars)
         # construct seasonal solution storage template
         seasonaltemp = Collection{Vector{Vec}}()
-        foreach(var -> setproperty!(seasonaltemp, var, Vector{Vec}(undef, st.dur)), vars)
+        foreach(var -> (seasonaltemp[var] = Vector{Vec}(undef, st.dur)), vars)
         return new{M,F,V}(
             st, # spacetime
             ts,
@@ -443,18 +449,9 @@ function Base.:-(
     diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly)
     xinx = findall(in(diffsol.ts), sx.ts)
     yinx = findall(in(diffsol.ts), sy.ts)
-    foreach(
-        var -> setproperty!(
-            diffsol.raw, var,
-            getproperty(sx.raw, var)[xinx] .- getproperty(sy.raw, var)[yinx]
-        ),
-        vars
-    ) # foreach
+    foreach(var -> (diffsol.raw[var] = sx.raw[var][xinx] .- sy.raw[var][yinx]), vars)
     for season in 1:3, var in vars
-        setproperty!(
-            diffsol.annual[season], var,
-            getproperty(sx.annual[season], var)[1:st.dur] .- getproperty(sy.annual[season], var)[1:st.dur]
-        )
+        diffsol.annual[season][var] = sx.annual[season][var][1:st.dur] .- sy.annual[season][var][1:st.dur]
     end # for season, var
     return diffsol
 end # function Base.:-
@@ -620,14 +617,14 @@ function annual_mean(annusol::Solutions)::Collection{Vec}
     # calculate annual mean for each variable except temperatures
     means = Collection{Vec}()
     for var in propertynames(annusol.raw)
-        vecvec = getproperty(annusol.raw, var)
+        vecvec = annusol.raw[var]
         @boundscheck length(vecvec) == annusol.spacetime.nt ||
             throw(
                 ArgumentError(
                     "Length of raw solution vector for $var does not match the number of timesteps per year, when calculating annual mean."
                 )
             ) # throw
-        setproperty!(means, var, crossmean(vecvec))
+        means[var] = crossmean(vecvec)
     end # for var
     return means
 end # function annual_mean
@@ -656,39 +653,21 @@ function savesol!(
     year = ceil(Int, sols.spacetime.T[tinx])
     ti = mod1(tinx, sols.spacetime.nt) # index of time in the year
     # save raw data to annual
-    foreach(
-        var -> getproperty(annusol.raw, var)[ti] = getproperty(varscp, var), # !
-        propertynames(annusol.raw)
-    )
+    foreach(var -> annusol.raw[var][ti] = varscp[var], propertynames(annusol.raw))
     # save raw data
     if !sols.lastonly # save all raw data
-        foreach(
-            var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), tinx),
-            propertynames(sols.raw)
-        )
+        foreach(var -> (sols.raw[var][tinx] = varscp[var]), propertynames(sols.raw))
     elseif tinx > length(sols.spacetime.T) - sols.spacetime.nt # save the raw data of the last year
-        foreach(
-            var -> setindex!(getproperty(sols.raw, var), getproperty(varscp, var), ti),
-            propertynames(sols.raw)
-        )
+        foreach(var -> (sols.raw[var][ti] = varscp[var]), propertynames(sols.raw))
     end # if !, elseif
     # save seasonal data
     if ti == sols.spacetime.winter.inx
-        foreach(
-            var -> setindex!(getproperty(sols.annual.winter, var), getproperty(varscp, var), year),
-            propertynames(sols.annual.winter)
-        )
+        foreach(var -> (sols.annual.winter[var][year] = varscp[var]), propertynames(sols.annual.winter))
     elseif ti == sols.spacetime.summer.inx
-        foreach(
-            var -> setindex!(getproperty(sols.annual.summer, var), getproperty(varscp, var), year),
-            propertynames(sols.annual.summer)
-        )
+        foreach(var -> (sols.annual.summer[var][year] = varscp[var]), propertynames(sols.annual.summer))
     elseif ti == sols.spacetime.nt # calculate annual average
         means = annual_mean(annusol)
-        foreach(
-            var -> setindex!(getproperty(sols.annual.avg, var), getproperty(means, var), year),
-            propertynames(sols.annual.avg)
-        )
+        foreach(var -> (sols.annual.avg[var][year] = means[var]), propertynames(sols.annual.avg))
     end # if ==, elseif*2
     return sols
 end # function savesol!
