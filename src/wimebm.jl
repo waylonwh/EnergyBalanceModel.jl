@@ -324,7 +324,7 @@ function Infrastructure.step!(
         vars.Ewave[xi] = wave_strain(half_atted_spect, vars.h[xi], par)
         vars.lambda[xi] = half_atted_lambda
     end # for xi
-    Infrastructure.step!(MIZModel(), t, f, vars, st, par) # thermodynamics
+    Infrastructure.step!(MIZModel(), t, f, vars, st, par; breakup) # thermodynamics
     return vars
 end # function Infrastructure.step!
 
