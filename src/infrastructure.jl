@@ -5,7 +5,8 @@ using ..Utilities
 import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats, StyledStrings as SS
 
 export AbstractModel, ClassicModel, MIZModel, WIModel, ModelDiff
-export Collection, Forcing, Par, Solutions, SpaceTime, Vec, AbstractSpectrum
+export Collection, Forcing, Par, Solutions, SpaceTime, Vec
+export Spectrum, bretschneider, monochromatic
 export default_parameters, default_parval
 export get_diffop
 export hemispheric_mean, ice_area
@@ -354,7 +355,97 @@ function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
 end # function (forcing::Forcing{false})
 
 # Spectrum for WIM
-abstract type AbstractSpectrum end
+"""
+    Spectrum(freq::Vec, density::Vec)
+
+Represents a wave energy spectrum for the wave-ice interaction model ([`WIModel`](@ref)).
+
+The angular frequencies `freq` (rad s⁻¹) and the corresponding spectral energy `density`
+must be vectors of the same length. The wave periods are computed as `2π ./ freq` and stored
+in the `period` field.
+
+# Fields
+- `freq::Vec`: angular frequencies (rad s⁻¹)
+- `period::Vec`: wave periods (s), derived as `2π ./ freq`
+- `density::Vec`: spectral energy density at each frequency
+
+See also [`bretschneider`](@ref) and [`monochromatic`](@ref) for convenience constructors.
+
+# Examples
+```julia-repl
+julia> Spectrum([0.5, 1.0, 1.5], [0.2, 0.5, 0.1])
+Spectrum([0.5, 1.0, 1.5], [12.566370614359172, 6.283185307179586, 4.1887902047863905], [0.2, 0.5, 0.1])
+```
+"""
+struct Spectrum
+    freq::Vec
+    period::Vec
+    density::Vec
+end # struct Spectrum
+
+Spectrum(freq::Vec, density::Vec) = length(freq) == length(density) ?
+    Spectrum(freq, 2pi ./ freq, density) :
+    throw(ArgumentError("Frequency and density vectors must be of the same length."))
+
+Base.show(io::IO, S::Spectrum)::Nothing = print(
+    io, "Spectrum(", length(S.freq), " components)"
+)
+
+function Base.show(io::IO, ::MIME"text/plain", S::Spectrum)::Nothing
+    println(io, "Spectrum with ", length(S.freq), " frequency components:")
+    println(io, "  ω ∈ [", round(minimum(S.freq); digits=3), ", ", round(maximum(S.freq); digits=3), "] rad s⁻¹")
+    println(io, "  T ∈ [", round(minimum(S.period); digits=2), ", ", round(maximum(S.period); digits=2), "] s")
+    print(io, "  peak density at T = ", round(S.period[argmax(S.density)]; digits=2), " s")
+    return nothing
+end # function Base.show
+
+"""
+    bretschneider(Hs::Float64, Tp::Float64, freq::Vec=collect(range(2π/23.8, 2π/2.5; step=7.5e-2))) -> Spectrum
+
+Construct a Bretschneider wave [`Spectrum`](@ref) with significant wave height `Hs` (m) and
+peak period `Tp` (s), evaluated at the angular frequencies `freq` (rad s⁻¹).
+
+The spectral energy density is given by
+``S(T) = \\frac{1.25 H_s^2 T^5}{8\\pi T_p^4} \\exp\\!\\left[-1.25 (T/T_p)^4\\right]``,
+where ``T = 2\\pi / \\omega`` is the wave period.
+
+# Examples
+```julia-repl
+julia> S = bretschneider(3.0, 9.5);
+
+julia> length(S.freq)
+14
+```
+"""
+function bretschneider(
+    Hs::Float64, Tp::Float64, freq::Vec=collect(range(2pi/23.8, 2pi/2.5; step=7.5e-2))
+)::Spectrum
+    T = 2pi ./ freq
+    return Spectrum(freq, @. 1.25 * Hs^2 * T^5 / (8pi * Tp^4) * exp(-1.25(T/Tp)^4))
+end # function bretschneider
+
+"""
+    monochromatic(Hs::Float64, Tp::Float64, freq::Vec=collect(range(2π/(Tp+0.1), 2π/(Tp-0.1); step=1e-3)); eps::Float64=1e-6) -> Spectrum
+
+Construct an approximately monochromatic wave [`Spectrum`](@ref) with significant wave
+height `Hs` (m) and peak period `Tp` (s).
+
+The energy is concentrated near the peak angular frequency ``2\\pi / T_p`` using a narrow
+Gaussian of variance `eps`, so that the total energy matches that of a monochromatic wave of
+height `Hs`. Smaller `eps` produces a sharper peak.
+
+# Examples
+```julia-repl
+julia> S = monochromatic(3.0, 9.5);
+
+julia> isapprox(S.freq[argmax(S.density)], 2pi / 9.5; atol=1e-3)
+true
+```
+"""
+monochromatic(
+    Hs::Float64, Tp::Float64, freq::Vec=collect(range(2pi/(Tp+0.1), 2pi/(Tp-0.1); step=1e-3));
+    eps::Float64=1e-6
+)::Spectrum = Spectrum(freq, @. Hs^2 / 16 * exp(-(freq - 2pi/Tp)^2 / 2eps) / sqrt(2pi * eps))
 
 """
     Solutions{M,F,V}
@@ -392,7 +483,7 @@ struct Solutions{M<:AbstractModel,F,V}
     annual::@NamedTuple{
         winter::Collection{Vector{Vec}}, summer::Collection{Vector{Vec}}, avg::Collection{Vector{Vec}}
     } # seasonal peak and annual avg
-    spectrum_ref::Ref{AbstractSpectrum} # spectrum used for WIModel, if applicable
+    spectrum_ref::Ref{Spectrum} # spectrum used for WIModel, if applicable
 
     function Solutions{M}(
         st::SpaceTime{F}, forcing::Forcing{V}, par::Par, init::Collection{Vec},
@@ -424,7 +515,7 @@ struct Solutions{M<:AbstractModel,F,V}
                 summer=deepcopy(seasonaltemp),
                 avg=deepcopy(seasonaltemp)
             ), # ( # seasonal
-            Ref{AbstractSpectrum}() # spectrum_ref
+            Ref{Spectrum}() # spectrum_ref
         ) # new
     end # function Solutions
 end # struct Solutions{M,F,V}
@@ -477,7 +568,7 @@ function Base.show(io::IO, ::MIME"text/plain", sols::Solutions)::Nothing
     return nothing
 end # function Base.show
 
-get_spectrum(sol::Solutions{WIModel}) = sol.spectrum_ref[] # -> Spectrum
+get_spectrum(sol::Solutions{WIModel})::Spectrum = sol.spectrum_ref[] # -> Spectrum
 
 # default parameter values
 const default_parval = Par(
@@ -801,7 +892,7 @@ end # function integrate
 
 function integrate(
     model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::AbstractSpectrum
+    lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum
 ) # -> Solutions{WIModel,F,C}
     # initialise
     if isfinite(updatefreq)
