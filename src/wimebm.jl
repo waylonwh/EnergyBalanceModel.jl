@@ -207,30 +207,38 @@ end # function Infrastructure.initialise
 function Infrastructure.step!(
     ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; spectrum::Spectrum
 )::Collection{Vec}
-    vars.Ewave = zeros(st.nx)
-    vars.lambda = fill(wave_length(spectrum, 0.0, par), st.nx)
+    vars.Ewave = zeros(st.nx) # !
+    vars.lambda = fill(wave_length(spectrum, 0.0, par), st.nx) # !
+    vars.dDwave = zeros(st.nx) # !
     breakup = falses(st.nx) # track which cells are breaking
     edgeinx = findfirst(>(0), vars.h)
-    if !isnothing(edgeinx) # no ice
+    if !isnothing(edgeinx) # if there is any ice at all
         # attenuate spectrum
         spect = spectrum
         for xi in edgeinx:st.nx
             L = grid_length(st, xi)
             atted_spect = attenuate(spect, L, vars.h[xi], vars.phi[xi], par)
             atted_strain = wave_strain(atted_spect, vars.h[xi], par)
+            half_atted_spect = attenuate(spect, L/2, vars.h[xi], vars.phi[xi], par)
+            half_atted_lambda = wave_length(half_atted_spect, vars.h[xi], par)
+            oldD = vars.D[xi]
             if atted_strain > par.Ec # full breakup
-                dbar = mean_size(spect, L, vars.h[xi], vars.phi[xi], par)
+                dbar = mean_size(1/2*half_atted_lambda, par)
                 updateD!(dbar, xi, vars)
+                vars.dDwave[xi] = vars.D[xi] - oldD
                 breakup[xi] = true
             elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
                 l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
-                frontd = mean_size(spect, l, vars.h[xi], vars.phi[xi], par)
+                half_partial_atted_spect = attenuate(spect, l/2, vars.h[xi], vars.phi[xi], par)
+                half_partial_atted_lambda = wave_length(half_partial_atted_spect, vars.h[xi], par)
+                frontd = mean_size(1/2*half_partial_atted_lambda, par)
                 updateD!(frontd, xi, vars, l, L)
+                vars.dDwave[xi] = vars.D[xi] - oldD
                 breakup[xi] = true
             end # if >, else
             spect = atted_spect # update spectrum
-            vars.Ewave[xi] = wave_strain(atted_spect, vars.h[xi], par)
-            vars.lambda[xi] = wave_length(atted_spect, vars.h[xi], par)
+            vars.Ewave[xi] = wave_strain(half_atted_spect, vars.h[xi], par)
+            vars.lambda[xi] = half_atted_lambda
         end # for xi
     end # if !
     Infrastructure.step!(MIZModel(), t, f, vars, st, par; breakup) # thermodynamics
