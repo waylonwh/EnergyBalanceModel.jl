@@ -654,19 +654,20 @@ for model in IU.subtypes(AbstractModel)
 end # for model
 
 (
-    initconds_fromT(::ClassicModel, T::Vector{FT}, cw::FT, nt::Integer)::Collection{Vector{FT}}
+    initconds_fromT(::ClassicModel, T::Vector{FT}, cw::FT,)::Collection{Vector{FT}}
 ) where FT<:AbstractFloat = Collection{Vector{FT}}(:Tg => T, :E => cw .* T)
 
 (
-    initconds_fromT(::AbstractModel, T::Vector{FT}, cw::FT, nt::Integer)::Collection{Vector{FT}}
+    initconds_fromT(::AbstractModel, T::Vector{FT}, cw::FT)::Collection{Vector{FT}}
 ) where FT<:AbstractFloat = Collection{Vector{FT}}(
-    :Tg => T, :Ei => zeros(FT, nt), :Ew => cw .* T, :h => zeros(FT, nt), :D => zeros(FT, nt)
+    :Tg => T, :Ei => zeros(FT, length(T)), :Ew => cw .* T,
+    :h => zeros(FT, length(T)), :D => zeros(FT, length(T))
 )
 
 initvarset(::ClassicModel)::Set{Symbol} = Set((:Tg, :E))
 initvarset(::AbstractModel)::Set{Symbol} = Set((:Tg, :Ei, :Ew, :h, :D))
 
-function check_initconds(model::AbstractModel, initconds::Collection{Vector})::Nothing
+function check_initconds(model::AbstractModel, initconds::Collection{<:Vector})::Nothing
     varset = initvarset(model)
     list(itr) = join(string.(itr), ", ", " and ")
     issubset(varset, propertynames(initconds)) ||
@@ -743,10 +744,10 @@ mutable struct EBMProblem{T<:AbstractFloat}
                 ArgumentError("model must be one of the following types: ClassicModel, MIZModel, or WIModel.")
             )
         isnothing(initconds) ?
-            initconds = initconds_fromT(model, fill(FT(17), st.nx), parameters.cw, st.nt) :
+            initconds = initconds_fromT(model, fill(FT(17), st.nx), parameters.cw) :
             check_initconds(model, initconds)
         model isa WIModel || isnothing(spectrum) ||
-            throw(ArgumentError("Spectrum should only be provided for WIModel."))
+            @warn "spectrum will be ignored for non-WIModel."
         model isa WIModel && isnothing(spectrum) &&
             (spectrum = bretschneider(FT(3), FT(9.5)))
         return new{FT}(model, st, forcing, parameters, initconds, spectrum)
@@ -784,9 +785,9 @@ function EBMProblem(
     if initconds isa Collection
         initconds_inst = initconds
     elseif initconds isa Vector
-        initconds_inst = initconds_fromT(model, initconds, parameters_inst.cw, st_inst.nt)
+        initconds_inst = initconds_fromT(model, initconds, parameters_inst.cw)
     else # initconds isa nothing
-        initconds_inst = initconds_fromT(model, fill(FT(17), nx), parameters_inst.cw, st_inst.nt)
+        initconds_inst = initconds_fromT(model, fill(FT(17), nx), parameters_inst.cw)
     end # if isa, elseif, else
     return EBMProblem{FT}(model, st_inst, forcing_inst, parameters_inst, initconds_inst; spectrum)
 end # function EBMProblem
