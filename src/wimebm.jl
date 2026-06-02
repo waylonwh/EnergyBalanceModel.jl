@@ -200,8 +200,6 @@ function Infrastructure.initialise(
     vars, sols, annusol = MIZEBM._initialise(model, st, forcing, par, init; lastonly)
     sols.spectrum_ref[] = deepcopy(spectrum) # store spectrum in sols for later reference
     annusol.spectrum_ref[] = deepcopy(spectrum)
-    vars.Ewave = zeros(st.nx)
-    vars.lambda = Vec(undef, st.nx)
     cache_wavenumber!(spectrum.freq, par, 1//10^4, 10)
     return (vars, sols, annusol)
 end # function Infrastructure.initialise
@@ -209,36 +207,32 @@ end # function Infrastructure.initialise
 function Infrastructure.step!(
     ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; spectrum::Spectrum
 )::Collection{Vec}
+    vars.Ewave = zeros(st.nx)
+    vars.lambda = fill(wave_length(spectrum, 0.0, par), st.nx)
     breakup = falses(st.nx) # track which cells are breaking
     edgeinx = findfirst(>(0), vars.h)
-    if isnothing(edgeinx) # no ice
-        vars.Ewave .= 0.0
-        vars.lambda .= wave_length(spectrum, 0.0, par)
-        edgeinx = st.nx + 1 # skip loop
-    elseif edgeinx > 1 # at least once cell has no ice
-        vars.Ewave[1:edgeinx-1] .= 0.0
-        vars.lambda[1:edgeinx-1] .= wave_length(spectrum, 0.0, par)
-    end # if isnothing, elseif
-    # attenuate spectrum
-    spect = spectrum
-    for xi in edgeinx:st.nx
-        L = grid_length(st, xi)
-        atted_spect = attenuate(spect, L, vars.h[xi], vars.phi[xi], par)
-        atted_strain = wave_strain(atted_spect, vars.h[xi], par)
-        if atted_strain > par.Ec # full breakup
-            dbar = mean_size(spect, L, vars.h[xi], vars.phi[xi], par)
-            updateD!(dbar, xi, vars)
-            breakup[xi] = true
-        elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
-            l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
-            frontd = mean_size(spect, l, vars.h[xi], vars.phi[xi], par)
-            updateD!(frontd, xi, vars, l, L)
-            breakup[xi] = true
-        end # if >, else
-        spect = atted_spect # update spectrum
-        vars.Ewave[xi] = wave_strain(atted_spect, vars.h[xi], par)
-        vars.lambda[xi] = wave_length(atted_spect, vars.h[xi], par)
-    end # for xi
+    if !isnothing(edgeinx) # no ice
+        # attenuate spectrum
+        spect = spectrum
+        for xi in edgeinx:st.nx
+            L = grid_length(st, xi)
+            atted_spect = attenuate(spect, L, vars.h[xi], vars.phi[xi], par)
+            atted_strain = wave_strain(atted_spect, vars.h[xi], par)
+            if atted_strain > par.Ec # full breakup
+                dbar = mean_size(spect, L, vars.h[xi], vars.phi[xi], par)
+                updateD!(dbar, xi, vars)
+                breakup[xi] = true
+            elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
+                l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
+                frontd = mean_size(spect, l, vars.h[xi], vars.phi[xi], par)
+                updateD!(frontd, xi, vars, l, L)
+                breakup[xi] = true
+            end # if >, else
+            spect = atted_spect # update spectrum
+            vars.Ewave[xi] = wave_strain(atted_spect, vars.h[xi], par)
+            vars.lambda[xi] = wave_length(atted_spect, vars.h[xi], par)
+        end # for xi
+    end # if !
     Infrastructure.step!(MIZModel(), t, f, vars, st, par; breakup) # thermodynamics
     return vars
 end # function Infrastructure.step!
