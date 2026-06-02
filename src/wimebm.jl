@@ -211,7 +211,7 @@ function Infrastructure.step!(
     vars.lambda = fill(wave_length(spectrum, 0.0, par), st.nx)
     breakup = falses(st.nx) # track which cells are breaking
     edgeinx = findfirst(>(0), vars.h)
-    if !isnothing(edgeinx) # no ice
+    if !isnothing(edgeinx) # if there is any ice
         # attenuate spectrum
         spect = spectrum
         for xi in edgeinx:st.nx
