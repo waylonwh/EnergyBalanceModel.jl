@@ -114,10 +114,15 @@ moment_strain(S::Spectrum, n::Int, h::Float64, par::Par)::Float64 = moment(
     S, n; coeff=real.(wavenumber_ice(S.freq, h, par, 0.0)).^4 * h^2/4
 )
 
+ice_attenuation(S::Spectrum, h::Real, par::Collection) = imag.(wavenumber_ice(S.freq, h, par, par.Gamma)) # -> Vector{Real}
+
 function attenuate(S::Spectrum, L::Float64, h::Float64, phi::Float64, par::Par)::Spectrum
-    alpha1 = imag.(wavenumber_ice(S.freq, h, par, par.Gamma))
+    alpha1 = ice_attenuation(S, h, par)
     return Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * L))
-end # function attenuate) # @persistent
+end # function attenuate
+
+attenuate(S::Spectrum, l::Real, phi::Real, alpha1::Vector)::Spectrum =
+    Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * l))
 
 wave_period(S::Spectrum)::Float64 = 2pi * sqrt(moment_elevation(S, 0) / moment_elevation(S, 2))
 
@@ -130,9 +135,11 @@ end # function wave_length
 wave_strain(S::Spectrum, h::Float64, par::Par)::Float64 = 2sqrt(moment_strain(S, 0, h, par))
 
 function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, par::Par)::Float64
+    alpha1 = ice_attenuation(S, h, par)
     sol = NlinSol.solve(
         NlinSol.IntervalNonlinearProblem(
-            (l, _) -> wave_strain(attenuate(S, l, h, phi, par), h, par) - par.Ec, (0.0, L)
+            (l, _) -> wave_strain(attenuate(S, l, phi, alpha1), h, par) - par.Ec,
+            (0, L)
         )
     )
     NlinSol.SciMLBase.successful_retcode(sol) ||
@@ -143,14 +150,21 @@ function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, pa
     return sol.u
 end # function fracture_distance
 
-fsd(d::Float64, dmn::Float64, dmx::Float64, par::Par)::Float64 =
-    dmn <= d <= dmx ?
-        par.gamma * dmn^par.gamma * d^(-(par.gamma+1)) / (1 - (dmn/dmx)^par.gamma) :
-        0.0
+# expectation of the trancated power law
+expectation(dmn::Real, dmx::Real, gamma::Real) = # -> Real
+    gamma * dmn / (gamma - 1) * (1 - (dmn/dmx)^(gamma-1)) / (1 - (dmn/dmx)^gamma)
 
-function mean_size(dmx::Float64, par::Par)::Float64
+function mean_size(spectrum::Spectrum, L::Real, h::Real, phi::Real, par::Collection) # -> AbstractFloat
+    alpha1 = ice_attenuation(spectrum, h, par)
     sol = Intgr.solve(
-        Intgr.IntegralProblem((d, _) -> d * fsd(d, par.dmn, dmx, par), (par.dmn, dmx)),
+        Intgr.IntegralProblem(
+            (l, _) -> expectation(
+                par.dmn,
+                1/2 * wave_length(attenuate(spectrum, l, phi, alpha1), h, par), # dmx
+                par.gamma
+            ),
+            (0, L)
+        ),
         Intgr.QuadGKJL()
     )
     Intgr.SciMLBase.successful_retcode(sol) ||
@@ -158,7 +172,7 @@ function mean_size(dmx::Float64, par::Par)::Float64
             "Integral did not converge when computing mean size. Result may be inaccurate.",
             sol.retcode, sol.resid
         )
-    return sol.u
+    return sol.u / L
 end # function mean_size
 
 # Physical grid length at a given index in metres
@@ -211,23 +225,19 @@ function Infrastructure.step!(
         L = grid_length(st, xi)
         atted_spect = attenuate(spect, L, vars.h[xi], vars.phi[xi], par)
         atted_strain = wave_strain(atted_spect, vars.h[xi], par)
-        half_atted_spect = attenuate(spect, L/2, vars.h[xi], vars.phi[xi], par)
-        half_atted_lambda = wave_length(half_atted_spect, vars.h[xi], par)
         if atted_strain > par.Ec # full breakup
-            dbar = mean_size(1/2*half_atted_lambda, par)
+            dbar = mean_size(spect, L, vars.h[xi], vars.phi[xi], par)
             updateD!(dbar, xi, vars)
             breakup[xi] = true
         elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
             l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
-            half_partial_atted_spect = attenuate(spect, l/2, vars.h[xi], vars.phi[xi], par)
-            half_partial_atted_lambda = wave_length(half_partial_atted_spect, vars.h[xi], par)
-            frontd = mean_size(1/2*half_partial_atted_lambda, par)
+            frontd = mean_size(spect, l, vars.h[xi], vars.phi[xi], par)
             updateD!(frontd, xi, vars, l, L)
             breakup[xi] = true
         end # if >, else
         spect = atted_spect # update spectrum
-        vars.Ewave[xi] = wave_strain(half_atted_spect, vars.h[xi], par)
-        vars.lambda[xi] = half_atted_lambda
+        vars.Ewave[xi] = wave_strain(atted_spect, vars.h[xi], par)
+        vars.lambda[xi] = wave_length(atted_spect, vars.h[xi], par)
     end # for xi
     Infrastructure.step!(MIZModel(), t, f, vars, st, par; breakup) # thermodynamics
     return vars
