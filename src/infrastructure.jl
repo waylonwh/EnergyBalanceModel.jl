@@ -653,6 +653,29 @@ for model in IU.subtypes(AbstractModel)
     @eval default_parameters(::$model)::Par = default_parameters($(Symbol(namelower, "_parvars")))
 end # for model
 
+(
+    initconds_fromT(::ClassicModel, T::Vector{FT}, cw::FT, nt::Integer)::Collection{Vector{FT}}
+) where FT<:AbstractFloat = Collection{Vector{FT}}(:Tg => T, :E => cw .* T)
+
+(
+    initconds_fromT(::AbstractModel, T::Vector{FT}, cw::FT, nt::Integer)::Collection{Vector{FT}}
+) where FT<:AbstractFloat = Collection{Vector{FT}}(
+    :Tg => T, :Ei => zeros(FT, nt), :Ew => cw .* T, :h => zeros(FT, nt), :D => zeros(FT, nt)
+)
+
+initvarset(::ClassicModel)::Set{Symbol} = Set((:Tg, :E))
+initvarset(::AbstractModel)::Set{Symbol} = Set((:Tg, :Ei, :Ew, :h, :D))
+
+function check_initconds(model::AbstractModel, initconds::Collection{Vector})::Nothing
+    varset = initvarset(model)
+    list(itr) = join(string.(itr), ", ", " and ")
+    issubset(varset, propertynames(initconds)) ||
+        throw(ArgumentError("Initial conditions for $(typeof(model)) must include $(list(varset))."))
+    length(varset) == length(propertynames(initconds)) ||
+        @warn "$(typeof(model)) only needs initial conditions for $(list(varset)). Extra variables will be ignored."
+    return nothing
+end # function check_initconds
+
 """
     EBMProblem(model::AbstractModel, ::Type{FT}=Float64; st, forcing, parameters, initconds, spectrum) -> EBMProblem{FT}
 
@@ -708,23 +731,20 @@ mutable struct EBMProblem{T<:AbstractFloat}
     spectrum::Union{Spectrum,Nothing}
 
     function EBMProblem{FT}(
-        model::AbstractModel,
+        model::M,
         st::SpaceTime=SpaceTime{sin}(180, 2000, 50),
         forcing::Forcing=Forcing(zero(FT)),
         parameters::Collection{FT}=default_parameters(model),
         initconds::Union{Collection{Vector{FT}},Nothing}=nothing;
         spectrum::Union{Spectrum,Nothing}=nothing
-    ) where FT<:AbstractFloat
-        if isnothing(initconds)
-            T = fill(FT(17), st.nx)
-            initconds = Collection{Vector{FT}}(
-                :Ei => zeros(FT, st.nx),
-                :Ew => T .* parameters.cw,
-                :h => zeros(FT, st.nx),
-                :D => zeros(FT, st.nx),
-                :Tg => T,
-            ) # Collection{Vector{FT}}
-        end
+    ) where {FT<:AbstractFloat, M<:AbstractModel}
+        (M === AbstractModel || model isa ModelDiff) &&
+            throw(
+                ArgumentError("model must be one of the following types: ClassicModel, MIZModel, or WIModel.")
+            )
+        isnothing(initconds) ?
+            initconds = initconds_fromT(model, fill(FT(17), st.nx), parameters.cw, st.nt) :
+            check_initconds(model, initconds)
         model isa WIModel || isnothing(spectrum) ||
             throw(ArgumentError("Spectrum should only be provided for WIModel."))
         model isa WIModel && isnothing(spectrum) &&
@@ -751,10 +771,9 @@ function EBMProblem(
     if forcing isa Forcing
         forcing_inst = forcing
     else # forcing isa Number or NamedTuple
-        forcing_inst =
-            forcing isa Number ?
-                Forcing(FT(forcing)) :
-                Forcing(forcing.base, forcing.peak, forcing.cool, forcing.holdyrs, forcing.rates)
+        forcing_inst = forcing isa Number ?
+            Forcing(FT(forcing)) :
+            Forcing(forcing.base, forcing.peak, forcing.cool, forcing.holdyrs, forcing.rates)
     end # if isa, else
     if parameters isa Collection
         parameters_inst = parameters
@@ -765,16 +784,9 @@ function EBMProblem(
     if initconds isa Collection
         initconds_inst = initconds
     elseif initconds isa Vector
-        initconds_inst = Collection{Vector{FT}}(
-            :Ei => zeros(FT, nx), :Ew => initconds .* parameters_inst.cw,
-            :h => zeros(FT, nx), :D => zeros(FT, nx), :Tg => initconds,
-        )
+        initconds_inst = initconds_fromT(model, initconds, parameters_inst.cw, st_inst.nt)
     else # initconds isa nothing
-        T = fill(FT(17), nx)
-        initconds_inst = Collection{Vector{FT}}(
-            :Ei => zeros(FT, nx), :Ew => T .* parameters_inst.cw,
-            :h => zeros(FT, nx), :D => zeros(FT, nx), :Tg => T,
-        )
+        initconds_inst = initconds_fromT(model, fill(FT(17), nx), parameters_inst.cw, st_inst.nt)
     end # if isa, elseif, else
     return EBMProblem{FT}(model, st_inst, forcing_inst, parameters_inst, initconds_inst; spectrum)
 end # function EBMProblem

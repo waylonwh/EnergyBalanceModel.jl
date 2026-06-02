@@ -133,7 +133,7 @@ function run_example(model::M=MIZModel())::Solutions{M,sin,false} where M<:Abstr
 end # function run_example
 
 import PrecompileTools as PT
-
+# TODO
 PT.@setup_workload begin
     import InteractiveUtils as IU
     Fs = (identity, sin)
@@ -142,7 +142,7 @@ PT.@setup_workload begin
     redirect_stdout(devnull)
     redirect_stderr(devnull)
     PT.@compile_workload begin
-        for M in (ClassicModel, MIZModel), F in Fs, farg in fs_args
+        for M in (ClassicModel, MIZModel, WIModel), F in Fs, farg in fs_args
             st = SpaceTime{F}(10, 10, 1)
             forcing = Forcing(farg...)
             par = default_parameters(M())
