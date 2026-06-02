@@ -135,6 +135,7 @@ end # function run_example
 import PrecompileTools as PT
 
 PT.@setup_workload begin
+    begin
     import InteractiveUtils as IU
     Fs = (identity, sin)
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
@@ -142,21 +143,14 @@ PT.@setup_workload begin
     redirect_stdout(devnull)
     redirect_stderr(devnull)
     PT.@compile_workload begin
-        for M in (ClassicModel, MIZModel), F in Fs, farg in fs_args
-            st = SpaceTime{F}(10, 10, 1)
+        spectrum = bretschneider(3.0, 9.5)
+        spect = Spectrum(spectrum.freq[1:3], spectrum.density[1:3])
+        for M in (ClassicModel, MIZModel, WIModel), F in Fs, farg in fs_args
+            st = SpaceTime{F}(5, 3, 1)
             forcing = Forcing(farg...)
-            par = default_parameters(M())
-            T = fill(0.0, st.nx)
-            init = Collection{Vec}(:Tg => T)
-            if M === ClassicModel
-                init.E = par.cw * T
-            else # MIZModel
-                init.Ei = zeros(st.nx)
-                init.Ew = par.cw * T
-                init.h = zeros(st.nx)
-                init.D = zeros(st.nx)
-            end # if isa; elseif
-            sol = integrate(M(), st, forcing, par, init)
+            T = fill(2.0, st.nx)
+            prob = EBMProblem(M(); st, forcing, initconds=T, spectrum=spect)
+            sol = solve(prob)
             F === sin && length(farg) == 1 && (m2s[M] = sol)
         end # for m, F, farg
         m2s[MIZModel] - m2s[ClassicModel]

@@ -139,7 +139,7 @@ get_levels(::Val{true}, ::Val{true}, _)::Tuple{Vector{Float64},Symbol,Symbol,Vec
     :auto, :auto, collect(-400:100:400)
 ) # D diff
 get_levels(::Val{false}, ::Val{true}, data::Matrix{Float64})::Tuple{Vector{Float64},Nothing,Nothing,Mk.Automatic} = (
-    maximum(abs, filter(!isnan, data))*range(-1, 1; length=21),
+    maximum(abs, filter(!isnan, data))*range(-1, 1; length=41),
     nothing, nothing, Mk.automatic
 ) # normal diff
 
