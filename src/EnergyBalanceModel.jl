@@ -135,7 +135,6 @@ end # function run_example
 import PrecompileTools as PT
 
 PT.@setup_workload begin
-    begin
     import InteractiveUtils as IU
     Fs = (identity, sin)
     fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
