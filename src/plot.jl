@@ -250,7 +250,7 @@ function plot_raw(
     xinx, tinx = limit_size(sols.spacetime.x, sols.ts, xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for linx in eachindex(layout)
-        datatitle.vars[linx] = matricify(getindex.(getproperty(sols.raw, layout[linx].var)[tinx], Ref(xinx)))
+        datatitle.vars[linx] = matricify(getindex.(sols.raw[layout[linx].var][tinx], Ref(xinx)))
     end # for inx
     return contourf_tiles(
         sols.ts[tinx], sols.spacetime.x[xinx], datatitle, into;
@@ -290,7 +290,7 @@ function plot_avg(
     xinx, tinx = limit_size(sols.spacetime.x, collect(1:sols.spacetime.dur), xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for linx in eachindex(layout)
-        datatitle.vars[linx] = matricify(getindex.(getproperty(sols.annual.avg, layout[linx].var)[tinx], Ref(xinx)))
+        datatitle.vars[linx] = matricify(getindex.(sols.annual.avg[layout[linx].var][tinx], Ref(xinx)))
     end # for inx
     return contourf_tiles(
         collect(tinx), sols.spacetime.x[xinx], datatitle, into;
