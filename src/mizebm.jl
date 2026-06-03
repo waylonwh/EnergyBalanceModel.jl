@@ -152,7 +152,7 @@ function _initialise(
     solvars = Set{Symbol}(
         (
             :Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n, :Fvi, :Fvw, :Flat, :Ql, :Qp, :T0,
-            :Tg, :Dlatmelt, :Dlatgrow, :Dweld
+            :Tg, :Dlatmelt, :Dlatgrow, :Dweld, :dDpancake
         )
     )
     model isa WIModel && push!(solvars, :Ewave, :lambda, :dDwave, :breakup) # add wave variables for WIModel
@@ -211,10 +211,10 @@ function Infrastructure.step!(
         h_t(Fvi, par),
         st.dt
     ) # !
+    avgD = average(vars.D, par.Dmin, vars.phi, phip) # new pancakes
+    vars.dDpancake = avgD - vars.D # !
     vars.D = forward_euler(
-        average(vars.D, par.Dmin, vars.phi, phip), # new pancakes
-        D_t!(lasth, vars.D, vars.Ti, vars.Tw, vars.phi, Ql, par; breakup, vars),
-        st.dt
+        avgD, D_t!(lasth, vars.D, vars.Ti, vars.Tw, vars.phi, Ql, par; breakup, vars), st.dt
     ) # !
     clamp!(vars.h, 0, Inf) # avoid overshooting to negative thickness
     zeroref!(vars.h, vars.Ei) # restrict non-existence
