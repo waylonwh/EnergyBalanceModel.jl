@@ -56,7 +56,7 @@ function stepTg!(
 end # function stepTg!
 
 # lateral melt rate
-wlat(Tw::Vec, par::Par)::Vec = @. par.m1 * (Tw - par.Tm^par.m2)
+wlat(Tw::Vec, par::Par)::Vec = @. par.m1 * (Tw - par.Tm)^par.m2
 
 # concentration
 function concentration(Ei::Vec, h::Vec, par::Par)::Vec
@@ -126,7 +126,7 @@ Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
 Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1-phi)Fvw - Flat
 h_t(Fvi::Vec, par::Par)::Vec = -1/par.Lf * Fvi
 function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par; breakup::BitArray)::Vec
-    lat_melt = -pi / 2 * par.alpha * wlat(Tw, par)
+    lat_melt = -pi / 2par.alpha * wlat(Tw, par)
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
     zeroref!(lat_grow, h)
@@ -183,7 +183,7 @@ function Infrastructure.step!(
     Ei, Ew, _, psiEwdt = redistributeE(rEi, rEw)
     vars.Ei = Ei # !
     vars.Ew = Ew # !
-    vars.E = weighted_avg(vars.Ei, vars.Ew, vars.phi) # !
+    vars.E = vars.Ei + vars.Ew # !
     # update floe size and thickness
     Al = area_lead(vars.D, vars.phi, vars.n, par)
     Ql, Qp = split_psiEw(psiEwdt/st.dt, vars.phi, Al)
