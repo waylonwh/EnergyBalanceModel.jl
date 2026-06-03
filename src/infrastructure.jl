@@ -339,8 +339,8 @@ function Base.show(io::IO, ::MIME"text/plain", forcing::Forcing{true})::Nothing
 end # function Base.show
 
 # evaluate forcing at time T (in years)
-(forcing::Forcing{true})(::Float64)::Float64 = forcing.base # constant forcing
-function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
+(forcing::Forcing{false})(::Float64)::Float64 = forcing.base # constant forcing
+function (forcing::Forcing{true})(T::Float64)::Float64 # varying forcing
     if T < forcing.domain[2] # hold at base
         return forcing.base
     elseif T < forcing.domain[3] # warming
@@ -352,7 +352,7 @@ function (forcing::Forcing{false})(T::Float64)::Float64 # varying forcing
     else # hold at cool
         return forcing.cool
     end # if <, elseif*3, else
-end # function (forcing::Forcing{false})
+end # function (forcing::Forcing{true})
 
 # Spectrum for WIM
 """
