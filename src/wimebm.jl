@@ -237,6 +237,7 @@ function Infrastructure.step!(
             vars.lambda[xi] = wave_length(atted_spect, vars.h[xi], par)
         end # for xi
     end # if !
+    vars.breakup = Vector{Float64}(breakup) # !
     Infrastructure.step!(MIZModel(), t, f, vars, st, par; breakup) # thermodynamics
     return vars
 end # function Infrastructure.step!

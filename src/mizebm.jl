@@ -155,7 +155,7 @@ function _initialise(
             :Tg, :Dlatmelt, :Dlatgrow, :Dweld
         )
     )
-    model isa WIModel && push!(solvars, :Ewave, :lambda, :dDwave) # add wave variables for WIModel
+    model isa WIModel && push!(solvars, :Ewave, :lambda, :dDwave, :breakup) # add wave variables for WIModel
     vars, sols, annusol = create_storages(model, solvars, st, forcing, par, init; lastonly)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)
