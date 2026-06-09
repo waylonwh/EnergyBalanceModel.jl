@@ -152,7 +152,7 @@ function _initialise(
     solvars = Set{Symbol}(
         (
             :Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n, :Fvi, :Fvw, :Flat, :Ql, :Qp, :T0,
-            :Tg, :Dlatmelt, :Dlatgrow, :Dweld, :dDpancake
+            :Tg, :Dlatmelt, :Dlatgrow, :Dweld, :dDpancake, :Al
         )
     )
     model isa WIModel && push!(solvars, :Ewave, :lambda, :dDwave, :breakup) # add wave variables for WIModel
@@ -202,6 +202,7 @@ function Infrastructure.step!(
     # update floe size and thickness
     Al = area_lead(vars.D, vars.phi, vars.n, par)
     Ql, Qp = split_psiEw(psiEwdt/st.dt, vars.phi, Al)
+    vars.Al = Al # !
     vars.Ql = Ql # !
     vars.Qp = Qp # !
     phip = st.dt * dphip(Qp, par)
