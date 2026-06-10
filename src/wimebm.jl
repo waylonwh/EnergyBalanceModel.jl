@@ -210,6 +210,7 @@ function Infrastructure.step!(
     vars.Ewave = zeros(st.nx) # !
     vars.lambda = fill(wave_length(spectrum, 0.0, par), st.nx) # !
     vars.dDwave = zeros(st.nx) # !
+    vars.dup = fill(NaN, st.nx)
     breakup = falses(st.nx) # track which cells are breaking
     edgeinx = findfirst(>(0), vars.h)
     if !isnothing(edgeinx) # if there is any ice at all
@@ -225,12 +226,14 @@ function Infrastructure.step!(
                 updateD!(dbar, xi, vars)
                 vars.dDwave[xi] = vars.D[xi] - oldD
                 breakup[xi] = true
+                vars.dup[xi] = dbar
             elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
                 l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
                 frontd = mean_size(spect, l, vars.h[xi], vars.phi[xi], par)
                 updateD!(frontd, xi, vars, l, L)
                 vars.dDwave[xi] = vars.D[xi] - oldD
                 breakup[xi] = true
+                vars.dup[xi] = frontd
             end # if >, else
             spect = atted_spect # update spectrum
             vars.Ewave[xi] = wave_strain(atted_spect, vars.h[xi], par)
