@@ -154,7 +154,7 @@ function _initialise(
     solvars = Set{Symbol}(
         (
             :Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n, :Fvi, :Fvw, :Flat, :Ql, :Qp, :T0,
-            :Tg, :Dlatmelt, :Dlatgrow, :Dweld, :dDpancake, :Al
+            :Tg, :Dlatmelt, :Dlatgrow, :Dweld, :dDpancake, :Al, :Fbot
         )
     )
     model isa WIModel && push!(solvars, :Ewave, :lambda, :dDwave, :breakup, :dup) # add wave variables for WIModel
@@ -195,6 +195,7 @@ function Infrastructure.step!(
     vars.Fvi = Fvi # !
     vars.Fvw = Fvw # !
     vars.Flat = Flat # !
+    vars.Fbot = Fbot # !
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat, Fbot), st.dt)
     rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat, Fbot), st.dt)
