@@ -93,6 +93,8 @@ function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Par)::Vec
     return Flat
 end # function lat_flux
 
+bot_flux(Tw::Vector, par::Collection) = par.rhow * par.cp * par.ch * par.u0 * (Tw .- par.Tm)
+
 function redistributeE(rEi::Vec, rEw::Vec)::NTuple{4,Vec}
     cEi = clamp.(rEi, -Inf, 0)
     cEw = clamp.(rEw, 0, Inf)
@@ -122,9 +124,9 @@ function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
 end # function average
 
 # differential equations
-Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
-Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1-phi)Fvw - Flat
-h_t(Fvi::Vec, par::Par)::Vec = -1/par.Lf * Fvi
+Ei_t(phi::Vec, Fvi::Vec, Flat::Vec, Fbot::Vec)::Vec = @. phi * Fvi + Flat + phi * Fbot
+Ew_t(phi::Vec, Fvw::Vec, Flat::Vec, Fbot::Vec)::Vec = @. (1-phi)Fvw - Flat - phi * Fbot
+h_t(Fvi::Vec, Fbot::Vec, par::Par)::Vec = -1/par.Lf * (Fvi + Fbot)
 function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par; breakup::BitArray)::Vec
     lat_melt = -pi / 2par.alpha * wlat(Tw, par)
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
@@ -177,9 +179,10 @@ function Infrastructure.step!(
     Fvi = vert_flux(t, :ice, vars.Tg, vars.T, f, st, par)
     Fvw = vert_flux(t, :water, vars.Tg, vars.T, f, st, par)
     Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
+    Fbot = bot_flux(vars.Tw, par)
     # update enthalpy
-    rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
-    rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)
+    rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat, Fbot), st.dt)
+    rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat, Fbot), st.dt)
     Ei, Ew, _, psiEwdt = redistributeE(rEi, rEw)
     vars.Ei = Ei # !
     vars.Ew = Ew # !
@@ -191,7 +194,7 @@ function Infrastructure.step!(
     lasth = vars.h # save for D
     vars.h = forward_euler(
         average(vars.h, par.hmin, vars.phi, phip), # new pancakes
-        h_t(Fvi, par),
+        h_t(Fvi, Fbot, par),
         st.dt
     ) # !
     vars.D = forward_euler(
