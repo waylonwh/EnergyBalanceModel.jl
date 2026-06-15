@@ -601,7 +601,7 @@ const default_parval = Par(
     :hmin => 0.1, # new pancake thickness (m)
     :kappa => 0.01_secyear, # floe welding parameter (m^-2 y^-1)
     :rhow => 1025.0, # Water density (kg m^-3)
-    :cp => 3980.0, # Specific heat for seawater near freezing (W y kg^-1 K^-1)
+    :cp => 3980.0 / _secyear, # Specific heat for seawater near freezing (W y kg^-1 K^-1)
     :ch => 6e-3, # Heat transfer coefficient
     :u0 => 0.01_secyear, # surface friction velocity (m y^-1)
     # WIM
