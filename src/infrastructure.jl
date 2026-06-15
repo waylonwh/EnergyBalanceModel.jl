@@ -620,11 +620,11 @@ const classicmodel_parvars = Set{Symbol}(
 )
 const mizmodel_parvars = push!(
     copy(classicmodel_parvars),
-    :Tm, :m1, :m2, :alpha, :rl, :Dmin, :Dmax, :hmin, :kappa
+    :Tm, :m1, :m2, :alpha, :rl, :Dmin, :Dmax, :hmin, :kappa, :rhow, :cp, :ch, :u0
 )
 const wimodel_parvars = push!(
     copy(mizmodel_parvars),
-    :Y, :nu, :rhow, :g, :Ec, :Gamma, :gamma, :dmn
+    :Y, :nu, :g, :Ec, :Gamma, :gamma, :dmn
 )
 
 # Create a parameter dictionary from default values for a given Set
