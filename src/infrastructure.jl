@@ -611,7 +611,6 @@ const default_parval = Par(
     :Ec => 7.05e-5, # Breaking significant strain
     :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
     :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
-    :dmn => 20.0, # Chosen minmum floe diameter for the truncated power-law FSD in WIM (m)
 ) # Par
 
 # parameters used in each model
