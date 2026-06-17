@@ -623,7 +623,7 @@ const mizmodel_parvars = push!(
 )
 const wimodel_parvars = push!(
     copy(mizmodel_parvars),
-    :Y, :nu, :g, :Ec, :Gamma, :gamma, :dmn
+    :Y, :nu, :g, :Ec, :Gamma, :gamma
 )
 
 # Create a parameter dictionary from default values for a given Set
