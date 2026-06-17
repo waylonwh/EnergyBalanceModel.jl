@@ -603,7 +603,7 @@ const default_parval = Par(
     :rhow => 1025.0, # Water density (kg m^-3)
     :cp => 3980.0 / _secyear, # Specific heat for seawater near freezing (W y kg^-1 K^-1)
     :ch => 6e-3, # Heat transfer coefficient
-    :u0 => 0.01_secyear, # surface friction velocity (m y^-1)
+    :u0 => 0.01_secyear, # Surface friction velocity (m y^-1)
     # WIM
     :Y => 5.5e9, # Effective Young's modulus (Pa)
     :nu => 0.3, # Poisson's ratio
@@ -611,7 +611,6 @@ const default_parval = Par(
     :Ec => 7.05e-5, # Breaking significant strain
     :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
     :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
-    :dmn => 20.0, # Chosen minmum floe diameter for the truncated power-law FSD in WIM (m)
 ) # Par
 
 # parameters used in each model

@@ -16,8 +16,7 @@ solar(x::Vec, t::Float64, surface::Symbol, par::Par)::Vec = solar(x, t, Val(surf
 weighted_avg(vi::Vec, vw::Vec, phi::Vec)::Vec = @. vi*phi + (1-phi)vw
 
 # temperatures
-water_temp(Ew::Vec, phi::Vec, par::Par)::Vec = @. par.Tm + Ew / ((1-phi)par.cw)
-water_temp_nonan(Ew::Vec, phi::Vec, par::Par)::Vec = condset!(water_temp(Ew, phi, par), 0.0, isone, phi)
+water_temp(Ew::Vec, par::Par)::Vec = @. par.Tm + Ew / par.cw
 
 ice_temp(T0::Vec, par::Par)::Vec = min.(T0, par.Tm)
 
@@ -161,7 +160,7 @@ function _initialise(
     vars, sols, annusol = create_storages(model, solvars, st, forcing, par, init; lastonly)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)
-    vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
+    vars.nextTw = water_temp(vars.Ew, par)
     vars.nextT0 = solveT0(st.x, st.T[1], vars.h, vars.Tg, vars.nextTw, vars.nextphi, forcing(st.T[1]), par)
     condset!(vars.nextTw, 0.0, isnan) # eliminate NaNs for calculations
     return (vars, sols, annusol)
@@ -227,7 +226,7 @@ function Infrastructure.step!(
     zeroref!(vars.D, vars.Ei) # restrict non-existence
     # update variables for Tg
     vars.nextphi = concentration(vars.Ei, vars.h, par) # !
-    vars.nextTw = water_temp_nonan(vars.Ew, vars.nextphi, par) # !
+    vars.nextTw = water_temp(vars.Ew, par) # !
     vars.nextT0 = solveT0(st.x, t, vars.h, vars.Tg, vars.nextTw, vars.nextphi, f, par)
     vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.nextT0, vars.nextTw, vars.nextphi, f, st, par) # !
     # set NaNs to no existence
