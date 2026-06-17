@@ -603,7 +603,7 @@ const default_parval = Par(
     :rhow => 1025.0, # Water density (kg m^-3)
     :cp => 3980.0 / _secyear, # Specific heat for seawater near freezing (W y kg^-1 K^-1)
     :ch => 6e-3, # Heat transfer coefficient
-    :u0 => 0.01_secyear, # surface friction velocity (m y^-1)
+    :u0 => 0.01_secyear, # Surface friction velocity (m y^-1)
     # WIM
     :Y => 5.5e9, # Effective Young's modulus (Pa)
     :nu => 0.3, # Poisson's ratio

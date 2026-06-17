@@ -1,6 +1,6 @@
 name = "EnergyBalanceModel"
 uuid = "68dbb056-390c-4f33-8773-0304cbd749ae"
-version = "0.2.9-DEV.0" # ww/basalmelt
+version = "0.2.9-DEV.1" # ww/basalmelt
 authors = ["Waylon Wu <me@waylonwu.net>", "Navid C. Constantinou <navidcy@users.noreply.github.com>"]
 
 [deps]
