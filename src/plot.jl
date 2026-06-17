@@ -132,11 +132,11 @@ get_levels(::Val{false}, ::Val{false}, _)::Tuple{Int,Nothing,Nothing,Mk.Automati
     21, nothing, nothing, Mk.automatic
 ) # normal
 get_levels(::Val{true}, ::Val{false}, _)::Tuple{Vector{Float64},Nothing,Symbol,Vector{Int}} = (
-    dlevels, nothing, :auto, collect(0:5:20)
+    dlevels, nothing, :auto, collect(0:5:30)
 ) # D sol
 get_levels(::Val{true}, ::Val{true}, _)::Tuple{Vector{Float64},Symbol,Symbol,Vector{Int}} = (
     sort!(unique!(d -> isequal(-0.0, d) ? abs(d) : identity(d), [-dlevels; dlevels])),
-    :auto, :auto, collect(-20:5:20)
+    :auto, :auto, collect(-30:5:30)
 ) # D diff
 get_levels(::Val{false}, ::Val{true}, data::Matrix{Float64})::Tuple{Vector{Float64},Nothing,Nothing,Mk.Automatic} = (
     maximum(abs, filter(!isnan, data))*range(-1, 1; length=41),
