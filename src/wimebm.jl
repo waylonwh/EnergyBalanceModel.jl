@@ -155,7 +155,8 @@ flexural_min(h::Real, par::Collection) = # -> Real
 
 # expectation of the trancated power law
 expectation(dmn::Real, dmx::Real, gamma::Real) = # -> Real
-    gamma * dmn / (gamma - 1) * (1 - (dmn/dmx)^(gamma-1)) / (1 - (dmn/dmx)^gamma)
+    dmn < dmx ?
+        gamma * dmn / (gamma - 1) * (1 - (dmn/dmx)^(gamma-1)) / (1 - (dmn/dmx)^gamma) : dmn
 
 function mean_size(spectrum::Spectrum, L::Real, h::Real, phi::Real, par::Collection) # -> AbstractFloat
     alpha1 = ice_attenuation(spectrum, h, par)
