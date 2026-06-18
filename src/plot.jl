@@ -126,17 +126,17 @@ GLMakie
 backend()::Union{Module,Missing} = Mk.current_backend()
 backend(bcknd::Symbol)::Module = init_backend(Val(bcknd))
 
-const dlevels = [20(range(0, 20, 20) ./ 20).^2; 30]
+const dlevels = [400(range(0, 400, 20) ./ 400).^2; 450]
 # (isD::Val{[Bool]}, diff::Val{[Bool]}, data::Matrix{Float64}) -> (levels, extendlow, extendhigh)
 get_levels(::Val{false}, ::Val{false}, _)::Tuple{Int,Nothing,Nothing,Mk.Automatic} = (
     21, nothing, nothing, Mk.automatic
 ) # normal
 get_levels(::Val{true}, ::Val{false}, _)::Tuple{Vector{Float64},Nothing,Symbol,Vector{Int}} = (
-    dlevels, nothing, :auto, collect(0:5:30)
+    dlevels, nothing, :auto, collect(0:100:400)
 ) # D sol
 get_levels(::Val{true}, ::Val{true}, _)::Tuple{Vector{Float64},Symbol,Symbol,Vector{Int}} = (
     sort!(unique!(d -> isequal(-0.0, d) ? abs(d) : identity(d), [-dlevels; dlevels])),
-    :auto, :auto, collect(-30:5:30)
+    :auto, :auto, collect(-400:100:400)
 ) # D diff
 get_levels(::Val{false}, ::Val{true}, data::Matrix{Float64})::Tuple{Vector{Float64},Nothing,Nothing,Mk.Automatic} = (
     maximum(abs, filter(!isnan, data))*range(-1, 1; length=41),
