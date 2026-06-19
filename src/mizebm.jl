@@ -16,8 +16,7 @@ solar(x::Vec, t::Float64, surface::Symbol, par::Par)::Vec = solar(x, t, Val(surf
 weighted_avg(vi::Vec, vw::Vec, phi::Vec)::Vec = @. vi*phi + (1-phi)vw
 
 # temperatures
-water_temp(Ew::Vec, phi::Vec, par::Par)::Vec = @. par.Tm + Ew / ((1-phi)par.cw)
-water_temp_nonan(Ew::Vec, phi::Vec, par::Par)::Vec = condset!(water_temp(Ew, phi, par), 0.0, isone, phi)
+water_temp(Ew::Vec, par::Par)::Vec = @. par.Tm + Ew / par.cw
 
 ice_temp(T0::Vec, par::Par)::Vec = min.(T0, par.Tm)
 
@@ -93,6 +92,8 @@ function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Par)::Vec
     return Flat
 end # function lat_flux
 
+bot_flux(Tw::Vector, par::Collection) = par.rhow * par.cp * par.ch * par.u0 * (Tw .- par.Tm)
+
 function redistributeE(rEi::Vec, rEw::Vec)::NTuple{4,Vec}
     cEi = clamp.(rEi, -Inf, 0)
     cEw = clamp.(rEw, 0, Inf)
@@ -122,9 +123,9 @@ function average(f::Vec, fn::Float64, n::Vec, dn::Vec)::Vec
 end # function average
 
 # differential equations
-Ei_t(phi::Vec, Fvi::Vec, Flat::Vec)::Vec = @. phi * Fvi + Flat
-Ew_t(phi::Vec, Fvw::Vec, Flat::Vec)::Vec = @. (1-phi)Fvw - Flat
-h_t(Fvi::Vec, par::Par)::Vec = -1/par.Lf * Fvi
+Ei_t(phi::Vec, Fvi::Vec, Flat::Vec, Fbot::Vec)::Vec = @. phi * Fvi + Flat + phi * Fbot
+Ew_t(phi::Vec, Fvw::Vec, Flat::Vec, Fbot::Vec)::Vec = @. (1-phi)Fvw - Flat - phi * Fbot
+h_t(Fvi::Vec, Fbot::Vec, par::Par)::Vec = -1/par.Lf * (Fvi + Fbot)
 function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Par; breakup::BitArray)::Vec
     lat_melt = -pi / 2par.alpha * wlat(Tw, par)
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
@@ -148,7 +149,7 @@ function _initialise(
     vars, sols, annusol = create_storages(model, solvars, st, forcing, par, init; lastonly)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)
-    vars.nextTw = water_temp(vars.Ew, vars.nextphi, par)
+    vars.nextTw = water_temp(vars.Ew, par)
     vars.nextT0 = solveT0(st.x, st.T[1], vars.h, vars.Tg, vars.nextTw, vars.nextphi, forcing(st.T[1]), par)
     condset!(vars.nextTw, 0.0, isnan) # eliminate NaNs for calculations
     return (vars, sols, annusol)
@@ -177,9 +178,10 @@ function Infrastructure.step!(
     Fvi = vert_flux(t, :ice, vars.Tg, vars.T, f, st, par)
     Fvw = vert_flux(t, :water, vars.Tg, vars.T, f, st, par)
     Flat = lat_flux(vars.h, vars.D, vars.Tw, vars.phi, par)
+    Fbot = bot_flux(vars.Tw, par)
     # update enthalpy
-    rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat), st.dt)
-    rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat), st.dt)
+    rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, Flat, Fbot), st.dt)
+    rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, Flat, Fbot), st.dt)
     Ei, Ew, _, psiEwdt = redistributeE(rEi, rEw)
     vars.Ei = Ei # !
     vars.Ew = Ew # !
@@ -191,7 +193,7 @@ function Infrastructure.step!(
     lasth = vars.h # save for D
     vars.h = forward_euler(
         average(vars.h, par.hmin, vars.phi, phip), # new pancakes
-        h_t(Fvi, par),
+        h_t(Fvi, Fbot, par),
         st.dt
     ) # !
     vars.D = forward_euler(
@@ -205,12 +207,11 @@ function Infrastructure.step!(
     zeroref!(vars.D, vars.Ei) # restrict non-existence
     # update variables for Tg
     vars.nextphi = concentration(vars.Ei, vars.h, par) # !
-    vars.nextTw = water_temp_nonan(vars.Ew, vars.nextphi, par) # !
+    vars.nextTw = water_temp(vars.Ew, par) # !
     vars.nextT0 = solveT0(st.x, t, vars.h, vars.Tg, vars.nextTw, vars.nextphi, f, par)
     vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.nextT0, vars.nextTw, vars.nextphi, f, st, par) # !
     # set NaNs to no existence
     condset!(vars.Ti, NaN, iszero, vars.Ei)
-    condset!(vars.Tw, NaN, >(0.95), vars.phi)
     return vars
 end # function Infrastructure.step!
 
