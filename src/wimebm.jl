@@ -116,10 +116,10 @@ moment_strain(S::Spectrum, n::Int, h::Float64, par::Par)::Float64 = moment(
 
 ice_attenuation(S::Spectrum, h::Real, par::Collection) = imag.(wavenumber_ice(S.freq, h, par, par.Gamma)) # -> Vector{Real}
 
-function attenuate(S::Spectrum, L::Float64, h::Float64, phi::Float64, par::Par)::Spectrum
-    alpha1 = ice_attenuation(S, h, par)
-    return Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * L))
-end # function attenuate
+# function attenuate(S::Spectrum, L::Float64, h::Float64, phi::Float64, par::Par)::Spectrum
+#     alpha1 = ice_attenuation(S, h, par)
+#     return Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * L))
+# end # function attenuate
 
 attenuate(S::Spectrum, l::Real, phi::Real, alpha1::Vector)::Spectrum =
     Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * l))
@@ -133,6 +133,8 @@ function wave_length(S::Spectrum, h::Float64, par::Par)::Float64
 end # function wave_length
 
 wave_strain(S::Spectrum, h::Float64, par::Par)::Float64 = 2sqrt(moment_strain(S, 0, h, par))
+
+wave_height(S::Spectrum) = 4sqrt(moment_elevation(S, 0)) # -> Real
 
 function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, par::Par)::Float64
     alpha1 = ice_attenuation(S, h, par)
@@ -150,34 +152,32 @@ function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, pa
     return sol.u
 end # function fracture_distance
 
-flexural_min(h::Real, par::Collection) = # -> Real
-    1//2 * (pi^4 * par.Y * h^3 / (48par.rhow * par.g * (1-par.nu^2)))^(1//4)
-
-# expectation of the trancated power law
-expectation(dmn::Real, dmx::Real, gamma::Real) = # -> Real
-    dmn < dmx ?
-        gamma * dmn / (gamma - 1) * (1 - (dmn/dmx)^(gamma-1)) / (1 - (dmn/dmx)^gamma) : dmn
-
-function mean_size(spectrum::Spectrum, L::Real, h::Real, phi::Real, par::Collection) # -> AbstractFloat
-    alpha1 = ice_attenuation(spectrum, h, par)
+function cell_mean(func::Function, spectrum::Spectrum, phi::Number, alpha1::Vector, L::Number) # -> Number
     sol = Intgr.solve(
-        Intgr.IntegralProblem(
-            (l, _) -> expectation(
-                flexural_min(h, par),
-                1/2 * wave_length(attenuate(spectrum, l, phi, alpha1), h, par), # dmx
-                par.gamma
-            ),
-            (0, L)
-        ),
+        Intgr.IntegralProblem((l, _) -> func(attenuate(spectrum, l, phi, alpha1)), (0, L)),
         Intgr.QuadGKJL()
     )
     Intgr.SciMLBase.successful_retcode(sol) ||
         @warn(
-            "Integral did not converge when computing mean size. Result may be inaccurate.",
+            "Integral did not converge when computing cell mean. Result may be inaccurate.",
             sol.retcode, sol.resid
         )
     return sol.u / L
-end # function mean_size
+end # function cell_mean
+
+flexural_min(h::Number, par::Collection) = # -> Number
+    1//2 * (pi^4 * par.Y * h^3 / (48par.rhow * par.g * (1-par.nu^2)))^(1//4)
+
+# expectation of the trancated power law
+expectation(dmn::Number, dmx::Number, gamma::Number) = # -> Number
+    dmn < dmx ?
+        gamma * dmn / (gamma - 1) * (1 - (dmn/dmx)^(gamma-1)) / (1 - (dmn/dmx)^gamma) : dmn
+
+mean_size(spectrum::Spectrum, h::Number, phi::Number, L::Number, alpha1::Vector, par::Collection) = # -> Number
+    cell_mean(
+        sl -> expectation(flexural_min(h, par), 1//2 * wave_length(sl, h, par), par.gamma),
+        spectrum, phi, alpha1, L
+    )
 
 # Physical grid length at a given index in metres
 function grid_length(st::SpaceTime{F}, i::Int)::Float64 where F
@@ -213,6 +213,7 @@ function Infrastructure.step!(
 )::Collection{Vec}
     vars.Ewave = zeros(st.nx) # !
     vars.lambda = fill(wave_length(spectrum, 0.0, par), st.nx) # !
+    vars.Hs = fill(wave_height(spectrum), st.nx) # !
     vars.dDwave = zeros(st.nx) # !
     vars.dup = fill(NaN, st.nx)
     breakup = falses(st.nx) # track which cells are breaking
@@ -222,26 +223,34 @@ function Infrastructure.step!(
         spect = spectrum
         for xi in edgeinx:st.nx
             L = grid_length(st, xi)
-            atted_spect = attenuate(spect, L, vars.h[xi], vars.phi[xi], par)
+            alpha1 = ice_attenuation(spect, vars.h[xi], par)
+            atted_spect = attenuate(spect, L, vars.phi[xi], alpha1)
             atted_strain = wave_strain(atted_spect, vars.h[xi], par)
             oldD = vars.D[xi]
             if atted_strain > par.Ec # full breakup
-                dbar = mean_size(spect, L, vars.h[xi], vars.phi[xi], par)
+                dbar = mean_size(spect, vars.h[xi], vars.phi[xi], L, alpha1, par)
                 updateD!(dbar, xi, vars)
                 vars.dDwave[xi] = vars.D[xi] - oldD
                 breakup[xi] = true
                 vars.dup[xi] = dbar
             elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
                 l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
-                frontd = mean_size(spect, l, vars.h[xi], vars.phi[xi], par)
+                frontd = mean_size(spect, vars.h[xi], vars.phi[xi], l, alpha1, par)
                 updateD!(frontd, xi, vars, l, L)
                 vars.dDwave[xi] = vars.D[xi] - oldD
                 breakup[xi] = true
                 vars.dup[xi] = frontd
             end # if >, else
+            vars.Ewave[xi] = cell_mean(
+                sl -> wave_strain(sl, vars.h[xi], par),
+                spect, vars.phi[xi], alpha1, L
+            )
+            vars.lambda[xi] = cell_mean(
+                sl -> wave_length(sl, vars.h[xi], par),
+                spect, vars.phi[xi], alpha1, L
+            )
+            vars.Hs[xi] = cell_mean(wave_height, spect, vars.phi[xi], alpha1, L)
             spect = atted_spect # update spectrum
-            vars.Ewave[xi] = wave_strain(atted_spect, vars.h[xi], par)
-            vars.lambda[xi] = wave_length(atted_spect, vars.h[xi], par)
         end # for xi
     end # if !
     vars.breakup = Vector{Float64}(breakup) # !
