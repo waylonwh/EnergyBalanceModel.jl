@@ -150,16 +150,20 @@ function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, pa
     return sol.u
 end # function fracture_distance
 
+flexural_min(h::Real, par::Collection) = # -> Real
+    1//2 * (pi^4 * par.Y * h^3 / (48par.rhow * par.g * (1-par.nu^2)))^(1//4)
+
 # expectation of the trancated power law
 expectation(dmn::Real, dmx::Real, gamma::Real) = # -> Real
-    gamma * dmn / (gamma - 1) * (1 - (dmn/dmx)^(gamma-1)) / (1 - (dmn/dmx)^gamma)
+    dmn < dmx ?
+        gamma * dmn / (gamma - 1) * (1 - (dmn/dmx)^(gamma-1)) / (1 - (dmn/dmx)^gamma) : dmn
 
 function mean_size(spectrum::Spectrum, L::Real, h::Real, phi::Real, par::Collection) # -> AbstractFloat
     alpha1 = ice_attenuation(spectrum, h, par)
     sol = Intgr.solve(
         Intgr.IntegralProblem(
             (l, _) -> expectation(
-                par.dmn,
+                flexural_min(h, par),
                 1/2 * wave_length(attenuate(spectrum, l, phi, alpha1), h, par), # dmx
                 par.gamma
             ),
