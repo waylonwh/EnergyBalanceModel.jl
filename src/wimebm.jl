@@ -42,8 +42,8 @@ function interpolate_wavenumber(h::AbstractFloat, cache::WavenumberCache) # -> U
     h > cache.hmax && ArgumentError("h is out of bounds for wavenumber cache.")
     col = floor(Int, h / cache.dh) + 1
     weight = h % cache.dh / cache.dh
-    interp = weight * cache.wavenumber[:,col]
-    @. interp += (1-weight) * cache.wavenumber[:,col+1]
+    interp = (1 - weight) * cache.wavenumber[:,col]
+    @. interp += weight * cache.wavenumber[:,col+1]
     return interp
 end # function interpolate_wavenumber
 

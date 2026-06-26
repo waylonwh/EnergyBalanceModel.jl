@@ -17,7 +17,7 @@ export create_storages, integrate, solve
 
 Alias for `Vector{Float64}` to represent model variables.
 """
-const Vec = Vector{Float64}
+const Vec = Vector{Float64} # TODO: to be removed
 
 """
     AbstractModel
