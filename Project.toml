@@ -1,6 +1,6 @@
 name = "EnergyBalanceModel"
 uuid = "68dbb056-390c-4f33-8773-0304cbd749ae"
-version = "0.2.10-DEV.0" # ww/dmn
+version = "0.2.11-DEV.0" # ww/removevec
 authors = ["Waylon Wu <me@waylonwu.net>", "Navid C. Constantinou <navidcy@users.noreply.github.com>"]
 
 [deps]
