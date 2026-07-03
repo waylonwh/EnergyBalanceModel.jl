@@ -4,7 +4,7 @@ using ..Infrastructure, ..Utilities
 
 import InteractiveUtils as IU, Makie as Mk
 
-export Layout, backend
+export Layout, default_layout, backend
 export plot_avg, plot_raw, plot_seasonal
 
 """
@@ -23,13 +23,13 @@ Layout{Symbol}([:E :T :h], AbstractString["Enthalpy" "Temperature" "Thinkness"])
 struct Layout{T}
     vars::Matrix{T}
     titles::Matrix{AbstractString}
-    function Layout{T}(vars::Matrix{T}, titles::Matrix{AbstractString}) where T
+    function Layout{T}(vars::Matrix{T}, titles::Matrix{<:AbstractString}) where T
         size(vars) == size(titles) ||
             throw(ArgumentError("Size of vars and titles must be the same."))
         return new{T}(vars, titles)
     end # function Layout
 end # struct Layout
-Layout(vars::Matrix{T}, titles::Matrix{AbstractString}=string.(vars)) where T = Layout{T}(vars, titles)
+Layout(vars::Matrix{T}, titles::Matrix{<:AbstractString}=string.(vars)) where T = Layout{T}(vars, titles)
 
 Base.size(layout::Layout)::NTuple{2,Int} = size(layout.vars)
 Base.axes(layout::Layout, dim::Int)::Base.OneTo{Int64} = axes(layout.vars, dim)
@@ -54,9 +54,7 @@ end # function Base.showerror
 
 const classicmodel_layout = Layout(
     [:E  :T  :h],
-    AbstractString[
-        Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"  Mk.L"$h$ ($\mathrm{m}$)"
-    ]
+    [Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"  Mk.L"$h$ ($\mathrm{m}$)"]
 )
 
 const mizmodel_layout = Layout(
@@ -65,7 +63,7 @@ const mizmodel_layout = Layout(
         :Tw  :Ti  :T
         :h   :D   :phi
     ],
-    AbstractString[
+    [
         Mk.L"$E_{\mathrm{w}}$ ($\mathrm{J\,m^{-2}}$)"   Mk.L"$E_{\mathrm{i}}$ ($\mathrm{J\,m^{-2}}$)"   Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"
         Mk.L"$T_{\mathrm{w}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T_{\mathrm{i}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"
         Mk.L"$\bar{h}$ ($\mathrm{m}$)"                  Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)"        Mk.L"$\varphi$"
@@ -78,7 +76,7 @@ const wimodel_layout = Layout(
         :Tw  :Ti     :T
         :h   :D      :phi
     ],
-    AbstractString[
+    [
         Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"                Mk.L"$E_{\mathrm{wave}}$"                       Mk.L"$\lambda$ ($\mathrm{m}$)"
         Mk.L"$T_{\mathrm{w}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T_{\mathrm{i}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"
         Mk.L"$\bar{h}$ ($\mathrm{m}$)"                  Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)"        Mk.L"$\varphi$"
@@ -87,7 +85,7 @@ const wimodel_layout = Layout(
 
 for model in filter(!=(ModelDiff), IU.subtypes(AbstractModel))
     namelower = lowercase(split(string(model), '.')[end])
-    @eval default_layout(::$model)::Layout{Symbol} = $(Symbol(namelower, "_layout"))
+    @eval default_layout(::$model)::Layout{Symbol} = deepcopy($(Symbol(namelower, "_layout")))
 end # for model
 function default_layout(::ModelDiff{A,B})::Layout{Symbol} where {A<:AbstractModel, B<:AbstractModel}
     layout = (A === ClassicModel || B === ClassicModel) ?
