@@ -62,7 +62,7 @@ export Collection, Forcing, Par, Solutions, SpaceTime, EBMProblem
 export Spectrum, bretschneider, monochromatic
 export default_parameters, integrate, solve
 export hemispheric_mean, ice_area
-export Layout, backend, plot_avg, plot_raw, plot_seasonal
+export Layout, default_layout, backend, plot_avg, plot_raw, plot_seasonal
 export run_example
 
 include("utilities.jl")
