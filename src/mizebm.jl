@@ -145,7 +145,6 @@ function _initialise(
 ) # -> Tuple{Collection{Vec}, Solutions{M,F,V}, Solutions{M,F,V}}
     # create storages
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
-    model isa WIModel && push!(solvars, :Ewave, :lambda) # add wave variables for WIModel
     vars, sols, annusol = create_storages(model, solvars, st, forcing, par, init; lastonly)
     # compute phi and Tw
     vars.nextphi = concentration(vars.Ei, vars.h, par)

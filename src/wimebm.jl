@@ -207,8 +207,6 @@ end # function Infrastructure.initialise
 function Infrastructure.step!(
     ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; spectrum::Spectrum
 )::Collection{Vec}
-    vars.Ewave = zeros(st.nx)
-    vars.lambda = fill(wave_length(spectrum, 0.0, par), st.nx)
     breakup = falses(st.nx) # track which cells are breaking
     edgeinx = findfirst(>(0), vars.h)
     if !isnothing(edgeinx) # if there is any ice
@@ -229,14 +227,6 @@ function Infrastructure.step!(
                 updateD!(frontd, xi, vars, l, L)
                 breakup[xi] = true
             end # if >, else
-            vars.Ewave[xi] = cell_mean(
-                sl -> wave_strain(sl, vars.h[xi], par),
-                spect, vars.phi[xi], alpha1, L
-            )
-            vars.lambda[xi] = cell_mean(
-                sl -> wave_length(sl, vars.h[xi], par),
-                spect, vars.phi[xi], alpha1, L
-            )
             spect = atted_spect # update spectrum
         end # for xi
     end # if !
