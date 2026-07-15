@@ -152,7 +152,7 @@ function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, pa
     return sol.u
 end # function fracture_distance
 
-function cell_mean(func::Function, spectrum::Spectrum, phi::Number, alpha1::Vector, L::Number) # -> Number
+function cell_mean(func::Function, spectrum::Spectrum, phi::Real, alpha1::Vector, L::Real) # -> Real
     sol = Intgr.solve(
         Intgr.IntegralProblem((l, _) -> func(attenuate(spectrum, l, phi, alpha1)), (0, L)),
         Intgr.QuadGKJL()
@@ -165,19 +165,20 @@ function cell_mean(func::Function, spectrum::Spectrum, phi::Number, alpha1::Vect
     return sol.u / L
 end # function cell_mean
 
-flexural_min(h::Number, par::Collection) = # -> Number
+flexural_min(h::Real, par::Collection) = # -> Real
     1//2 * (pi^4 * par.Y * h^3 / (48par.rhow * par.g * (1-par.nu^2)))^(1//4)
 
 # expectation of the trancated power law
-expectation(dmn::Number, dmx::Number, gamma::Number) = # -> Number
+expectation(dmn::Real, dmx::Real, gamma::Real) = # -> Real
     dmn < dmx ?
         gamma * dmn / (gamma - 1) * (1 - (dmn/dmx)^(gamma-1)) / (1 - (dmn/dmx)^gamma) : dmn
 
-mean_size(spectrum::Spectrum, h::Number, phi::Number, L::Number, alpha1::Vector, par::Collection) = # -> Number
-    cell_mean(
-        sl -> expectation(flexural_min(h, par), 1//2 * wave_length(sl, h, par), par.gamma),
-        spectrum, phi, alpha1, L
-    )
+mean_size(
+    spectrum::Spectrum, h::Real, phi::Real, L::Real, alpha1::Vector, par::Collection, Dbar::Real
+) = cell_mean(
+    sl -> min(expectation(flexural_min(h, par), 1/2 * wave_length(sl, h, par), par.gamma), Dbar),
+    spectrum, phi, alpha1, L
+) # -> Real
 
 # Physical grid length at a given index in metres
 function grid_length(st::SpaceTime{F}, i::Int)::Float64 where F
@@ -191,11 +192,8 @@ function grid_length(st::SpaceTime{F}, i::Int)::Float64 where F
     return dtheta / (pi/2) * 1e7
 end # function grid_length
 
-function updateD!(newD::Float64, xi::Int, vars::Collection{Vec}, l::Float64=1.0, L::Float64=1.0)::Nothing
-    dbar = (l*newD + (L-l)*vars.D[xi]) / L # weighted average based on fracture distance
-    dbar < vars.D[xi] && (vars.D[xi] = dbar) # update floe size if it has been reduced by breaking # !
-    return nothing
-end # function updateD!
+updateD!(newD::Float64, xi::Int, vars::Collection{Vec}, l::Float64=1.0, L::Float64=1.0) = # -> Number
+    vars.D[xi] = (l*newD + (L-l)*vars.D[xi]) / L # weighted average based on fracture distance
 
 function Infrastructure.initialise(
     model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
@@ -228,14 +226,14 @@ function Infrastructure.step!(
             atted_strain = wave_strain(atted_spect, vars.h[xi], par)
             oldD = vars.D[xi]
             if atted_strain > par.Ec # full breakup
-                dbar = mean_size(spect, vars.h[xi], vars.phi[xi], L, alpha1, par)
+                dbar = mean_size(spect, vars.h[xi], vars.phi[xi], L, alpha1, par, vars.D[xi])
                 updateD!(dbar, xi, vars)
                 vars.dDwave[xi] = vars.D[xi] - oldD
                 breakup[xi] = true
                 vars.dup[xi] = dbar
             elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
                 l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
-                frontd = mean_size(spect, vars.h[xi], vars.phi[xi], l, alpha1, par)
+                frontd = mean_size(spect, vars.h[xi], vars.phi[xi], l, alpha1, par, vars.D[xi])
                 updateD!(frontd, xi, vars, l, L)
                 vars.dDwave[xi] = vars.D[xi] - oldD
                 breakup[xi] = true
