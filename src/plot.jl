@@ -70,18 +70,7 @@ const mizmodel_layout = Layout(
     ]
 )
 
-const wimodel_layout = Layout(
-    [
-        :E   :Ewave  :lambda
-        :Tw  :Ti     :T
-        :h   :D      :phi
-    ],
-    [
-        Mk.L"$E$ ($\mathrm{J\,m^{-2}}$)"                Mk.L"$E_{\mathrm{wave}}$"                       Mk.L"$\lambda$ ($\mathrm{m}$)"
-        Mk.L"$T_{\mathrm{w}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T_{\mathrm{i}}$ ($\mathrm{\degree\!C}$)"  Mk.L"$T$ ($\mathrm{\degree\!C}$)"
-        Mk.L"$\bar{h}$ ($\mathrm{m}$)"                  Mk.L"$\bar{\mathcal{D}}$ ($\mathrm{m}$)"        Mk.L"$\varphi$"
-    ]
-)
+const wimodel_layout = mizmodel_layout
 
 for model in filter(!=(ModelDiff), IU.subtypes(AbstractModel))
     namelower = lowercase(split(string(model), '.')[end])
