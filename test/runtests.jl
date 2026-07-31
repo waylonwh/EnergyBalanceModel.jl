@@ -49,6 +49,5 @@ end # @testset begin
         (Float64, spectrum.freq, wimpar.Gamma, 1e-10, wimpar)
     )
     @test wimsols.spectrum_ref[].density == spectrum.density
-    @test hasproperty(wimsols.raw, :Ewave) && hasproperty(wimsols.raw, :lambda)
-    # @test lastyear_hemi_mean(wimsols, :T) - lastyear_hemi_mean(mizsols, :T) < 1.0
+    @test lastyear_hemi_mean(wimsols, :T) - lastyear_hemi_mean(mizsols, :T) < 1.0
 end

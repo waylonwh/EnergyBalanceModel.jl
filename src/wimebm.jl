@@ -150,6 +150,19 @@ function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, pa
     return sol.u
 end # function fracture_distance
 
+function cell_mean(func::Function, spectrum::Spectrum, phi::Real, alpha1::Vector, L::Real) # -> Real
+    sol = Intgr.solve(
+        Intgr.IntegralProblem((l, _) -> func(attenuate(spectrum, l, phi, alpha1)), (0, L)),
+        Intgr.QuadGKJL()
+    )
+    Intgr.SciMLBase.successful_retcode(sol) ||
+        @warn(
+            "Integral did not converge when computing cell mean. Result may be inaccurate.",
+            sol.retcode, sol.resid
+        )
+    return sol.u / L
+end # function cell_mean
+
 flexural_min(h::Real, par::Collection) = # -> Real
     1//2 * (pi^4 * par.Y * h^3 / (48par.rhow * par.g * (1-par.nu^2)))^(1//4)
 
@@ -158,26 +171,12 @@ expectation(dmn::Real, dmx::Real, gamma::Real) = # -> Real
     dmn < dmx ?
         gamma * dmn / (gamma - 1) * (1 - (dmn/dmx)^(gamma-1)) / (1 - (dmn/dmx)^gamma) : dmn
 
-function mean_size(spectrum::Spectrum, L::Real, h::Real, phi::Real, par::Collection) # -> AbstractFloat
-    alpha1 = ice_attenuation(spectrum, h, par)
-    sol = Intgr.solve(
-        Intgr.IntegralProblem(
-            (l, _) -> expectation(
-                flexural_min(h, par),
-                1/2 * wave_length(attenuate(spectrum, l, phi, alpha1), h, par), # dmx
-                par.gamma
-            ),
-            (0, L)
-        ),
-        Intgr.QuadGKJL()
-    )
-    Intgr.SciMLBase.successful_retcode(sol) ||
-        @warn(
-            "Integral did not converge when computing mean size. Result may be inaccurate.",
-            sol.retcode, sol.resid
-        )
-    return sol.u / L
-end # function mean_size
+mean_size(
+    spectrum::Spectrum, h::Real, phi::Real, L::Real, alpha1::Vector, par::Collection, Dbar::Real
+) = cell_mean(
+    sl -> min(expectation(flexural_min(h, par), 1/2 * wave_length(sl, h, par), par.gamma), Dbar),
+    spectrum, phi, alpha1, L
+)
 
 # Physical grid length at a given index in metres
 function grid_length(st::SpaceTime{F}, i::Int)::Float64 where F
@@ -191,11 +190,8 @@ function grid_length(st::SpaceTime{F}, i::Int)::Float64 where F
     return dtheta / (pi/2) * 1e7
 end # function grid_length
 
-function updateD!(newD::Float64, xi::Int, vars::Collection{Vec}, l::Float64=1.0, L::Float64=1.0)::Nothing
-    dbar = (l*newD + (L-l)*vars.D[xi]) / L # weighted average based on fracture distance
-    dbar < vars.D[xi] && (vars.D[xi] = dbar) # update floe size if it has been reduced by breaking # !
-    return nothing
-end # function updateD!
+updateD!(newD::Float64, xi::Int, vars::Collection{Vec}, l::Float64=1.0, L::Float64=1.0) = # -> Number
+    vars.D[xi] = (l*newD + (L-l)*vars.D[xi]) / L # weighted average based on fracture distance
 
 function Infrastructure.initialise(
     model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
@@ -211,8 +207,6 @@ end # function Infrastructure.initialise
 function Infrastructure.step!(
     ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; spectrum::Spectrum
 )::Collection{Vec}
-    vars.Ewave = zeros(st.nx)
-    vars.lambda = fill(wave_length(spectrum, 0.0, par), st.nx)
     breakup = falses(st.nx) # track which cells are breaking
     edgeinx = findfirst(>(0), vars.h)
     if !isnothing(edgeinx) # if there is any ice
@@ -220,21 +214,20 @@ function Infrastructure.step!(
         spect = spectrum
         for xi in edgeinx:st.nx
             L = grid_length(st, xi)
-            atted_spect = attenuate(spect, L, vars.h[xi], vars.phi[xi], par)
+            alpha1 = ice_attenuation(spect, vars.h[xi], par)
+            atted_spect = attenuate(spect, L, vars.phi[xi], alpha1)
             atted_strain = wave_strain(atted_spect, vars.h[xi], par)
             if atted_strain > par.Ec # full breakup
-                dbar = mean_size(spect, L, vars.h[xi], vars.phi[xi], par)
+                dbar = mean_size(spect, vars.h[xi], vars.phi[xi], L, alpha1, par, vars.D[xi])
                 updateD!(dbar, xi, vars)
                 breakup[xi] = true
             elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
                 l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
-                frontd = mean_size(spect, l, vars.h[xi], vars.phi[xi], par)
+                frontd = mean_size(spect, vars.h[xi], vars.phi[xi], l, alpha1, par, vars.D[xi])
                 updateD!(frontd, xi, vars, l, L)
                 breakup[xi] = true
             end # if >, else
             spect = atted_spect # update spectrum
-            vars.Ewave[xi] = wave_strain(atted_spect, vars.h[xi], par)
-            vars.lambda[xi] = wave_length(atted_spect, vars.h[xi], par)
         end # for xi
     end # if !
     Infrastructure.step!(MIZModel(), t, f, vars, st, par; breakup) # thermodynamics
