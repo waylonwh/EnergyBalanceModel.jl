@@ -100,7 +100,8 @@ function wavenumber_ice(
     abstol::Float64=1e-10, # init::ComplexF64=omega^2/par.g + 0im
 )::ComplexF64
     prob = NlinSol.NonlinearProblem{false}(
-        (k, _) -> dispersion_relation(k, omega, gamma, h, par), omega^2/par.g + 0im
+        (k, p) -> dispersion_relation(k, p.omega, p.gamma, p.h, p.par),
+        omega^2/par.g + 0im, (; omega, gamma, h, par)
     )
     sol = NlinSol.solve(
         prob, NlinSol.NewtonRaphson(; autodiff=NlinSol.AutoFiniteDiff()); abstol
@@ -185,12 +186,11 @@ wave_strain(S::Spectrum, h::Float64, par::Par)::Float64 = 2sqrt(moment_strain(S,
 
 function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, par::Par)::Float64
     alpha1 = ice_attenuation(S, h, par)
-    sol = NlinSol.solve(
-        NlinSol.IntervalNonlinearProblem(
-            (l, _) -> wave_strain(attenuate(S, l, phi, alpha1), h, par) - par.Ec,
-            (0, L)
-        )
+    prob = NlinSol.IntervalNonlinearProblem(
+        (l, p) -> wave_strain(attenuate(p.S, l, p.phi, p.alpha1), p.h, p.par) - p.par.Ec,
+        (0, L), (; S, phi, alpha1, h, par)
     )
+    sol = NlinSol.solve(prob)
     NlinSol.SciMLBase.successful_retcode(sol) ||
         @warn(
             "Nonlinear solver did not converge when solving for fracture distance. Result may be inaccurate.",
@@ -200,10 +200,11 @@ function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, pa
 end # function fracture_distance
 
 function cell_mean(func::Function, spectrum::Spectrum, phi::Real, alpha1::Vector, L::Real) # -> Real
-    sol = Intgr.solve(
-        Intgr.IntegralProblem((l, _) -> func(attenuate(spectrum, l, phi, alpha1)), (0, L)),
-        Intgr.QuadGKJL()
+    prob = Intgr.IntegralProblem(
+        (l, p) -> p.func(attenuate(p.spectrum, l, p.phi, p.alpha1)),
+        (0, L), (; func, spectrum, phi, alpha1)
     )
+    sol = Intgr.solve(prob, Intgr.QuadGKJL())
     Intgr.SciMLBase.successful_retcode(sol) ||
         @warn(
             "Integral did not converge when computing cell mean. Result may be inaccurate.",

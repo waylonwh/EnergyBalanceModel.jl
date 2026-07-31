@@ -141,6 +141,7 @@ Base.iterate(coll::Collection) = iterate(getfield(coll, :dict)) # -> Tuple{Pair{
 Base.iterate(coll::Collection, state::Int) = iterate(getfield(coll, :dict), state) # -> Tuple{Pair{Symbol,V},Int} or Nothing
 Base.length(coll::Collection)::Int = length(getfield(coll, :dict))
 Base.hash(coll::Collection, h::UInt)::UInt = hash(getfield(coll, :dict), h)
+Base.get(coll::Collection, key::Symbol, default) = get(getfield(coll, :dict), key, default)
 
 function uniqueunion(ca::Collection{A}, cb::Collection{B}) where {A, B}
     vtype = typejoin(A, B)
