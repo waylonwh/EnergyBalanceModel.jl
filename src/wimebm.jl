@@ -92,7 +92,8 @@ function cache_wavenumber!(
         ),
         WavenumberCache(
             hash((T, freqs, par.Gamma, abstol, par)), T(dh), T(hmax),
-            wavenumber_ice.(freqs, hvec', Ref(par), par.Gamma; abstol))
+            wavenumber_ice.(freqs, hvec', Ref(par), par.Gamma; abstol)
+        )
     )
     _wavenumber_ice_cache_ref[] = tup
     return tup
