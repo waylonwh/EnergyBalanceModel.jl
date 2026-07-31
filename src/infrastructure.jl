@@ -4,9 +4,9 @@ using ..Utilities
 
 import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats, StyledStrings as SS
 
-export AbstractModel, ClassicModel, MIZModel, WIModel, ModelDiff
-export Collection, Forcing, Par, Solutions, SpaceTime, Vec, EBMProblem
-export Spectrum, bretschneider, monochromatic
+export AbstractModel, ClassicModel, MIZModel, ModelDiff, WIModel
+export AbstractSolver, ActiveSetSolver, GhostLayerSolver, NonlinearSolver
+export Collection, EBMProblem, Forcing, Par, Solutions, SpaceTime, Spectrum, Vec
 export default_parameters, default_parval
 export get_diffop
 export hemispheric_mean, ice_area
@@ -17,7 +17,7 @@ export create_storages, integrate, solve
 
 Alias for `Vector{Float64}` to represent model variables.
 """
-const Vec = Vector{Float64} # TODO: to be removed
+const Vec = Vector{Float64} # TODO deprecated; to be removed
 
 """
     AbstractModel
@@ -55,6 +55,49 @@ struct ClassicModel <: AbstractModel end
 A type representing the difference (S-B) between two models `B` and `S`.
 """
 struct ModelDiff{B<:AbstractModel, S<:AbstractModel} <: AbstractModel end
+
+"""
+    AbstractSolver
+
+Abstract type for the different solvers used to advance the surface temperature of a model
+by one timestep.
+"""
+abstract type AbstractSolver end
+
+"""
+    GhostLayerSolver <: AbstractSolver
+
+Singleton type selecting the ghost layer scheme of Wagner & Eisenman (2015), in which
+horizontal diffusion acts on a ghost layer of small heat capacity `cg` that is coupled to
+the surface over the short timescale `tau`. The ghost layer temperature is stepped with an
+implicit Euler step, and the surface temperature follows diagnostically.
+
+!!! note
+    This scheme gives a poor approximation for `MIZModel` and `WIModel`. It is recommended
+    to use the `ActiveSetSolver` instead.
+"""
+struct GhostLayerSolver <: AbstractSolver end
+
+"""
+    ActiveSetSolver <: AbstractSolver
+
+Singleton type selecting the active set scheme, which classifies the gridboxes as freezing
+or melting at each timestep and iteratively solves the linear system implied by that
+classification for the surface temperature.
+"""
+struct ActiveSetSolver <: AbstractSolver end
+
+"""
+    NonlinearSolver <: AbstractSolver
+
+Singleton type selecting the nonlinear scheme, in which the surface temperature is obtained
+by solving the full nonlinear system at each timestep with a Newton-type iteration.
+
+!!! note
+    This scheme is computationally expensive and it is recommended to use the
+    `ActiveSetSolver` instead.
+"""
+struct NonlinearSolver <: AbstractSolver end
 
 """
     Collection{V}(args...)
@@ -400,54 +443,6 @@ function Base.show(io::IO, ::MIME"text/plain", S::Spectrum)::Nothing
 end # function Base.show
 
 """
-    bretschneider(Hs::Float64, Tp::Float64, freq::Vec=collect(range(2π/23.8, 2π/2.5; step=7.5e-2))) -> Spectrum
-
-Construct a Bretschneider wave [`Spectrum`](@ref) with significant wave height `Hs` (m) and
-peak period `Tp` (s), evaluated at the angular frequencies `freq` (rad s⁻¹).
-
-The spectral energy density is given by
-``S(T) = \\frac{1.25 H_s^2 T^5}{8\\pi T_p^4} \\exp\\!\\left[-1.25 (T/T_p)^4\\right]``,
-where ``T = 2\\pi / \\omega`` is the wave period.
-
-# Examples
-```julia-repl
-julia> S = bretschneider(3.0, 9.5);
-
-julia> length(S.freq)
-14
-```
-"""
-function bretschneider(
-    Hs::Float64, Tp::Float64, freq::Vec=collect(range(2pi/23.8, 2pi/2.5; step=7.5e-2))
-)::Spectrum
-    T = 2pi ./ freq
-    return Spectrum(freq, @. 1.25 * Hs^2 * T^5 / (8pi * Tp^4) * exp(-1.25(T/Tp)^4))
-end # function bretschneider
-
-"""
-    monochromatic(Hs::Float64, Tp::Float64, freq::Vec=collect(range(2π/(Tp+0.1), 2π/(Tp-0.1); step=1e-3)); eps::Float64=1e-6) -> Spectrum
-
-Construct an approximately monochromatic wave [`Spectrum`](@ref) with significant wave
-height `Hs` (m) and peak period `Tp` (s).
-
-The energy is concentrated near the peak angular frequency ``2\\pi / T_p`` using a narrow
-Gaussian of variance `eps`, so that the total energy matches that of a monochromatic wave of
-height `Hs`. Smaller `eps` produces a sharper peak.
-
-# Examples
-```julia-repl
-julia> S = monochromatic(3.0, 9.5);
-
-julia> isapprox(S.freq[argmax(S.density)], 2pi / 9.5; atol=1e-3)
-true
-```
-"""
-monochromatic(
-    Hs::Float64, Tp::Float64, freq::Vec=collect(range(2pi/(Tp+0.1), 2pi/(Tp-0.1); step=1e-3));
-    eps::Float64=1e-6
-)::Spectrum = Spectrum(freq, @. Hs^2 / 16 * exp(-(freq - 2pi/Tp)^2 / 2eps) / sqrt(2pi * eps))
-
-"""
     Solutions{M,F,V}
 
 An object to store model solutions. Type parameter `M` is the model type (`MIZModel` or
@@ -588,8 +583,8 @@ const default_parval = Par(
     :Fb => 4.0, # heat flux from ocean below (W m^-2)
     :k => 2.0, # sea ice thermal conductivity (W m^-2 K^-1)
     :Lf => 9.5, # sea ice latent heat of fusion (W y m^-3)
-    :cg => 1e-3 * 9.8, # ghost layer heat capacity(W y m^-2 K^-1)
-    :tau => 1e-5 * 9.8, # ghost layer coupling timescale (y)
+    :cg => 0.098, # ghost layer heat capacity(W y m^-2 K^-1)
+    :tau => 3e-5, # ghost layer coupling timescale (y)
     # MIZ
     :Tm => 0.0, # mean temperature (C)
     :m1 => 1.6e-6_secyear, # empirical constants of lateral melt (m y^-1 K^-1)
@@ -736,6 +731,7 @@ mutable struct EBMProblem{T<:AbstractFloat}
     forcing::Forcing
     parameters::Collection{T}
     initconds::Collection{Vec}
+    solver::AbstractModel
     spectrum::Union{Spectrum,Nothing}
 
     function EBMProblem{FT}(
@@ -1056,29 +1052,34 @@ function integrate(
 end # function integrate
 
 function integrate(
-    model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum
-) # -> Solutions{WIModel,F,C}
-    # initialise
-    if isfinite(updatefreq)
+    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    lastonly::Bool=true, updatefreq::Float64=1.0, solver::AbstractSolver=ActiveSetSolver(), kwargs...
+) where M<:Union{ClassicModel,MIZModel,WIModel} # -> Solutions{M,F,C}
+    # initialise for WIModel
+    if M === WIModel
+        spectrum = get(kwargs, :spectrum, nothing)
+        isnothing(spectrum) &&
+            throw(ArgumentError("spectrum must be specified for WIModel as a keyword argument."))
         print(SS.styled"{bold,warning:Caching wavenumber...}", lpad("", 10))
         start = time()
     end # if isfinite
     task = Threads.@spawn initialise(model, st, forcing, par, init; lastonly, spectrum)
-    isfinite(updatefreq) && (
+    M === WIModel && isfinite(updatefreq) && (
         timer = Timer(
             _ -> print("\e[10D", lpad(string(round(time()-start; digits=1)), 8), " s"),
             0.1; interval=0.1
         )
-    )
+    ) # &&
     vars, sols, annusol = fetch(task)
     if isfinite(updatefreq)
-        close(timer)
-        println(
-            "\r\e[2K",
-            SS.styled"{bold,success:Wavenumber cached}",
-            " in ", round(time()-start; digits=2), " s\n"
-        )
+        if M === WIModel
+            close(timer)
+            println(
+                "\r\e[2K",
+                SS.styled"{bold,success:Wavenumber cached}",
+                " in ", round(time()-start; digits=2), " s\n"
+            ) # println
+        end # if ===
         progress::Progress = Progress(
             length(st.T), "Integrating WIModel", updatefreq;
             infofeed=(t -> string("t = ", round(t; digits=2)))
@@ -1087,7 +1088,7 @@ function integrate(
     end # if isfinite
     # loop over time
     for ti in eachindex(st.T)
-        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
+        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; solver, spectrum)
         savesol!(sols, annusol, vars, ti)
         isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
     end # for ti
@@ -1095,11 +1096,13 @@ function integrate(
 end # function integrate
 
 """
-    solve(prob::EBMProblem; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+    solve(prob::EBMProblem, solver::AbstractSolver=ActiveSetSolver(); lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
 
 Integrate the `EBMProblem` `prob` and return the results in a `Solutions` object. This is
-the high-level entry point that dispatches to the appropriate `integrate` method for the
-problem's model, forwarding the spectrum automatically when the model is a `WIModel`.
+the high-level entry point to `integrate` from `EBMProblem`. The `solver` selects the scheme
+used to advance the surface temperature at each timestep, defaulting to
+[`ActiveSetSolver`](@ref); see [`GhostLayerSolver`](@ref) and [`NonlinearSolver`](@ref) for
+the alternatives.
 
 When `lastonly=true`, only the last year of the solution is stored for each timestep,
 otherwise the full solution is stored. A progress bar is displayed and updated with
@@ -1123,15 +1126,12 @@ Solutions{WIModel, sin, false} with:
   with forcing Forcing(0.0) (constant forcing)
 ```
 """
-solve(prob::EBMProblem; lastonly::Bool=true, updatefreq::Float64=1.0) =
-    prob.model isa WIModel ?
-        integrate(
-            prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
-            lastonly, updatefreq, spectrum=prob.spectrum
-        ) :
-        integrate(
-            prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
-            lastonly, updatefreq
-        )
+solve(
+    prob::EBMProblem, solver::AbstractSolver=ActiveSetSolver();
+    lastonly::Bool=true, updatefreq::Float64=1.0
+) = integrate( # -> Solutions
+    prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
+    lastonly, updatefreq, solver, prob.spectrum
+)
 
 end # module Infrastructure
