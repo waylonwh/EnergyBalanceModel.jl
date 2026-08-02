@@ -146,11 +146,12 @@ function _initialise(
     # create storages
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
     vars, sols, annusol = create_storages(model, solvars, st, forcing, par, init; lastonly)
-    # compute phi and Tw
-    vars.nextphi = concentration(vars.Ei, vars.h, par)
-    vars.nextTw = water_temp(vars.Ew, par)
-    vars.nextT0 = solveT0(st.x, st.T[1], vars.h, vars.Tg, vars.nextTw, vars.nextphi, forcing(st.T[1]), par)
-    condset!(vars.nextTw, 0.0, isnan) # eliminate NaNs for calculations
+    # diagnostic variables read by the first step!, on the same timestep as Ei, Ew, h and D
+    vars.phi = concentration(vars.Ei, vars.h, par)
+    vars.Tw = water_temp(vars.Ew, par)
+    vars.T0 = solveT0(st.x, st.T[1], vars.h, vars.Tg, vars.Tw, vars.phi, forcing(st.T[1]), par)
+    vars.Ti = condset(ice_temp(vars.T0, par), 0.0, isnan) # eliminate NaNs for calculations
+    vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi)
     return (vars, sols, annusol)
 end # function _initialise
 
@@ -164,15 +165,9 @@ function Infrastructure.step!(
     ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par;
     breakup::BitArray=falses(st.nx)
 )::Collection{Vec}
-    # assign next variables to current
-    vars.phi = vars.nextphi
-    vars.Tw = vars.nextTw
-    T0 = vars.nextT0
-    # compute diagnostic variables
-    vars.Ti = ice_temp(T0, par)
-    condset!(vars.Ti, 0.0, isnan) # eliminate NaNs for calculations
-    vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi)
-    vars.n = num(vars.D, vars.phi, par)
+    # prepare for the step
+    vars.n = num(vars.D, vars.phi, par) # refresh in case D was changed by wave breakup
+    Ti = condset(vars.Ti, 0.0, isnan) # eliminate NaNs for calculations
     # calculate fluxes
     Fvi = vert_flux(t, :ice, vars.Tg, vars.T, f, st, par)
     Fvw = vert_flux(t, :water, vars.Tg, vars.T, f, st, par)
@@ -197,18 +192,21 @@ function Infrastructure.step!(
     ) # !
     vars.D = forward_euler(
         average(vars.D, par.Dmin, vars.phi, phip), # new pancakes
-        D_t(lasth, vars.D, vars.Ti, vars.Tw, vars.phi, Ql, par; breakup),
+        D_t(lasth, vars.D, Ti, vars.Tw, vars.phi, Ql, par; breakup),
         st.dt
     ) # !
     clamp!(vars.h, 0, Inf) # avoid overshooting to negative thickness
     zeroref!(vars.h, vars.Ei) # restrict non-existence
     clamp!(vars.D, 0, par.Dmax)
     zeroref!(vars.D, vars.Ei) # restrict non-existence
-    # update variables for Tg
-    vars.nextphi = concentration(vars.Ei, vars.h, par) # !
-    vars.nextTw = water_temp(vars.Ew, par) # !
-    vars.nextT0 = solveT0(st.x, t, vars.h, vars.Tg, vars.nextTw, vars.nextphi, f, par)
-    vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.nextT0, vars.nextTw, vars.nextphi, f, st, par) # !
+    # advance the diagnostic variables
+    vars.phi = concentration(vars.Ei, vars.h, par) # !
+    vars.n = num(vars.D, vars.phi, par) # !
+    vars.Tw = water_temp(vars.Ew, par) # !
+    vars.Tg = stepTg!(t+st.dt, vars.Tg, vars.h, vars.T0, vars.Tw, vars.phi, f, st, par) # !
+    vars.T0 = solveT0(st.x, t+st.dt, vars.h, vars.Tg, vars.Tw, vars.phi, f, par)
+    vars.Ti = condset(ice_temp(vars.T0, par), 0.0, isnan) # !
+    vars.T = weighted_avg(vars.Ti, vars.Tw, vars.phi) # !
     # set NaNs to no existence
     condset!(vars.Ti, NaN, iszero, vars.Ei)
     return vars

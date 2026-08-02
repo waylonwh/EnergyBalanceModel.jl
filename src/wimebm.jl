@@ -2,6 +2,7 @@ module WIMEBM # EnergyBalanceModel.
 
 using ..Infrastructure, ..Utilities
 
+import ..MIZEBM
 import InteractiveUtils as IU
 import Integrals as Intgr
 import NonlinearSolve as NlinSol
