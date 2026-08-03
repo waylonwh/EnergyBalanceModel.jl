@@ -4,7 +4,7 @@ import Statistics as Stats, StyledStrings as SS
 
 export Progress, update!
 export @isdebugging, @persistent, iobuffer
-export condset, condset!, crossmean, zeroref!
+export condset!, crossmean, zeroref!
 
 # add new function introduced in Julia 1.12
 @static if VERSION < v"1.12"
@@ -222,12 +222,10 @@ iobuffer(io::IO; sizemodifier::NTuple{2,Int}=(0, 0))::IOContext = IOContext(
 end # function crossmean
 
 # conditional copy in place
-@inline function condset!(to::Vector, from, cond::Function, ref::Vector=to) # -> Vector{T}
+@inline function condset!(to::Vector, from, cond::Function, ref::Vector) # -> Vector{T}
     @. to[cond(ref)] = from # !
     return to
 end # function condset!
-
-@inline condset(to::Vector, from, cond::Function, ref::Vector=to) = condset!(copy(to), from, cond, ref) # -> Vector{T}
 
 # replace entries with zeros in ref with zeros in place in v
 @inline (zeroref!(v::Vector{T}, ref::Vector{T})::Vector{T}) where T = condset!(v, zero(T), iszero, ref)

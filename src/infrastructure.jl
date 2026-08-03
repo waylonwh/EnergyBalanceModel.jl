@@ -4,20 +4,21 @@ using ..Utilities
 
 import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats, StyledStrings as SS
 
-export AbstractModel, ClassicModel, MIZModel, WIModel, ModelDiff
-export Collection, Forcing, Par, Solutions, SpaceTime, Vec, EBMProblem
+export AbstractModel, ClassicModel, MIZModel, ModelDiff, WIModel
+export AbstractSolver, ActiveSetSolver, GhostLayerSolver, NonlinearSolver
+export Collection, EBMProblem, Forcing, Solutions, SpaceTime, Vec
 export Spectrum, bretschneider, monochromatic
 export default_parameters, default_parval
 export get_diffop
 export hemispheric_mean, ice_area
-export create_storages, integrate, solve
+export create_storages, integrate, soldiff, solve
 
 """
     Vec
 
 Alias for `Vector{Float64}` to represent model variables.
 """
-const Vec = Vector{Float64} # TODO: to be removed
+const Vec = Vector{Float64} # TODO deprecated; to be removed
 
 """
     AbstractModel
@@ -52,9 +53,65 @@ struct ClassicModel <: AbstractModel end
 """
     ModelDiff{B<:AbstractModel, S<:AbstractModel} <: AbstractModel
 
-A type representing the difference (S-B) between two models `B` and `S`.
+A type representing the difference (A-B) between two models `A` and `B`.
 """
-struct ModelDiff{B<:AbstractModel, S<:AbstractModel} <: AbstractModel end
+struct ModelDiff{A<:AbstractModel, B<:AbstractModel} <: AbstractModel end
+
+"""
+    AbstractSolver
+
+Abstract type for the different solvers used to advance the surface temperature of a model
+by one timestep.
+"""
+abstract type AbstractSolver end
+
+"""
+    GhostLayerSolver <: AbstractSolver
+
+Singleton type selecting the ghost layer scheme of Wagner & Eisenman (2015), in which
+horizontal diffusion acts on a ghost layer of small heat capacity `cg` that is coupled to
+the surface over the short timescale `tau`. The ghost layer temperature is stepped with an
+implicit Euler step, and the surface temperature follows diagnostically.
+
+!!! note
+    This scheme gives a poor approximation for `MIZModel` and `WIModel`. It is recommended
+    to use the `ActiveSetSolver` instead.
+"""
+struct GhostLayerSolver <: AbstractSolver end
+
+"""
+    ActiveSetSolver <: AbstractSolver
+
+Singleton type selecting the active set scheme, which classifies the gridboxes as freezing
+or melting at each timestep and iteratively solves the linear system implied by that
+classification for the surface temperature.
+"""
+struct ActiveSetSolver <: AbstractSolver end
+
+"""
+    NonlinearSolver <: AbstractSolver
+
+Singleton type selecting the nonlinear scheme, in which the surface temperature is obtained
+by solving the full nonlinear system at each timestep with a Newton-type iteration.
+
+!!! note
+    This scheme is computationally expensive and it is recommended to use the
+    `ActiveSetSolver` instead.
+"""
+struct NonlinearSolver <: AbstractSolver end
+
+"""
+    DiffSolver{A<:AbstractSolver, B<:AbstractSolver} <: AbstractSolver
+
+Singleton type recording that a solution was obtained as the difference (A-B) between a
+solution advanced with solver `A` and one advanced with solver `B`.
+
+This is a bookkeeping type rather than a scheme. It carries the provenance of the two
+solvers in the `solver` field of the [`Solutions`](@ref), and is never used to advance a
+timestep. It is the solver-level counterpart of [`ModelDiff`](@ref), when two models are
+solved with different solvers.
+"""
+struct DiffSolver{A<:AbstractSolver, B<:AbstractSolver} <: AbstractSolver end
 
 """
     Collection{V}(args...)
@@ -98,6 +155,7 @@ Base.iterate(coll::Collection) = iterate(getfield(coll, :dict)) # -> Tuple{Pair{
 Base.iterate(coll::Collection, state::Int) = iterate(getfield(coll, :dict), state) # -> Tuple{Pair{Symbol,V},Int} or Nothing
 Base.length(coll::Collection)::Int = length(getfield(coll, :dict))
 Base.hash(coll::Collection, h::UInt)::UInt = hash(getfield(coll, :dict), h)
+Base.get(coll::Collection, key::Symbol, default) = get(getfield(coll, :dict), key, default)
 
 function uniqueunion(ca::Collection{A}, cb::Collection{B}) where {A, B}
     vtype = typejoin(A, B)
@@ -106,15 +164,6 @@ function uniqueunion(ca::Collection{A}, cb::Collection{B}) where {A, B}
     return all(key -> ca[key] === cb[key], overlap) ?
         Collection{vtype}() : Collection{vtype}(union(ca, cb))
 end # function uniqueunion
-
-"""
-    Par
-
-Alias for `Collection{Float64}` to represent model parameters.
-
-See also [`Collection`](@ref).
-"""
-const Par = Collection{Float64}
 
 """
     SpaceTime{F}(urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375)
@@ -460,7 +509,7 @@ An object to store model solutions. Type parameter `M` is the model type (`MIZMo
 - `spacetime::SpaceTime{F}`: space and time on which solutions are defined
 - `ts::Vec`: time vector for stored solutions
 - `forcing::Forcing{V}`: climate forcing
-- `parameters::Par`: model parameters
+- `parameters::Collection`: model parameters
 - `initconds::Collection{Vec}`: initial conditions
 - `lastonly::Bool`: whether to store solutions for each time step only for the last year
 - `raw::Collection{Vector{Vec}}`: solutions for each time step
@@ -476,8 +525,9 @@ struct Solutions{M<:AbstractModel,F,V}
     spacetime::SpaceTime{F} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing{V} # climate forcing
-    parameters::Par # model parameters
+    parameters::Collection # model parameters
     initconds::Collection{Vec} # initial conditions
+    solver::AbstractSolver # solver used to advance solution
     lastonly::Bool # store only last year of solution
     raw::Collection{Vector{Vec}} # solution storage
     annual::@NamedTuple{
@@ -486,8 +536,8 @@ struct Solutions{M<:AbstractModel,F,V}
     spectrum_ref::Ref{Spectrum} # spectrum used for WIModel, if applicable
 
     function Solutions{M}(
-        st::SpaceTime{F}, forcing::Forcing{V}, par::Par, init::Collection{Vec},
-        vars::Set{Symbol}, lastonly::Bool=true
+        st::SpaceTime{F}, forcing::Forcing{V}, par::Collection, init::Collection{Vec},
+        vars::Set{Symbol}, lastonly::Bool=true; solver::AbstractSolver
     ) where {M<:AbstractModel, F, V} # Solutions
         if lastonly
             dur_store = 1
@@ -508,6 +558,7 @@ struct Solutions{M<:AbstractModel,F,V}
             forcing,
             par, # parameters
             init, # initconds
+            solver,
             lastonly,
             solraw, # raw
             (
@@ -537,7 +588,8 @@ function Base.:-(
     init = uniqueunion(sx.initconds, sy.initconds)
     vars = intersect(propertynames(sx.raw), propertynames(sy.raw))
     lastonly = sx.lastonly || sy.lastonly
-    diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly)
+    solver = sx.solver === sy.solver ? sx.solver : DiffSolver{typeof(sx.solver), typeof(sy.solver)}()
+    diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly; solver)
     xinx = findall(in(diffsol.ts), sx.ts)
     yinx = findall(in(diffsol.ts), sy.ts)
     foreach(var -> (diffsol.raw[var] = sx.raw[var][xinx] .- sy.raw[var][yinx]), vars)
@@ -547,16 +599,18 @@ function Base.:-(
     return diffsol
 end # function Base.:-
 
+soldiff(sx::Solutions, sy::Solutions) = sx - sy # -> Solutions{ModelDiff,F,false}
+
 Base.show(io::IO, sols::Solutions)::Nothing = print(
     io,
     typeof(sols), '(',
-    sols.spacetime.nx, '×', length(sols.ts), "@(", first(sols.ts), ':', sols.spacetime.dt, ':', last(sols.ts), "), ",
-    propertynames(sols.raw),
+    sols.spacetime.nx, '×', length(sols.ts),
+    " for ", sols.spacetime.dur, " years: ", propertynames(sols.raw),
     ')'
 )
 
 function Base.show(io::IO, ::MIME"text/plain", sols::Solutions)::Nothing
-    println(io, typeof(sols), " with:")
+    println(io, typeof(sols), " solved by ", typeof(sols.solver), " with:")
     println(io, "  ", length(sols.raw), " solution variables: ", propertynames(sols.raw))
     xhead = "  on $(sols.spacetime.nx) latitudinal gridboxes: "
     buffer = iobuffer(io)
@@ -573,7 +627,7 @@ get_spectrum(sol::Solutions{WIModel})::Spectrum = sol.spectrum_ref[] # -> Spectr
 const _secyear = 31536000 # number of seconds in a year
 
 # default parameter values
-const default_parval = Par(
+const default_parval = Collection{Float64}(
     # classic
     :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
     :A => 193.0, # OLR when T = T_m (W m^-2)
@@ -588,8 +642,9 @@ const default_parval = Par(
     :Fb => 4.0, # heat flux from ocean below (W m^-2)
     :k => 2.0, # sea ice thermal conductivity (W m^-2 K^-1)
     :Lf => 9.5, # sea ice latent heat of fusion (W y m^-3)
-    :cg => 1e-3 * 9.8, # ghost layer heat capacity(W y m^-2 K^-1)
-    :tau => 1e-5 * 9.8, # ghost layer coupling timescale (y)
+    # for GhostLayerSolver only
+    :cg => 0.098, # ghost layer heat capacity(W y m^-2 K^-1)
+    :tau => 3e-5, # ghost layer coupling timescale (y)
     # MIZ
     :Tm => 0.0, # mean temperature (C)
     :m1 => 1.6e-6_secyear, # empirical constants of lateral melt (m y^-1 K^-1)
@@ -611,7 +666,7 @@ const default_parval = Par(
     :Ec => 7.05e-5, # Breaking significant strain
     :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
     :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
-) # Par
+) # Collection{Float64}
 
 # parameters used in each model
 const classicmodel_parvars = Set{Symbol}(
@@ -627,13 +682,13 @@ const wimodel_parvars = push!(
 )
 
 # Create a parameter dictionary from default values for a given Set
-function default_parameters(paramset::Set{Symbol})::Par
+function default_parameters(paramset::Set{Symbol})::Collection{Float64}
     setvec = collect(paramset)
-    return Par(setvec .=> getproperty.(Ref(default_parval), setvec))
+    return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultparameters
 
 """
-    default_parameters(<:AbstractModel) -> Par
+    default_parameters(<:AbstractModel) -> Collection{Float64}
 
 Get default parameters for a given model.
 
@@ -657,7 +712,7 @@ Collection{Float64} with 16 entries:
 function default_parameters end # stub
 for model in IU.subtypes(AbstractModel)
     namelower = lowercase(split(string(model), '.')[end])
-    @eval default_parameters(::$model)::Par = default_parameters($(Symbol(namelower, "_parvars")))
+    @eval default_parameters(::$model)::Collection{Float64} = default_parameters($(Symbol(namelower, "_parvars")))
 end # for model
 
 (
@@ -1007,18 +1062,18 @@ function step! end
 function initialise end
 
 function create_storages(
-    ::M, solvars::Set{Symbol}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool
+    ::M, solvars::Set{Symbol}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
+    solver::AbstractSolver, lastonly::Bool
 ) where M<:AbstractModel # -> Tuple{Collection{Vec},Solutions{M,F,C},Solutions{M,F,C}}
     vars = deepcopy(init)
-    sols = Solutions{M}(st, forcing, par, init, solvars, lastonly)
-    annusol = Solutions{M}(st, forcing, par, init, solvars, true) # for calculating annual means
+    sols = Solutions{M}(st, forcing, par, init, solvars, lastonly; solver)
+    annusol = Solutions{M}(st, forcing, par, init, solvars, true; solver) # for calculating annual means
     return (vars, sols, annusol)
 end # function create_storages
 
 """
-    integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{ClassicModel,F,C}
-    integrate(model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum) -> Solutions{M,F,C}
+    integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; solver::AbstractSolver, lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{ClassicModel,F,C}
+    integrate(model::WIModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; solver::AbstractSolver, lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
@@ -1034,60 +1089,44 @@ frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
-    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0
-) where M<:Union{MIZModel,ClassicModel} # -> Solutions{M,F,C}
-    # initialise
-    vars, sols, annusol = initialise(model, st, forcing, par, init; lastonly)
-    if isfinite(updatefreq)
-        progress::Progress = Progress(
-            length(st.T), string("Integrating ", M.name.name), updatefreq;
-            infofeed=(t -> string("t = ", round(t; digits=2)))
-        )
-        update!(progress; feedargs=(0,))
-    end # if isfinite
-    # loop over time
-    for ti in eachindex(st.T)
-        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par)
-        savesol!(sols, annusol, vars, ti)
-        isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
-    end # for ti
-    return sols
-end # function integrate
-
-function integrate(
-    model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum
-) # -> Solutions{WIModel,F,C}
-    # initialise
-    if isfinite(updatefreq)
+    model::M, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
+    lastonly::Bool=true, updatefreq::Float64=1.0, solver::AbstractSolver=ActiveSetSolver(), kwargs...
+) where M<:Union{ClassicModel,MIZModel,WIModel} # -> Solutions{M,F,C}
+    # initialise for WIModel
+    spectrum = get(kwargs, :spectrum, nothing)
+    if M === WIModel
+        isnothing(spectrum) &&
+            throw(ArgumentError("spectrum must be specified for WIModel as a keyword argument."))
         print(SS.styled"{bold,warning:Caching wavenumber...}", lpad("", 10))
         start = time()
     end # if isfinite
-    task = Threads.@spawn initialise(model, st, forcing, par, init; lastonly, spectrum)
-    isfinite(updatefreq) && (
+    task = Threads.@spawn initialise(model, st, forcing, par, init; solver, lastonly, spectrum)
+    if M === WIModel && isfinite(updatefreq)
         timer = Timer(
             _ -> print("\e[10D", lpad(string(round(time()-start; digits=1)), 8), " s"),
             0.1; interval=0.1
         )
-    )
+        finalizer(close, timer)
+    end # if &&
     vars, sols, annusol = fetch(task)
     if isfinite(updatefreq)
-        close(timer)
-        println(
-            "\r\e[2K",
-            SS.styled"{bold,success:Wavenumber cached}",
-            " in ", round(time()-start; digits=2), " s\n"
-        )
+        if M === WIModel
+            close(timer)
+            println(
+                "\r\e[2K",
+                SS.styled"{bold,success:Wavenumber cached}",
+                " in ", round(time()-start; digits=2), " s\n"
+            ) # println
+        end # if ===
         progress::Progress = Progress(
-            length(st.T), "Integrating WIModel", updatefreq;
+            length(st.T), "Integrating $M", updatefreq;
             infofeed=(t -> string("t = ", round(t; digits=2)))
         )
         update!(progress; feedargs=(0,))
     end # if isfinite
     # loop over time
     for ti in eachindex(st.T)
-        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; spectrum)
+        step!(model, st.t[mod1(ti, st.nt)], forcing(st.T[ti]), vars, st, par; solver, spectrum)
         savesol!(sols, annusol, vars, ti)
         isfinite(updatefreq) && update!(progress; feedargs=(st.T[ti],))
     end # for ti
@@ -1095,11 +1134,13 @@ function integrate(
 end # function integrate
 
 """
-    solve(prob::EBMProblem; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+    solve(prob::EBMProblem, solver::AbstractSolver=ActiveSetSolver(); lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
 
 Integrate the `EBMProblem` `prob` and return the results in a `Solutions` object. This is
-the high-level entry point that dispatches to the appropriate `integrate` method for the
-problem's model, forwarding the spectrum automatically when the model is a `WIModel`.
+the high-level entry point to `integrate` from `EBMProblem`. The `solver` selects the scheme
+used to advance the surface temperature at each timestep, defaulting to
+[`ActiveSetSolver`](@ref); see [`GhostLayerSolver`](@ref) and [`NonlinearSolver`](@ref) for
+the alternatives.
 
 When `lastonly=true`, only the last year of the solution is stored for each timestep,
 otherwise the full solution is stored. A progress bar is displayed and updated with
@@ -1123,15 +1164,12 @@ Solutions{WIModel, sin, false} with:
   with forcing Forcing(0.0) (constant forcing)
 ```
 """
-solve(prob::EBMProblem; lastonly::Bool=true, updatefreq::Float64=1.0) =
-    prob.model isa WIModel ?
-        integrate(
-            prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
-            lastonly, updatefreq, spectrum=prob.spectrum
-        ) :
-        integrate(
-            prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
-            lastonly, updatefreq
-        )
+solve(
+    prob::EBMProblem, solver::AbstractSolver=ActiveSetSolver();
+    lastonly::Bool=true, updatefreq::Float64=1.0
+) = integrate( # -> Solutions
+    prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
+    lastonly, updatefreq, solver, prob.spectrum
+)
 
 end # module Infrastructure

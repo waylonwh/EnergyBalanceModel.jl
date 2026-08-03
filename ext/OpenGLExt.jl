@@ -11,6 +11,4 @@ function EBM.Plot.init_backend(::Val{:GLMakie})::Module
     return GLMakie
 end # function EBM.Plot.init_backend
 
-EBM.Plot.precompile(GLMakie)
-
 end # module OpenGLExt
