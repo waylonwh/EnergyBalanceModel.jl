@@ -58,9 +58,10 @@ details on data handling and visualisation.
 module EnergyBalanceModel
 
 export ClassicModel, MIZModel, WIModel
+export ActiveSetSolver, GhostLayerSolver, NonlinearSolver
 export Collection, EBMProblem, Forcing, Solutions, SpaceTime
 export Spectrum, bretschneider, monochromatic
-export default_parameters, integrate, solve
+export default_parameters, integrate, soldiff, solve
 export hemispheric_mean, ice_area
 export Layout, backend, default_layout, plot_avg, plot_raw, plot_seasonal
 export run_example
