@@ -6,7 +6,7 @@ import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistic
 
 export AbstractModel, ClassicModel, MIZModel, ModelDiff, WIModel
 export AbstractSolver, ActiveSetSolver, GhostLayerSolver, NonlinearSolver
-export Collection, EBMProblem, Forcing, Par, Solutions, SpaceTime, Spectrum, Vec
+export Collection, EBMProblem, Forcing, Solutions, SpaceTime, Spectrum, Vec
 export default_parameters, default_parval
 export get_diffop
 export hemispheric_mean, ice_area
@@ -150,15 +150,6 @@ function uniqueunion(ca::Collection{A}, cb::Collection{B}) where {A, B}
     return all(key -> ca[key] === cb[key], overlap) ?
         Collection{vtype}() : Collection{vtype}(union(ca, cb))
 end # function uniqueunion
-
-"""
-    Par
-
-Alias for `Collection{Float64}` to represent model parameters.
-
-See also [`Collection`](@ref).
-"""
-const Par = Collection{Float64}
 
 """
     SpaceTime{F}(urange::NTuple{2,Float64}, nx::Int, nt::Int, dur::Int; winter::Float64=0.26125, summer::Float64=0.77375)
@@ -456,7 +447,7 @@ An object to store model solutions. Type parameter `M` is the model type (`MIZMo
 - `spacetime::SpaceTime{F}`: space and time on which solutions are defined
 - `ts::Vec`: time vector for stored solutions
 - `forcing::Forcing{V}`: climate forcing
-- `parameters::Par`: model parameters
+- `parameters::Collection`: model parameters
 - `initconds::Collection{Vec}`: initial conditions
 - `lastonly::Bool`: whether to store solutions for each time step only for the last year
 - `raw::Collection{Vector{Vec}}`: solutions for each time step
@@ -472,7 +463,7 @@ struct Solutions{M<:AbstractModel,F,V}
     spacetime::SpaceTime{F} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing{V} # climate forcing
-    parameters::Par # model parameters
+    parameters::Collection # model parameters
     initconds::Collection{Vec} # initial conditions
     lastonly::Bool # store only last year of solution
     raw::Collection{Vector{Vec}} # solution storage
@@ -482,7 +473,7 @@ struct Solutions{M<:AbstractModel,F,V}
     spectrum_ref::Ref{Spectrum} # spectrum used for WIModel, if applicable
 
     function Solutions{M}(
-        st::SpaceTime{F}, forcing::Forcing{V}, par::Par, init::Collection{Vec},
+        st::SpaceTime{F}, forcing::Forcing{V}, par::Collection, init::Collection{Vec},
         vars::Set{Symbol}, lastonly::Bool=true
     ) where {M<:AbstractModel, F, V} # Solutions
         if lastonly
@@ -569,7 +560,7 @@ get_spectrum(sol::Solutions{WIModel})::Spectrum = sol.spectrum_ref[] # -> Spectr
 const _secyear = 31536000 # number of seconds in a year
 
 # default parameter values
-const default_parval = Par(
+const default_parval = Collection{Float64}(
     # classic
     :D => 0.6, # diffusivity for heat transport (W m^-2 K^-1)
     :A => 193.0, # OLR when T = T_m (W m^-2)
@@ -607,7 +598,7 @@ const default_parval = Par(
     :Ec => 7.05e-5, # Breaking significant strain
     :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
     :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
-) # Par
+) # Collection{Float64}
 
 # parameters used in each model
 const classicmodel_parvars = Set{Symbol}(
@@ -623,13 +614,13 @@ const wimodel_parvars = push!(
 )
 
 # Create a parameter dictionary from default values for a given Set
-function default_parameters(paramset::Set{Symbol})::Par
+function default_parameters(paramset::Set{Symbol})::Collection{Float64}
     setvec = collect(paramset)
-    return Par(setvec .=> getproperty.(Ref(default_parval), setvec))
+    return Collection{Float64}(setvec .=> getproperty.(Ref(default_parval), setvec))
 end # function get_defaultparameters
 
 """
-    default_parameters(<:AbstractModel) -> Par
+    default_parameters(<:AbstractModel) -> Collection{Float64}
 
 Get default parameters for a given model.
 
@@ -653,7 +644,7 @@ Collection{Float64} with 16 entries:
 function default_parameters end # stub
 for model in IU.subtypes(AbstractModel)
     namelower = lowercase(split(string(model), '.')[end])
-    @eval default_parameters(::$model)::Par = default_parameters($(Symbol(namelower, "_parvars")))
+    @eval default_parameters(::$model)::Collection{Float64} = default_parameters($(Symbol(namelower, "_parvars")))
 end # for model
 
 (
@@ -1004,7 +995,7 @@ function step! end
 function initialise end
 
 function create_storages(
-    ::M, solvars::Set{Symbol}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    ::M, solvars::Set{Symbol}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     lastonly::Bool
 ) where M<:AbstractModel # -> Tuple{Collection{Vec},Solutions{M,F,C},Solutions{M,F,C}}
     vars = deepcopy(init)
@@ -1014,8 +1005,8 @@ function create_storages(
 end # function create_storages
 
 """
-    integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{ClassicModel,F,C}
-    integrate(model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum) -> Solutions{M,F,C}
+    integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{ClassicModel,F,C}
+    integrate(model::WIModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
@@ -1031,7 +1022,7 @@ frequency `updatefreq`. If `updatefreq` is `Inf`, no progress bar is shown.
 Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
-    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    model::M, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     lastonly::Bool=true, updatefreq::Float64=1.0
 ) where M<:Union{MIZModel,ClassicModel} # -> Solutions{M,F,C}
     # initialise
@@ -1053,7 +1044,7 @@ function integrate(
 end # function integrate
 
 function integrate(
-    model::M, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    model::M, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     lastonly::Bool=true, updatefreq::Float64=1.0, solver::AbstractSolver=ActiveSetSolver(), kwargs...
 ) where M<:Union{ClassicModel,MIZModel,WIModel} # -> Solutions{M,F,C}
     # initialise for WIModel

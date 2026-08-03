@@ -9,7 +9,7 @@ import NonlinearSolve as NlinSol
     cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
     S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64,
     id::UInt = UInt(0),
-    @inline function get_statics(st::SpaceTime, par::Par)::@NamedTuple{
+    @inline function get_statics(st::SpaceTime, par::Collection)::@NamedTuple{
         cg_tau::Float64, dt_tau::Float64, dc::Float64, kappa::Matrix{Float64},
         S::Matrix{Float64}, M::Float64, aw::Vec, kLf::Float64
     }
@@ -58,7 +58,7 @@ function solveT0(
 end # function solveT0
 
 Infrastructure.initialise(
-    model::ClassicModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
+    model::ClassicModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     lastonly::Bool=true
 ) = create_storages(model, Set{Symbol}((:E, :T, :h)), st, forcing, par, init; lastonly)
     # -> Tuple{Collection{Vec},Solutions{ClassicModel,F,V},Solutions{ClassicModel,F,V}}
@@ -102,7 +102,7 @@ function specialised_step!(::ActiveSetSolver, vars::Collection)::Nothing
 end # function specialised_step!
 
 function Infrastructure.step!(
-    ::ClassicModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par;
+    ::ClassicModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Collection;
     solver::AbstractSolver=GhostLayerSolver()
 )::Collection{Vec}
     # get static variables

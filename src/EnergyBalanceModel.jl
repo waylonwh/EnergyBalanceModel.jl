@@ -58,7 +58,7 @@ details on data handling and visualisation.
 module EnergyBalanceModel
 
 export ClassicModel, MIZModel, WIModel
-export Collection, EBMProblem, Forcing, Par, Solutions, SpaceTime
+export Collection, EBMProblem, Forcing, Solutions, SpaceTime
 export Spectrum, bretschneider, monochromatic
 export default_parameters, integrate, solve
 export hemispheric_mean, ice_area
