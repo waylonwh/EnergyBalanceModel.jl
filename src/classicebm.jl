@@ -61,6 +61,54 @@ function solveT0(
     return sol.u
 end # function solveT0
 
+function solveT(
+    vars::Collection{<:Vector}, aS::Vector, st::SpaceTime, par::Collection, f::Real,
+    diffop::AbstractMatrix; max_iter::Integer
+) # -> Vector
+    # constants
+    q = @. aS - par.A + f # surface invariant flux
+    diffop = get_diffop(st) # diffusion operator
+    # open water
+    water = vars.E .>= 0 # water set
+    dw = par.cw + st.dt * par.B
+    s = fill(st.dt / dw, st.nx) # diffusion coefficient
+    r = (@. (vars.E + st.dt * (q + par.Fb)) / dw) # right-hand side
+    # freezing ice
+    h = get(vars, :h, @. -vars.E / par.Lf * (vars.E<0))
+    df = @. par.k / h + par.B
+    sf = @. 1 / df
+    rf = @. q / df
+    # interate to steady melting set
+    T = get(vars, :T, @. vars.E / par.cw) # for initial guess of the melting set
+    newmelt = @. T>=0 && !water # initial guess
+    iter = 0 # number of iterations
+    while true
+        melting = copy(newmelt)
+        # construct sets
+        sit = copy(s)
+        rit = copy(r)
+        sit[melting] .= 0
+        rit[melting] .= 0
+        freezing = @. !(water || melting)
+        sit[freezing] .= sf[freezing]
+        rit[freezing] .= rf[freezing]
+        # solve for T
+        T .= (LA.I - par.D * SA.spdiagm(sit) * diffop) \ (0 .+ rit)
+        # update melting set
+        @. newmelt =  !water && q - par.B*T + par.D * $(diffop*T) >= 0
+        iter += 1
+        newmelt == melting && break # break if melting set is steady
+        if iter > max_iter
+            @warn(
+                "Maximum number of iterations reached when solving for melting set. Result may be inaccurate.",
+                iter, max_iter, (1:st.nx)[newmelt .!== melting]
+            )
+            break
+        end # if >
+    end # while true
+    return T
+end # function solveT
+
 Infrastructure.initialise(
     model::ClassicModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     solver::AbstractSolver, lastonly::Bool, _...
@@ -68,8 +116,8 @@ Infrastructure.initialise(
     # -> Tuple{Collection{Vec},Solutions{ClassicModel,F,V},Solutions{ClassicModel,F,V}}
 
 function step_temperature!(
-    ::GhostLayerSolver, vars::Collection{<:Vector}, stat::NamedTuple, aS::Vector,
-    st::SpaceTime, par::Collection, f::Real, i::Integer
+    ::GhostLayerSolver, vars::Collection{<:Vector}, aS::Vector, st::SpaceTime,
+    par::Collection, f::Real, ::Integer, stat::NamedTuple, i::Integer
 ) # -> Tuple{Vector,Vector}
     C = @. aS + stat.cg_tau*vars.Tg - par.A + f
     # surface temperature
@@ -91,7 +139,7 @@ function step_temperature!(
 end # function specialised_step!
 
 function step_temperature!(
-    ::NonlinearSolver, vars::Collection{Vector{FT}}, stat::NamedTuple, aS::Vector{FT},
+    ::NonlinearSolver, vars::Collection{Vector{FT}}, aS::Vector{FT},
     st::SpaceTime, par::Collection{FT}, f::FT, _...
 )::NTuple{2,Vector{FT}} where FT <: AbstractFloat
     vars.T0 = solveT0(
@@ -105,8 +153,15 @@ function step_temperature!(
     return (vars.T, vars.E)
 end # function specialised_step!
 
-function step_temperature!(::ActiveSetSolver, vars::Collection)
-    throw(ErrorException("ActiveSetSolver is not implemented for ClassicModel."))
+function step_temperature!(
+    ::ActiveSetSolver, vars::Collection{<:Vector}, aS::Vector, st::SpaceTime,
+    par::Collection, f::Real, max_iter::Integer=1000, _...
+)
+    diffop = get_diffop(st)
+    vars.T = solveT(vars, aS, st, par, f, diffop; max_iter)
+    C = @. aS + par.D * $(diffop*vars.T) - par.A + f
+    @. vars.E += st.dt * (C - par.B*vars.T + par.Fb)
+    return (vars.T, vars.E)
 end # function specialised_step!
 
 function Infrastructure.step!(
@@ -120,7 +175,7 @@ function Infrastructure.step!(
     # forcing
     alpha = @. stat.aw * (vars.E>=0) + par.ai * (vars.E<0) # WE15 Eq. (4)
     # step T and E
-    step_temperature!(solver, vars, stat, alpha.*stat.S[:,i], st, par, f, i)
+    step_temperature!(solver, vars, alpha.*stat.S[:,i], st, par, f, 1000, stat, i)
     # Infer ice thickness
     vars.h = @. -vars.E / par.Lf * (vars.E<0)
     return vars
