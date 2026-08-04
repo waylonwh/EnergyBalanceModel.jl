@@ -61,6 +61,54 @@ function solveT0(
     return sol.u
 end # function solveT0
 
+function solveT(
+    vars::Collection{<:Vector}, aS::Vector, st::SpaceTime, par::Collection, f::Real;
+    max_iter::Integer=10st.nx
+) # -> Vector
+    # constants
+    q = @. aS - par.A + f # surface invariant flux
+    diffop = get_diffop(st) # diffusion operator
+    # open water
+    water = vars.E .>= 0 # water set
+    dw = par.cw + st.dt * par.B
+    s = fill(st.dt / dw, st.nx) # diffusion coefficient
+    r = (@. (vars.E + st.dt * (q + par.Fb)) / dw) # right-hand side
+    # freezing ice
+    h = get(vars, :h, @. -vars.E / par.Lf * (vars.E<0))
+    df = @. par.k / h + par.B
+    sf = @. 1 / df
+    rf = @. q / df
+    # interate to steady melting set
+    T = copy(get(vars, :T, @. vars.E / par.cw)) # for initial guess of the melting set
+    nextmelt = @. T>=0 && !water # initial guess
+    iter = 0 # number of iterations
+    while true
+        melting = copy(nextmelt)
+        # construct sets
+        sit = copy(s)
+        rit = copy(r)
+        sit[melting] .= 0
+        rit[melting] .= 0
+        freezing = @. !(water || melting)
+        sit[freezing] .= sf[freezing]
+        rit[freezing] .= rf[freezing]
+        # solve for T
+        T .= (LA.I - par.D * SA.spdiagm(sit) * diffop) \ (0 .+ rit)
+        # check
+        @. nextmelt =  !water && q - par.B*T + par.D * $(diffop*T) >= 0
+        iter += 1
+        nextmelt == melting && break # while true; break if melting set is steady
+        if iter >= max_iter
+            @warn(
+                "Maximum number of iterations reached when solving for melting set. Result may be inaccurate.",
+                iter, (1:st.nx)[nextmelt .!== melting]
+            )
+            break # while true
+        end # if >
+    end # while true
+    return T
+end # function solveT
+
 Infrastructure.initialise(
     model::ClassicModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     solver::AbstractSolver, lastonly::Bool, _...
@@ -68,15 +116,15 @@ Infrastructure.initialise(
     # -> Tuple{Collection{Vec},Solutions{ClassicModel,F,V},Solutions{ClassicModel,F,V}}
 
 function step_temperature!(
-    ::GhostLayerSolver, vars::Collection{<:Vector}, stat::NamedTuple, aS::Vector,
-    st::SpaceTime, par::Collection, f::Real, i::Integer
+    ::GhostLayerSolver, vars::Collection{<:Vector}, aS::Vector, st::SpaceTime, f::Real,
+    par::Collection, stat::NamedTuple, i::Integer; _...
 ) # -> Tuple{Vector,Vector}
     C = @. aS + stat.cg_tau*vars.Tg - par.A + f
     # surface temperature
     T0 = @. C / (stat.M - stat.kLf/vars.E) # WE15 Eq. (A3)
-    vars.T = surface_temperature(vars.E, T0, par)
+    vars.T = surface_temperature(vars.E, T0, par) # !
     # Forward Euler for E
-    @. vars.E += st.dt * (C - stat.M*vars.T + par.Fb) # WE15 Eq. (A2)
+    @. vars.E += st.dt * (C - stat.M*vars.T + par.Fb) # WE15 Eq. (A2) # !
     # Implicit Euler for Tg
     vars.Tg =
         (stat.kappa - SA.spdiagm(stat.dc ./ (stat.M .- stat.kLf./vars.E) .* (T0.<0).*(vars.E.<0))) \
@@ -86,27 +134,33 @@ function step_temperature!(
                 stat.dt_tau * (vars.E/par.cw.*(vars.E.>=0) +
                 (par.ai*view(stat.S, :, i+1) .- par.A .+ f) ./ (stat.M .- stat.kLf./vars.E) .* (T0.<0).*(vars.E.<0))
             )
-        ) # \ # WE15 Eq. (A1)
+        ) # \ # WE15 Eq. (A1) # !
     return (vars.T, vars.E)
 end # function specialised_step!
 
 function step_temperature!(
-    ::NonlinearSolver, vars::Collection{Vector{FT}}, stat::NamedTuple, aS::Vector{FT},
-    st::SpaceTime, par::Collection{FT}, f::FT, _...
+    ::NonlinearSolver, vars::Collection{Vector{FT}}, aS::Vector{FT}, st::SpaceTime, f::FT,
+    par::Collection{FT}, _args...; _...
 )::NTuple{2,Vector{FT}} where FT <: AbstractFloat
     vars.T0 = solveT0(
         get(vars, :T0, zeros(FT, st.nx)),
         vars.E, get(vars, :h, @. -vars.E / par.Lf * (vars.E<0)),
         aS, get_diffop(st), f, par
-    )
-    vars.T = surface_temperature(vars.E, vars.T0, par)
+    ) # solveT0 # !
+    vars.T = surface_temperature(vars.E, vars.T0, par) # !
     C = @. aS + par.D * $(get_diffop(st)vars.T) - par.A + f
-    @. vars.E += st.dt * (C - par.B*vars.T + par.Fb)
+    @. vars.E += st.dt * (C - par.B*vars.T + par.Fb) # !
     return (vars.T, vars.E)
 end # function specialised_step!
 
-function step_temperature!(::ActiveSetSolver, vars::Collection)
-    throw(ErrorException("ActiveSetSolver is not implemented for ClassicModel."))
+function step_temperature!(
+    ::ActiveSetSolver, vars::Collection{<:Vector}, aS::Vector, st::SpaceTime, f::Real,
+    par::Collection, _args...; max_iter::Integer=10st.nx
+) # -> Tuple{Vector,Vector}
+    vars.T = solveT(vars, aS, st, par, f; max_iter) # !
+    C = @. aS + par.D * $(get_diffop(st)*vars.T) - par.A + f
+    @. vars.E += st.dt * (C - par.B*vars.T + par.Fb) # !
+    return (vars.T, vars.E)
 end # function specialised_step!
 
 function Infrastructure.step!(
@@ -120,7 +174,7 @@ function Infrastructure.step!(
     # forcing
     alpha = @. stat.aw * (vars.E>=0) + par.ai * (vars.E<0) # WE15 Eq. (4)
     # step T and E
-    step_temperature!(solver, vars, stat, alpha.*stat.S[:,i], st, par, f, i)
+    step_temperature!(solver, vars, alpha.*stat.S[:,i], st, f, par, stat, i)
     # Infer ice thickness
     vars.h = @. -vars.E / par.Lf * (vars.E<0)
     return vars
