@@ -208,10 +208,10 @@ function Infrastructure.step!(
 )::Collection{Vec}
     vars.Ewave = zeros(st.nx) # !
     vars.lambda = fill(wave_length(spectrum, 0.0, par), st.nx) # !
-    vars.Hs = fill(wave_height(spectrum), st.nx) # !
     vars.dDwave = zeros(st.nx) # !
     vars.dup = fill(NaN, st.nx)
     breakup = falses(st.nx) # track which cells are breaking
+    vars.Hs = fill(wave_height(spectrum), st.nx) # !
     edgeinx = findfirst(>(0), vars.h)
     if !isnothing(edgeinx) # if there is any ice
         # attenuate spectrum
@@ -219,6 +219,7 @@ function Infrastructure.step!(
         for xi in edgeinx:st.nx
             L = grid_length(st, xi)
             alpha1 = ice_attenuation(spect, vars.h[xi], par)
+            vars.Hs[xi] = wave_height(attenuate(spect, L/2, vars.phi[xi], alpha1))
             atted_spect = attenuate(spect, L, vars.phi[xi], alpha1)
             atted_strain = wave_strain(atted_spect, vars.h[xi], par)
             oldD = vars.D[xi]
@@ -244,7 +245,6 @@ function Infrastructure.step!(
             #     sl -> wave_length(sl, vars.h[xi], par),
             #     spect, vars.phi[xi], alpha1, L
             # ) # very slow
-            vars.Hs[xi] = cell_mean(wave_height, spect, vars.phi[xi], alpha1, L)
             spect = atted_spect # update spectrum
         end # for xi
     end # if !
