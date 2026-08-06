@@ -58,11 +58,12 @@ details on data handling and visualisation.
 module EnergyBalanceModel
 
 export ClassicModel, MIZModel, WIModel
-export Collection, Forcing, Par, Solutions, SpaceTime, EBMProblem
+export ActiveSetSolver, GhostLayerSolver, NonlinearSolver
+export Collection, EBMProblem, Forcing, Solutions, SpaceTime
 export Spectrum, bretschneider, monochromatic
-export default_parameters, integrate, solve
+export default_parameters, integrate, soldiff, solve
 export hemispheric_mean, ice_area
-export Layout, default_layout, backend, plot_avg, plot_raw, plot_seasonal
+export Layout, backend, default_layout, plot_avg, plot_raw, plot_seasonal
 export run_example
 
 include("utilities.jl")
@@ -131,29 +132,5 @@ function run_example(model::M=MIZModel())::Solutions{M,sin,false} where M<:Abstr
     end # try; catch
     return sols
 end # function run_example
-
-import PrecompileTools as PT
-
-PT.@setup_workload begin
-    import InteractiveUtils as IU
-    Fs = (identity, sin)
-    fs_args = ((0.0,), (0.0, 1.0, 0.0, (1, 1), (1.0, -1.0)))
-    m2s = Dict{Type{<:AbstractModel},Solutions}()
-    redirect_stdout(devnull)
-    redirect_stderr(devnull)
-    PT.@compile_workload begin
-        spectrum = bretschneider(3.0, 9.5)
-        spect = Spectrum(spectrum.freq[1:3], spectrum.density[1:3])
-        for M in (ClassicModel, MIZModel, WIModel), F in Fs, farg in fs_args
-            st = SpaceTime{F}(5, 3, 1)
-            forcing = Forcing(farg...)
-            T = fill(2.0, st.nx)
-            prob = EBMProblem(M(); st, forcing, initconds=T, spectrum=spect)
-            sol = solve(prob)
-            F === sin && length(farg) == 1 && (m2s[M] = sol)
-        end # for m, F, farg
-        m2s[MIZModel] - m2s[ClassicModel]
-    end # PT.@compile_workload begin
-end # PT.@setup_workload begin
 
 end # module EnergyBalanceModel
