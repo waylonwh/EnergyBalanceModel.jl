@@ -362,24 +362,4 @@ function plot_seasonal(
     return fig
 end # function plot_seasonal
 
-import PrecompileTools as PT
-
-function precompile(bcknd::Module)::Nothing
-    PT.@setup_workload begin
-        ints = collect(1:10)
-        floats = collect(0.1:0.1:1.0)
-        x = collect(0.1:0.1:1.0)
-        layout = Layout(
-            reshape([rand(10, 10)], 1, 1), reshape(AbstractString[Mk.L"title"], 1, 1)
-        )
-        bcknd.activate!()
-        PT.@compile_workload begin
-            for t in (ints, floats)
-                contourf_tiles(t, x, layout, Mk.Figure(); inspect=true)
-            end # for t
-        end # PT.@compile_workload begin
-    end # PT.@setup_workload begin
-    return nothing
-end # function precompile
-
 end # module Plot

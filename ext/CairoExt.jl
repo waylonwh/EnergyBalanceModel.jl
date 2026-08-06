@@ -11,6 +11,4 @@ function EBM.Plot.init_backend(::Val{:CairoMakie})::Module
     return CairoMakie
 end # function EBM.Plot.init_backend
 
-EBM.Plot.precompile(CairoMakie)
-
 end # module CairoExt

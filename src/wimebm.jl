@@ -2,8 +2,7 @@ module WIMEBM # EnergyBalanceModel.
 
 using ..Infrastructure, ..Utilities
 
-import EnergyBalanceModel.MIZEBM
-
+import ..MIZEBM
 import InteractiveUtils as IU
 import Integrals as Intgr
 import NonlinearSolve as NlinSol
@@ -18,7 +17,7 @@ end
 const _wavenumber_ice_cache_ref = Ref{NTuple{2,WavenumberCache}}()
 
 function dispersion_relation(
-    k::ComplexF64, omega::Float64, gamma::Float64, h::Float64, par::Par
+    k::ComplexF64, omega::Float64, gamma::Float64, h::Float64, par::Collection
 )::ComplexF64
     F = par.Y * h^3 / 12(1 - par.nu^2)
     lhs = (F*k^4 + par.rhow * (par.g - 0.9h*omega^2) - im*omega*gamma) * k
@@ -48,11 +47,12 @@ function interpolate_wavenumber(h::AbstractFloat, cache::WavenumberCache) # -> U
 end # function interpolate_wavenumber
 
 function wavenumber_ice(
-    omega::Float64, h::Float64, par::Par, gamma::Float64=0.0;
+    omega::Float64, h::Float64, par::Collection, gamma::Float64=0.0;
     abstol::Float64=1e-10, # init::ComplexF64=omega^2/par.g + 0im
 )::ComplexF64
     prob = NlinSol.NonlinearProblem{false}(
-        (k, _) -> dispersion_relation(k, omega, gamma, h, par), omega^2/par.g + 0im
+        (k, p) -> dispersion_relation(k, p.omega, p.gamma, p.h, p.par),
+        omega^2/par.g + 0im, (; omega, gamma, h, par)
     )
     sol = NlinSol.solve(
         prob, NlinSol.NewtonRaphson(; autodiff=NlinSol.AutoFiniteDiff()); abstol
@@ -92,7 +92,8 @@ function cache_wavenumber!(
         ),
         WavenumberCache(
             hash((T, freqs, par.Gamma, abstol, par)), T(dh), T(hmax),
-            wavenumber_ice.(freqs, hvec', Ref(par), par.Gamma; abstol))
+            wavenumber_ice.(freqs, hvec', Ref(par), par.Gamma; abstol)
+        )
     )
     _wavenumber_ice_cache_ref[] = tup
     return tup
@@ -110,40 +111,34 @@ end # function moment
 
 moment_elevation(S::Spectrum, n::Int)::Float64 = moment(S, n)
 
-moment_strain(S::Spectrum, n::Int, h::Float64, par::Par)::Float64 = moment(
+moment_strain(S::Spectrum, n::Int, h::Float64, par::Collection)::Float64 = moment(
     S, n; coeff=real.(wavenumber_ice(S.freq, h, par, 0.0)).^4 * h^2/4
 )
 
 ice_attenuation(S::Spectrum, h::Real, par::Collection) = imag.(wavenumber_ice(S.freq, h, par, par.Gamma)) # -> Vector{Real}
-
-# function attenuate(S::Spectrum, L::Float64, h::Float64, phi::Float64, par::Par)::Spectrum
-#     alpha1 = ice_attenuation(S, h, par)
-#     return Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * L))
-# end # function attenuate
 
 attenuate(S::Spectrum, l::Real, phi::Real, alpha1::Vector)::Spectrum =
     Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * l))
 
 wave_period(S::Spectrum)::Float64 = 2pi * sqrt(moment_elevation(S, 0) / moment_elevation(S, 2))
 
-function wave_length(S::Spectrum, h::Float64, par::Par)::Float64
+function wave_length(S::Spectrum, h::Float64, par::Collection)::Float64
     Tw = wave_period(S)
     kw = wavenumber_ice(2pi/Tw, h, par, 0.0)
     return 2pi / kw
 end # function wave_length
 
-wave_strain(S::Spectrum, h::Float64, par::Par)::Float64 = 2sqrt(moment_strain(S, 0, h, par))
+wave_strain(S::Spectrum, h::Float64, par::Collection)::Float64 = 2sqrt(moment_strain(S, 0, h, par))
 
 wave_height(S::Spectrum) = 4sqrt(moment_elevation(S, 0)) # -> Real
 
-function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, par::Par)::Float64
+function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, par::Collection)::Float64
     alpha1 = ice_attenuation(S, h, par)
-    sol = NlinSol.solve(
-        NlinSol.IntervalNonlinearProblem(
-            (l, _) -> wave_strain(attenuate(S, l, phi, alpha1), h, par) - par.Ec,
-            (0, L)
-        )
+    prob = NlinSol.IntervalNonlinearProblem(
+        (l, p) -> wave_strain(attenuate(p.S, l, p.phi, p.alpha1), p.h, p.par) - p.par.Ec,
+        (0, L), (; S, phi, alpha1, h, par)
     )
+    sol = NlinSol.solve(prob)
     NlinSol.SciMLBase.successful_retcode(sol) ||
         @warn(
             "Nonlinear solver did not converge when solving for fracture distance. Result may be inaccurate.",
@@ -153,10 +148,11 @@ function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, pa
 end # function fracture_distance
 
 function cell_mean(func::Function, spectrum::Spectrum, phi::Real, alpha1::Vector, L::Real) # -> Real
-    sol = Intgr.solve(
-        Intgr.IntegralProblem((l, _) -> func(attenuate(spectrum, l, phi, alpha1)), (0, L)),
-        Intgr.QuadGKJL()
+    prob = Intgr.IntegralProblem(
+        (l, p) -> p.func(attenuate(p.spectrum, l, p.phi, p.alpha1)),
+        (0, L), (; func, spectrum, phi, alpha1)
     )
+    sol = Intgr.solve(prob, Intgr.QuadGKJL())
     Intgr.SciMLBase.successful_retcode(sol) ||
         @warn(
             "Integral did not converge when computing cell mean. Result may be inaccurate.",
@@ -196,10 +192,10 @@ updateD!(newD::Float64, xi::Int, vars::Collection{Vec}, l::Float64=1.0, L::Float
     vars.D[xi] = (l*newD + (L-l)*vars.D[xi]) / L # weighted average based on fracture distance
 
 function Infrastructure.initialise(
-    model::WIModel, st::SpaceTime, forcing::Forcing, par::Par, init::Collection{Vec};
-    lastonly::Bool=true, spectrum::Spectrum
+    model::WIModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
+    solver::AbstractSolver, lastonly::Bool=true, spectrum::Spectrum
 ) # -> Tuple{Collection{Vec}, Solutions{WIModel,F,V}, Solutions{WIModel,F,V}}
-    vars, sols, annusol = MIZEBM._initialise(model, st, forcing, par, init; lastonly)
+    vars, sols, annusol = MIZEBM._initialise(model, st, forcing, par, init; solver, lastonly)
     sols.spectrum_ref[] = deepcopy(spectrum) # store spectrum in sols for later reference
     annusol.spectrum_ref[] = deepcopy(spectrum)
     cache_wavenumber!(spectrum.freq, par, 1//10^4, 10)
@@ -207,7 +203,8 @@ function Infrastructure.initialise(
 end # function Infrastructure.initialise
 
 function Infrastructure.step!(
-    ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Par; spectrum::Spectrum
+    ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Collection;
+    solver::AbstractSolver, spectrum::Spectrum
 )::Collection{Vec}
     vars.Ewave = zeros(st.nx) # !
     vars.lambda = fill(wave_length(spectrum, 0.0, par), st.nx) # !
@@ -252,7 +249,7 @@ function Infrastructure.step!(
         end # for xi
     end # if !
     vars.breakup = Vector{Float64}(breakup) # !
-    Infrastructure.step!(MIZModel(), t, f, vars, st, par; breakup) # thermodynamics
+    Infrastructure.step!(MIZModel(), t, f, vars, st, par; solver, breakup) # thermodynamics
     return vars
 end # function Infrastructure.step!
 
