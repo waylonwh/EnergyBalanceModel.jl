@@ -236,14 +236,14 @@ function Infrastructure.step!(
                 breakup[xi] = true
                 vars.dup[xi] = frontd
             end # if >, else
-            vars.Ewave[xi] = cell_mean(
-                sl -> wave_strain(sl, vars.h[xi], par),
-                spect, vars.phi[xi], alpha1, L
-            )
-            vars.lambda[xi] = cell_mean(
-                sl -> wave_length(sl, vars.h[xi], par),
-                spect, vars.phi[xi], alpha1, L
-            )
+            # vars.Ewave[xi] = cell_mean(
+            #     sl -> wave_strain(sl, vars.h[xi], par),
+            #     spect, vars.phi[xi], alpha1, L
+            # ) # slow
+            # vars.lambda[xi] = cell_mean(
+            #     sl -> wave_length(sl, vars.h[xi], par),
+            #     spect, vars.phi[xi], alpha1, L
+            # ) # very slow
             vars.Hs[xi] = cell_mean(wave_height, spect, vars.phi[xi], alpha1, L)
             spect = atted_spect # update spectrum
         end # for xi
