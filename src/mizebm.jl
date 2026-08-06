@@ -276,6 +276,7 @@ function _initialise(
 ) # -> Tuple{Collection{Vec}, Solutions{M,F,V}, Solutions{M,F,V}}
     # create storages
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
+    model isa WIModel && push!(solvars, :Hs) # add wave height for WIModel
     vars, sols, annusol = create_storages(model, solvars, st, forcing, par, init; solver, lastonly)
     # diagnostic variables read by the first step!, on the same timestep as Ei, Ew, h and D
     vars.phi = concentration(vars.Ei, vars.h, par)
