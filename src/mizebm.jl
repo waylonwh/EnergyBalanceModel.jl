@@ -229,8 +229,8 @@ function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collectio
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
     zeroref!(lat_grow, h)
-    condset!(weld, 0.0, >=(par.Tm), Ti)
-    weld[breakup] .= 0.0 # no welding if breaking
+    kappa0 = @. breakup || Ql>=0 || Ti>=par.Tm # effective welding rate to be zero
+    weld[kappa0] .= 0.0
     return @. lat_melt + lat_grow + weld
 end # function D_t
 
