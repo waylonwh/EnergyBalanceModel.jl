@@ -109,15 +109,22 @@ function solveT(
     return T
 end # function solveT
 
-Infrastructure.initialise(
+function Infrastructure.initialise(
     model::ClassicModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     solver::AbstractSolver, lastonly::Bool, _...
-) = create_storages(model, Set{Symbol}((:E, :T, :h)), st, forcing, par, init; solver, lastonly)
-    # -> Tuple{Collection{Vec},Solutions{ClassicModel,F,V},Solutions{ClassicModel,F,V}}
+) # -> Tuple{Collection{Vec},Solutions{ClassicModel},Solutions{ClassicModel}}
+    if solver isa GhostLayerSolver
+        par.cg = solver.cg
+        par.tau = solver.tau
+    end # if isa
+    return create_storages(
+        model, Set{Symbol}((:E, :T, :h)), st, forcing, par, init; solver, lastonly
+    )
+end # function Infrastructure.initialise
 
 function step_temperature!(
     ::GhostLayerSolver, vars::Collection{<:Vector}, aS::Vector, st::SpaceTime, f::Real,
-    par::Collection, stat::NamedTuple, i::Integer; _...
+    par::Collection, stat::NamedTuple, i::Integer
 ) # -> Tuple{Vector,Vector}
     C = @. aS + stat.cg_tau*vars.Tg - par.A + f
     # surface temperature
@@ -139,13 +146,14 @@ function step_temperature!(
 end # function specialised_step!
 
 function step_temperature!(
-    ::NonlinearSolver, vars::Collection{Vector{FT}}, aS::Vector{FT}, st::SpaceTime, f::FT,
-    par::Collection{FT}, _args...; _...
+    solver::NonlinearSolver, vars::Collection{Vector{FT}}, aS::Vector{FT}, st::SpaceTime,
+    f::FT, par::Collection{FT}, _...
 )::NTuple{2,Vector{FT}} where FT <: AbstractFloat
     vars.T0 = solveT0(
         get(vars, :T0, zeros(FT, st.nx)),
         vars.E, get(vars, :h, @. -vars.E / par.Lf * (vars.E<0)),
-        aS, get_diffop(st), f, par
+        aS, get_diffop(st), f, par;
+        solver.abstol
     ) # solveT0 # !
     vars.T = surface_temperature(vars.E, vars.T0, par) # !
     C = @. aS + par.D * $(get_diffop(st)vars.T) - par.A + f
@@ -154,10 +162,10 @@ function step_temperature!(
 end # function specialised_step!
 
 function step_temperature!(
-    ::ActiveSetSolver, vars::Collection{<:Vector}, aS::Vector, st::SpaceTime, f::Real,
-    par::Collection, _args...; max_iter::Integer=10st.nx
+    solver::ActiveSetSolver, vars::Collection{<:Vector}, aS::Vector, st::SpaceTime, f::Real,
+    par::Collection, _...
 ) # -> Tuple{Vector,Vector}
-    vars.T = solveT(vars, aS, st, par, f; max_iter) # !
+    vars.T = solveT(vars, aS, st, par, f; solver.max_iter) # !
     C = @. aS + par.D * $(get_diffop(st)*vars.T) - par.A + f
     @. vars.E += st.dt * (C - par.B*vars.T + par.Fb) # !
     return (vars.T, vars.E)

@@ -67,51 +67,82 @@ abstract type AbstractSolver end
 
 """
     GhostLayerSolver <: AbstractSolver
+    GhostLayerSolver(cg::Real=0.098, tau::Real=3e-5)
 
-Singleton type selecting the ghost layer scheme of Wagner & Eisenman (2015), in which
-horizontal diffusion acts on a ghost layer of small heat capacity `cg` that is coupled to
-the surface over the short timescale `tau`. The ghost layer temperature is stepped with an
-implicit Euler step, and the surface temperature follows diagnostically.
+Select the ghost layer scheme of Wagner & Eisenman (2015), in which horizontal diffusion
+acts on a ghost layer of small heat capacity `cg` that is coupled to the surface over the
+short timescale `tau`. The ghost layer temperature is stepped with an implicit Euler step,
+and the surface temperature follows diagnostically.
 
-!!! note
-    This scheme gives a poor approximation for `MIZModel` and `WIModel`. It is recommended
-    to use the `ActiveSetSolver` instead.
+# Fields
+- `cg::Float64`: ghost layer heat capacity (W y m^-2 K^-1)
+- `tau::Float64`: ghost layer coupling timescale (y)
 """
-struct GhostLayerSolver <: AbstractSolver end
+struct GhostLayerSolver <: AbstractSolver
+    cg::Float64 # ghost layer heat capacity(W y m^-2 K^-1)
+    tau::Float64 # ghost layer coupling timescale (y)
+    GhostLayerSolver(cg::Real=0.098, tau::Real=3e-5) = new(cg, tau)
+end # struct GhostLayerSolver
 
 """
     ActiveSetSolver <: AbstractSolver
+    ActiveSetSolver(max_iter::Integer=1000)
 
-Singleton type selecting the active set scheme, which classifies the gridboxes as freezing
-or melting at each timestep and iteratively solves the linear system implied by that
-classification for the surface temperature.
+Select the active set scheme, which classifies the gridboxes as freezing or melting at each
+timestep and iteratively solves the linear system implied by that classification for the
+surface temperature. This is the default scheme used by [`solve`](@ref) and
+[`integrate`](@ref).
+
+# Fields
+- `max_iter::Int`: maximum number of iterations allowed for the active set to converge. If
+    the classification has not settled within `max_iter` iterations, a warning is issued and
+    the last iterate is used.
 """
-struct ActiveSetSolver <: AbstractSolver end
+struct ActiveSetSolver <: AbstractSolver
+    max_iter::Int # maximum number of iterations to converge active set
+    ActiveSetSolver(max_iter::Integer=1000) = new(max_iter)
+end # struct ActiveSetSolver
 
 """
     NonlinearSolver <: AbstractSolver
+    NonlinearSolver(abstol::Real=1e-10)
 
-Singleton type selecting the nonlinear scheme, in which the surface temperature is obtained
-by solving the full nonlinear system at each timestep with a Newton-type iteration.
+Select the nonlinear scheme, in which the surface temperature is obtained by solving the
+full nonlinear system at each timestep with a Newton-type iteration.
+
+# Fields
+- `abstol::Float64`: absolute tolerance on the residual of the nonlinear system. A warning
+    is issued if the iteration terminates without reaching it.
 
 !!! note
     This scheme is computationally expensive and it is recommended to use the
-    `ActiveSetSolver` instead.
+    [`ActiveSetSolver`](@ref) instead.
 """
-struct NonlinearSolver <: AbstractSolver end
+struct NonlinearSolver <: AbstractSolver
+    abstol::Float64 # absolute tolerance for nonlinear solver
+    NonlinearSolver(abstol::Real=1e-10) = new(abstol)
+end # struct NonlinearSolver
 
 """
-    DiffSolver{A<:AbstractSolver, B<:AbstractSolver} <: AbstractSolver
+    DiffSolver <: AbstractSolver
+    DiffSolver(solverA::AbstractSolver, solverB::AbstractSolver)
 
-Singleton type recording that a solution was obtained as the difference (A-B) between a
-solution advanced with solver `A` and one advanced with solver `B`.
+A type recording that a solution was obtained as the difference (A-B) between a solution
+advanced with `solverA` and one advanced with `solverB`.
+
+# Fields
+- `solverA::AbstractSolver`: solver that advanced the solution being subtracted from
+- `solverB::AbstractSolver`: solver that advanced the solution being subtracted
 
 This is a bookkeeping type rather than a scheme. It carries the provenance of the two
-solvers in the `solver` field of the [`Solutions`](@ref), and is never used to advance a
-timestep. It is the solver-level counterpart of [`ModelDiff`](@ref), when two models are
-solved with different solvers.
+solvers, along with their settings, in the `solver` field of the [`Solutions`](@ref), and is
+never used to advance a timestep. It is the solver-level counterpart of [`ModelDiff`](@ref),
+when two models are solved with different solvers.
 """
-struct DiffSolver{A<:AbstractSolver, B<:AbstractSolver} <: AbstractSolver end
+struct DiffSolver <: AbstractSolver
+    solverA::AbstractSolver
+    solverB::AbstractSolver
+end # struct DiffSolver
 
 """
     Collection{V}(args...)
@@ -505,12 +536,14 @@ An object to store model solutions. Type parameter `M` is the model type (`MIZMo
 `V` is `true` for variable forcing.
 
 # Fields
-- `model::M`: model type
 - `spacetime::SpaceTime{F}`: space and time on which solutions are defined
 - `ts::Vec`: time vector for stored solutions
 - `forcing::Forcing{V}`: climate forcing
 - `parameters::Collection`: model parameters
 - `initconds::Collection{Vec}`: initial conditions
+- `solver::AbstractSolver`: the [`AbstractSolver`](@ref) instance that advanced the
+    solution, including its numerical settings; a [`DiffSolver`](@ref) if the solution is a
+    difference between two solutions obtained with different solvers
 - `lastonly::Bool`: whether to store solutions for each time step only for the last year
 - `raw::Collection{Vector{Vec}}`: solutions for each time step
 - `annual::@NamedTuple{winter::..., summer::..., avg::...}`: seasonal peak and annual
@@ -588,7 +621,7 @@ function Base.:-(
     init = uniqueunion(sx.initconds, sy.initconds)
     vars = intersect(propertynames(sx.raw), propertynames(sy.raw))
     lastonly = sx.lastonly || sy.lastonly
-    solver = sx.solver === sy.solver ? sx.solver : DiffSolver{typeof(sx.solver), typeof(sy.solver)}()
+    solver = DiffSolver(sx.solver, sy.solver)
     diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly; solver)
     xinx = findall(in(diffsol.ts), sx.ts)
     yinx = findall(in(diffsol.ts), sy.ts)
@@ -642,9 +675,6 @@ const default_parval = Collection{Float64}(
     :Fb => 4.0, # heat flux from ocean below (W m^-2)
     :k => 2.0, # sea ice thermal conductivity (W m^-2 K^-1)
     :Lf => 9.5, # sea ice latent heat of fusion (W y m^-3)
-    # for GhostLayerSolver only
-    :cg => 0.098, # ghost layer heat capacity(W y m^-2 K^-1)
-    :tau => 3e-5, # ghost layer coupling timescale (y)
     # MIZ
     :Tm => 0.0, # mean temperature (C)
     :m1 => 1.6e-6_secyear, # empirical constants of lateral melt (m y^-1 K^-1)
@@ -695,9 +725,8 @@ Get default parameters for a given model.
 # Examples
 ```julia-repl
 julia> default_parameters(ClassicModel())
-Collection{Float64} with 16 entries:
+Collection{Float64} with 13 entries:
   :a2 => 0.1
-  :F  => 0.0
   :A  => 193.0
   :k  => 2.0
   :D  => 0.6
@@ -1072,15 +1101,17 @@ function create_storages(
 end # function create_storages
 
 """
-    integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; solver::AbstractSolver, lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{ClassicModel,F,C}
-    integrate(model::WIModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; solver::AbstractSolver, lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum) -> Solutions{M,F,C}
+    integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; solver::AbstractSolver=ActiveSetSolver(), lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{ClassicModel,F,C}
+    integrate(model::WIModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; solver::AbstractSolver=ActiveSetSolver(), lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum) -> Solutions{M,F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
 `Solutions` object. Use `default_parameters` to get default model parameters. For
 `MIZModel`, `init` must contain the variables `:Ei`, `:Ew`, `:h`, `:D` and `:Tg`; for
 `ClassicModel`, `init` must contain `:E` and `:Tg`. A keyword argument `spectrum` must be
-specified for `WIModel` to indicate the spectrum of the incident wave field.
+specified for `WIModel` to indicate the spectrum of the incident wave field. The `solver`
+instance selects the scheme used to advance the surface temperature at each timestep and
+holds that scheme's numerical settings; see [`AbstractSolver`](@ref).
 
 When `lastonly=true`, only the last year of the solution is stored for each time step,
 otherwise the full solution is stored. A progress bar is displayed and updated with
@@ -1140,7 +1171,9 @@ Integrate the `EBMProblem` `prob` and return the results in a `Solutions` object
 the high-level entry point to `integrate` from `EBMProblem`. The `solver` selects the scheme
 used to advance the surface temperature at each timestep, defaulting to
 [`ActiveSetSolver`](@ref); see [`GhostLayerSolver`](@ref) and [`NonlinearSolver`](@ref) for
-the alternatives.
+the alternatives. Each solver also carries the numerical settings of its scheme in its
+fields, so pass a configured instance to override them, e.g.
+`solve(prob, ActiveSetSolver(500))`.
 
 When `lastonly=true`, only the last year of the solution is stored for each timestep,
 otherwise the full solution is stored. A progress bar is displayed and updated with
