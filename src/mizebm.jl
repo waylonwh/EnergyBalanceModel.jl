@@ -298,6 +298,8 @@ function _initialise(
     step_temperature!(
         solver, vars, st.T[1], st, forcing(st.T[1]), par, vars.Flat, vars.Fbot; initstep=true
     ) # step T0 Ti T
+    # non-GhostLayerSolver compatibility
+    solver isa GhostLayerSolver || haskey(vars, :Tg) || (vars.Tg = fill(NaN, st.nx)) # !
     return (vars, sols, annusol)
 end # function _initialise
 
