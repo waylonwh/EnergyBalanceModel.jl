@@ -207,6 +207,7 @@ function Infrastructure.step!(
     solver::AbstractSolver, spectrum::Spectrum
 )::Collection{Vec}
     breakup = falses(st.nx) # track which cells are breaking
+    vars.Hs = fill(wave_height(spectrum), st.nx) # !
     edgeinx = findfirst(>(0), vars.h)
     if !isnothing(edgeinx) # if there is any ice
         # attenuate spectrum
@@ -214,6 +215,7 @@ function Infrastructure.step!(
         for xi in edgeinx:st.nx
             L = grid_length(st, xi)
             alpha1 = ice_attenuation(spect, vars.h[xi], par)
+            vars.Hs[xi] = wave_height(attenuate(spect, L/2, vars.phi[xi], alpha1))
             atted_spect = attenuate(spect, L, vars.phi[xi], alpha1)
             atted_strain = wave_strain(atted_spect, vars.h[xi], par)
             if atted_strain > par.Ec # full breakup
