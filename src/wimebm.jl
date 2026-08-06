@@ -117,11 +117,6 @@ moment_strain(S::Spectrum, n::Int, h::Float64, par::Collection)::Float64 = momen
 
 ice_attenuation(S::Spectrum, h::Real, par::Collection) = imag.(wavenumber_ice(S.freq, h, par, par.Gamma)) # -> Vector{Real}
 
-function attenuate(S::Spectrum, L::Float64, h::Float64, phi::Float64, par::Collection)::Spectrum
-    alpha1 = ice_attenuation(S, h, par)
-    return Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * L))
-end # function attenuate
-
 attenuate(S::Spectrum, l::Real, phi::Real, alpha1::Vector)::Spectrum =
     Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * l))
 
@@ -134,6 +129,8 @@ function wave_length(S::Spectrum, h::Float64, par::Collection)::Float64
 end # function wave_length
 
 wave_strain(S::Spectrum, h::Float64, par::Collection)::Float64 = 2sqrt(moment_strain(S, 0, h, par))
+
+wave_height(S::Spectrum) = 4sqrt(moment_elevation(S, 0)) # -> Real
 
 function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, par::Collection)::Float64
     alpha1 = ice_attenuation(S, h, par)
