@@ -1,6 +1,6 @@
 name = "EnergyBalanceModel"
 uuid = "68dbb056-390c-4f33-8773-0304cbd749ae"
-version = "0.2.15-DEV.2" # ww/activeset
+version = "0.2.18-DEV.0" # ww/solverparams
 authors = ["Waylon Wu <me@waylonwu.net>", "Navid C. Constantinou <navidcy@users.noreply.github.com>"]
 
 [deps]
