@@ -29,8 +29,8 @@ mutable struct Progress
     updates::Int # number of external updates
 
     function Progress(
-        total::Int,
-        title::String="Progress", freq::Float64=1.0;
+        total::Integer,
+        title::String="Progress", freq::Real=1.0;
         width::Int=50, infofeed::Function=Returns("")
     )
         barwidth = width - (ndigits(total) * 2 + 1) - 2 - 5 - 3 # current/total [=> ] xx.x%
