@@ -51,7 +51,7 @@ function stepTg!(
 end # function stepTg!
 
 solveT0(
-    solve::GhostLayerSolver, x::Vector, t::Float64, h::Vector, Tg::Vector, Tw::Vector,
+    solver::GhostLayerSolver, x::Vector, t::Float64, h::Vector, Tg::Vector, Tw::Vector,
     phi::Vector, f::Real, par::Collection
 ) = @. ( # -> Vector
     $(solar(x, t, :ice, par)) - par.A + f - (1-phi)Tw * (par.B + solver.cg/solver.tau)
