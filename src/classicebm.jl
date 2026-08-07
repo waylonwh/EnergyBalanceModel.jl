@@ -116,6 +116,9 @@ function Infrastructure.initialise(
     if solver isa GhostLayerSolver
         par.cg = solver.cg
         par.tau = solver.tau
+    else # not GhostLayerSolver; for compatibility for get_statics
+        par.cg = NaN
+        par.tau = NaN
     end # if isa
     return create_storages(
         model, Set{Symbol}((:E, :T, :h)), st, forcing, par, init; solver, lastonly
