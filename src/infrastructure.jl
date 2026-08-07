@@ -1015,8 +1015,8 @@ end # function savesol!
 """
     hemispheric_mean(vec::Vec, x::Vec) -> Float64
 
-Calculate the hemispheric mean value of `vec` defined on grid `x` using the trapezoidal
-rule.
+Calculate the hemispheric mean value of `vec` defined on grid `x = sin(latitude)` by
+discretised integration using the Simpson's rule.
 
 # Examples
 ```julia-repl
@@ -1025,12 +1025,12 @@ julia> x = sin.(range(0, pi/2, 180));
 julia> vec = @. 7.5 + 20(1 - 2x^2);
 
 julia> hemispheric_mean(vec, x)
-14.166324413879554
+14.166666666666657
 ```
 """
-function hemispheric_mean(vec::Vec, x::Vec)::Float64
+function hemispheric_mean(vec::Vector, x::Vector) # -> Number
     int = Intgr.solve(
-        Intgr.SampledIntegralProblem(@.(2vec / (pi * sqrt(1-x^2))), x), Intgr.SimpsonsRule()
+        Intgr.SampledIntegralProblem(vec, x), Intgr.SimpsonsRule()
     )
     if !Intgr.SciMLBase.successful_retcode(int)
         @warn "Integral did not converge when computing hemispheric mean. Result may be inaccurate."
@@ -1042,8 +1042,8 @@ end # function hemispheric_mean
 """
     ice_area(phi::Vec, x::Vec) -> Float64
 
-Calculate the area covered by sea ice from the sea ice concentration `phi` defined on grid
-`x` by discretised integration using the Simpson's rule.
+Calculate the area covered by sea ice, in km², from the sea ice concentration `phi` defined
+on grid `x = sin(latitude)` by discretised integration using the Simpson's rule.
 
 # Examples
 ```julia-repl
@@ -1052,18 +1052,16 @@ julia> x = sin.(range(0, pi/2, 181))[1:end-1]; # avoid the singularity at x=1
 julia> phi = @. 2x - x^2;
 
 julia> ice_area(phi, x)
-1.4075808945373096
+1.7001177979051808e8
 ```
 """
-function ice_area(phi::Vec, x::Vec)::Float64
-    int = Intgr.solve(
-        Intgr.SampledIntegralProblem(@.(pi*x * phi / 2sqrt(1-x^2)), x), Intgr.SimpsonsRule()
-    )
+function ice_area(phi::Vector, x::Vector) # -> Number
+    int = Intgr.solve(Intgr.SampledIntegralProblem(phi, x), Intgr.SimpsonsRule())
     if !Intgr.SciMLBase.successful_retcode(int)
         @warn "Integral did not converge when computing ice area. Result may be inaccurate."
         @isdebugging() && @show int.retcode
     end # if !
-    return int.u
+    return 2pi * 6371^2 * int.u
 end # function ice_area
 
 """
@@ -1081,9 +1079,9 @@ julia> ice_area(sols, :summer, 30)
 0.43981792357403693
 ```
 """
-ice_area(sols::Solutions{ClassicModel}, season::Symbol, year::Int)::Float64 =
+ice_area(sols::Solutions{ClassicModel}, season::Symbol, year::Integer) = # -> Real
     ice_area((getproperty(sols.annual, season).E[year].<0), sols.spacetime.x)
-ice_area(sols::Solutions{MIZModel}, season::Symbol, year::Int)::Float64 =
+ice_area(sols::Solutions{<:Union{MIZModel,WIModel}}, season::Symbol, year::Integer) = # -> Real
     ice_area(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
 
 # stub for functions for each model
