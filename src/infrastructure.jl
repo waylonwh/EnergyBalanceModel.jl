@@ -1119,7 +1119,7 @@ Refer to the documentation of the module `EnergyBalanceModel` for an example.
 """
 function integrate(
     model::M, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
-    lastonly::Bool=true, updatefreq::Float64=1.0, solver::AbstractSolver=ActiveSetSolver(), kwargs...
+    lastonly::Bool=true, updatefreq::Real=1.0, solver::AbstractSolver=ActiveSetSolver(), kwargs...
 ) where M<:Union{ClassicModel,MIZModel,WIModel} # -> Solutions{M,F,C}
     # initialise for WIModel
     spectrum = get(kwargs, :spectrum, nothing)
@@ -1197,7 +1197,7 @@ Solutions{WIModel, sin, false} with:
 """
 solve(
     prob::EBMProblem, solver::AbstractSolver=ActiveSetSolver();
-    lastonly::Bool=true, updatefreq::Float64=1.0
+    lastonly::Bool=true, updatefreq::Real=1.0
 ) = integrate( # -> Solutions
     prob.model, prob.st, prob.forcing, prob.parameters, prob.initconds;
     lastonly, updatefreq, solver, prob.spectrum
