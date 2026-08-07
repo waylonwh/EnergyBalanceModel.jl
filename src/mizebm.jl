@@ -233,7 +233,7 @@ function D_t!(
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
     zeroref!(lat_grow, h)
-    kappa0 = @. breakup || Ql>=0 || Ti>=par.Tm # effective welding rate to be zero
+    kappa0 = @. breakup || Ti>=par.Tm # effective welding rate to be zero
     weld[kappa0] .= 0.0
     vars.Dlatmelt = lat_melt # !
     vars.Dlatgrow = lat_grow # !
