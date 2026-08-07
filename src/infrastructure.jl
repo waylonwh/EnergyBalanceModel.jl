@@ -700,7 +700,7 @@ const default_parval = Collection{Float64}(
 
 # parameters used in each model
 const classicmodel_parvars = Set{Symbol}(
-    (:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf, :cg, :tau)
+    (:D, :A, :B, :cw, :S0, :S1, :S2, :a0, :a2, :ai, :Fb, :k, :Lf)
 )
 const mizmodel_parvars = push!(
     copy(classicmodel_parvars),
