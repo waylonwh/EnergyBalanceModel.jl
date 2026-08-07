@@ -22,24 +22,25 @@ ice_temp(T0::Vector, par::Collection) = min.(T0, par.Tm) # -> Vector
 
 # ghost layer scheme
 function stepTg!(
-    t::Float64, Tg::Vec, h::Vec, T0::Vec, Tw::Vec, phi::Vec, f::Float64, st::SpaceTime, par::Collection
+    t::Real, Tg::Vector, h::Vector, T0::Vector, Tw::Vector, phi::Vector, f::Real,
+    st::SpaceTime, par::Collection, cg::Real, tau::Real
 )::Vec
     frez = @. (T0<par.Tm) & (h>0)
     watr = .~frez
     diagphi = SA.spdiagm(phi)
-    invM = SA.spdiagm(inv.(phi * (par.B + par.cg/par.tau) .+ par.k./h))
+    invM = SA.spdiagm(inv.(phi * (par.B + cg/tau) .+ par.k./h))
     Tg .= (
-            (1+st.dt/par.tau)LA.I
-            - st.dt*par.D/par.cg * get_diffop(st)
-            - (st.dt*par.cg/par.tau^2 * diagphi * invM)SA.spdiagm(frez)
+            (1+st.dt/tau)LA.I
+            - st.dt*par.D/cg * get_diffop(st)
+            - (st.dt*cg/tau^2 * diagphi * invM)SA.spdiagm(frez)
         ) \ (
             Tg
-            + st.dt/par.tau * (
+            + st.dt/tau * (
                 (LA.I-diagphi)Tw
                 + (
                     diagphi * (
                         par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h)))
-                        - (par.B + par.cg/par.tau) * (LA.I-diagphi)SA.spdiagm(Tw)
+                        - (par.B + cg/tau) * (LA.I-diagphi)SA.spdiagm(Tw)
                         + SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
                     ) * invM
                 )frez
@@ -50,12 +51,12 @@ function stepTg!(
 end # function stepTg!
 
 solveT0(
-    ::GhostLayerSolver, x::Vector, t::Float64, h::Vector, Tg::Vector, Tw::Vector,
+    solver::GhostLayerSolver, x::Vector, t::Float64, h::Vector, Tg::Vector, Tw::Vector,
     phi::Vector, f::Real, par::Collection
 ) = @. ( # -> Vector
-    $(solar(x, t, :ice, par)) - par.A + f - (1-phi)Tw * (par.B + par.cg/par.tau)
-    + par.Tm * (par.B + par.k/h) + par.cg/par.tau * Tg
-) / (phi * (par.B + par.cg/par.tau) + par.k/h)
+    $(solar(x, t, :ice, par)) - par.A + f - (1-phi)Tw * (par.B + solver.cg/solver.tau)
+    + par.Tm * (par.B + par.k/h) + solver.cg/solver.tau * Tg
+) / (phi * (par.B + solver.cg/solver.tau) + par.k/h)
 
 # nonlinear scheme
 function T0eq(
@@ -169,11 +170,11 @@ end # function area_lead
 
 # fluxes
 function vert_flux(
-    ::GhostLayerSolver, t::Float64, surface::Symbol, Tbar::Vector, f::Real, st::SpaceTime,
-    par::Collection, Tg::Vector
+    solver::GhostLayerSolver, t::Float64, surface::Symbol, Tbar::Vector, f::Real,
+    st::SpaceTime, par::Collection, Tg::Vector
 ) # -> Vector
     L = @. par.A + par.B * (Tbar - par.Tm) # OLR
-    return solar(st.x, t, surface, par) .- L .+ par.cg/par.tau * (Tg-Tbar) .+ par.Fb .+ f
+    return solar(st.x, t, surface, par) .- L .+ solver.cg/solver.tau * (Tg-Tbar) .+ par.Fb .+ f
 end # function vert_flux
 
 function vert_flux(
@@ -229,7 +230,7 @@ function D_t(h::Vec, D::Vec, Ti::Vec, Tw::Vec, phi::Vec, Ql::Vec, par::Collectio
     lat_grow = @. -D / (2 * par.Lf * h * phi) * Ql
     weld = @. par.kappa * par.alpha / 4 * phi * D^3
     zeroref!(lat_grow, h)
-    kappa0 = @. breakup || Ql>=0 || Ti>=par.Tm # effective welding rate to be zero
+    kappa0 = @. breakup || Ti>=par.Tm # effective welding rate to be zero
     weld[kappa0] .= 0.0
     return @. lat_melt + lat_grow + weld
 end # function D_t
@@ -238,9 +239,13 @@ forward_euler(var::Vec, grad::Vec, dt::Float64)::Vec = @. var + grad*dt
 
 function step_temperature!(
     solver::GhostLayerSolver, vars::Collection{<:Vector}, t::Real, st::SpaceTime, f::Real,
-    par::Collection, _args...; initstep::Bool=false, _...
+    par::Collection, _args...; initstep::Bool=false
 ) # -> Vector
-    initstep || (vars.Tg = stepTg!(t, vars.Tg, vars.h, vars.T0, vars.Tw, vars.phi, f, st, par)) # !
+    initstep || (
+        vars.Tg = stepTg!(
+            t, vars.Tg, vars.h, vars.T0, vars.Tw, vars.phi, f, st, par, solver.cg, solver.tau
+        )
+    ) #|| # !
     vars.T0 = solveT0(solver, st.x, t, vars.h, vars.Tg, vars.Tw, vars.phi, f, par) # !
     vars.Ti = ice_temp(vars.T0, par) # !
     vars.T = weighted_avg(replace(vars.Ti, NaN=>0.0), vars.Tw, vars.phi) # !
@@ -253,8 +258,9 @@ function step_temperature!(
 ) # -> Vector
     vars.T0 = solveT0(
         solver, get(vars, :T0, fill(par.Tm, st.nx)),
-        st.x, t, vars.h, vars.Tw, vars.phi, get_diffop(st), f, par
-    )
+        st.x, t, vars.h, vars.Tw, vars.phi, get_diffop(st), f, par;
+        solver.abstol
+    ) # solveT0 # !
     vars.Ti = ice_temp(vars.T0, par) # !
     vars.T = weighted_avg(replace(vars.Ti, NaN=>0.0), vars.Tw, vars.phi) # !
     return vars.T
@@ -262,9 +268,9 @@ end # function step_temperature!
 
 function step_temperature!(
     solver::ActiveSetSolver, vars::Collection{<:Vector}, t::Real, st::SpaceTime, f::Real,
-    par::Collection, Flat::Vector, Fbot::Vector; max_iter::Integer=10st.nx, _...
+    par::Collection, Flat::Vector, Fbot::Vector; _...
 )
-    vars.T0, vars.T = solveT0(solver, t, vars, Flat, Fbot, st, f, par; max_iter) # !
+    vars.T0, vars.T = solveT0(solver, t, vars, Flat, Fbot, st, f, par; solver.max_iter) # !
     vars.Ti = ice_temp(vars.T0, par) # !
     return vars.T
 end # function step_temperature!
