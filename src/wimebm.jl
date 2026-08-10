@@ -219,7 +219,9 @@ function Infrastructure.step!(
         for xi in edgeinx:st.nx
             L = grid_length(st, xi)
             alpha1 = ice_attenuation(spect, vars.h[xi], par)
-            vars.Hs[xi] = wave_height(attenuate(spect, L/2, vars.phi[xi], alpha1))
+            vars.Hs[xi] = wave_height(attenuate(spect, L/2, vars.phi[xi], alpha1)) # !
+            vars.Ewave[xi] = wave_strain(spectrum, vars.h[xi], par) # !
+            # vars.lambda[xi] = wave_length(spectrum, vars.h[xi], par) # ! # slow
             atted_spect = attenuate(spect, L, vars.phi[xi], alpha1)
             atted_strain = wave_strain(atted_spect, vars.h[xi], par)
             oldD = vars.D[xi]
@@ -237,14 +239,6 @@ function Infrastructure.step!(
                 breakup[xi] = true
                 vars.dup[xi] = frontd
             end # if >, else
-            # vars.Ewave[xi] = cell_mean(
-            #     sl -> wave_strain(sl, vars.h[xi], par),
-            #     spect, vars.phi[xi], alpha1, L
-            # ) # slow
-            # vars.lambda[xi] = cell_mean(
-            #     sl -> wave_length(sl, vars.h[xi], par),
-            #     spect, vars.phi[xi], alpha1, L
-            # ) # very slow
             spect = atted_spect # update spectrum
         end # for xi
     end # if !
