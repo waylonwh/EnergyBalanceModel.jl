@@ -1284,15 +1284,15 @@ function integrate(
         finalizer(close, timer)
     end # if &&
     vars, sols, annusol = fetch(task)
+    if M === WIModel
+        isfinite(updatefreq) && close(timer)
+        println(
+            "\r\e[2K",
+            SS.styled"{bold,success:Wavenumber cached}",
+            " in ", round(time()-start; digits=2), " s\n"
+        ) # println
+    end # if ===
     if isfinite(updatefreq)
-        if M === WIModel
-            close(timer)
-            println(
-                "\r\e[2K",
-                SS.styled"{bold,success:Wavenumber cached}",
-                " in ", round(time()-start; digits=2), " s\n"
-            ) # println
-        end # if ===
         progress::Progress = Progress(
             length(st.T), "Integrating $M", updatefreq;
             infofeed=(t -> string("t = ", round(t; digits=2)))
