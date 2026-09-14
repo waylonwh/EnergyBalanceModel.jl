@@ -5,6 +5,7 @@ using ..Utilities
 import Integrals as Intgr, InteractiveUtils as IU, SparseArrays as SA, Statistics as Stats, StyledStrings as SS
 
 export AbstractModel, ClassicModel, MIZModel, ModelDiff, WIModel
+export AttenuationModel, DampedMassAttenuation, EmpiricalAttenuation, ViscousAttenuation
 export AbstractSolver, ActiveSetSolver, GhostLayerSolver, NonlinearSolver
 export Collection, EBMProblem, Forcing, Solutions, SpaceTime, Vec
 export Spectrum, bretschneider, monochromatic
@@ -13,12 +14,75 @@ export get_diffop
 export hemispheric_mean, ice_area
 export create_storages, integrate, soldiff, solve
 
-"""
-    Vec
-
-Alias for `Vector{Float64}` to represent model variables.
-"""
 const Vec = Vector{Float64} # TODO deprecated; to be removed
+
+"""
+    AbstractComponent
+
+Abstract type for interchangeable components selected within a model.
+"""
+abstract type AbstractComponent end
+
+"""
+    AttenuationModel <: AbstractComponent
+
+Abstract type for spectral attenuation components of [`WIModel`](@ref). Each component
+provides an energy attenuation coefficient in inverse metres, used in `exp(-mu * distance)`.
+"""
+abstract type AttenuationModel <: AbstractComponent end
+
+"""
+    ViscousAttenuation <: AttenuationModel
+    ViscousAttenuation()
+
+Select Robinson-Palmer viscous damping of an elastic ice plate. The energy attenuation
+coefficient is twice the imaginary part of the ice wavenumber, multiplied by ice
+concentration. The damping strength is set by the model parameter `Gamma` (Pa s m^-1).
+"""
+struct ViscousAttenuation <: AttenuationModel end
+
+"""
+    ViscousScatteringAttenuation <: AttenuationModel
+
+Placeholder for combined viscous and scattering attenuation. Construction throws an
+`ArgumentError` because this component is not yet implemented.
+"""
+struct ViscousScatteringAttenuation <: AttenuationModel
+    ViscousScatteringAttenuation() = throw(ArgumentError("ViscousScatteringAttenuation is not yet implemented."))
+end # struct ViscousScatteringAttenuation
+
+"""
+    EmpiricalAttenuation <: AttenuationModel
+    EmpiricalAttenuation(a::Real=2.12e-3, b::Real=4.59e-2)
+
+Select the empirical energy attenuation law `a / T^2 + b / T^4` of Meylan et al. (2014),
+where `T` is wave period in seconds. The coefficient is applied for positive ice
+concentration and is zero otherwise; it is not multiplied by concentration.
+
+# Fields
+- `a::Float64`: coefficient of `T^-2` (s^2 m^-1)
+- `b::Float64`: coefficient of `T^-4` (s^4 m^-1)
+
+Coefficients for the current frequency grid are stored in an internal cache.
+"""
+struct EmpiricalAttenuation <: AttenuationModel
+    a::Float64
+    b::Float64
+    _coeffcache::Ref{Pair{UInt,Vector{Float64}}}
+    EmpiricalAttenuation(a::Real=2.12e-3, b::Real=4.59e-2) = new(a, b, Ref(UInt(0) => zeros(0)))
+end # struct EmpiricalAttenuation
+
+"""
+    DampedMassAttenuation <: AttenuationModel
+    DampedMassAttenuation()
+
+Select the fractional damped-mass approximation of Pitt and Bennetts (2026), using the
+deep-water dispersion relation without flexural rigidity. Ice concentration scales both
+mass loading and damping within the dispersion relation. The energy attenuation
+coefficient is twice the imaginary part of this wavenumber, with no further concentration
+factor. Uses ice thickness and the model parameters `rhoiw`, `rhow`, `g`, and `Gamma`.
+"""
+struct DampedMassAttenuation <: AttenuationModel end
 
 """
     AbstractModel
@@ -37,11 +101,28 @@ struct MIZModel <: AbstractModel end
 
 """
     WIModel <: AbstractModel
+    WIModel(attenuation::AttenuationModel=ViscousAttenuation())
 
-Singleton type representing the wave ice interaction model, as an extension of the
-[`MIZModel`](@ref).
+Wave-ice interaction model extending [`MIZModel`](@ref) with wave propagation, attenuation,
+and floe breakup. The selected attenuation component controls spectral decay; wavelength
+and strain calculations retain the elastic-plate dispersion relation.
+
+# Fields
+- `attenuation::AttenuationModel`: attenuation component; defaults to
+    [`ViscousAttenuation`](@ref). Alternatives are [`EmpiricalAttenuation`](@ref) and
+    [`DampedMassAttenuation`](@ref).
+
+# Examples
+```julia
+WIModel()
+WIModel(EmpiricalAttenuation())
+WIModel(DampedMassAttenuation())
+```
 """
-struct WIModel <: AbstractModel end
+struct WIModel <: AbstractModel
+    attenuation::AttenuationModel
+    WIModel(attenuation::AttenuationModel=ViscousAttenuation()) = new(attenuation)
+end # struct WIModel
 
 """
     ClassicModel <: AbstractModel
@@ -690,11 +771,12 @@ const default_parval = Collection{Float64}(
     :ch => 6e-3, # Heat transfer coefficient
     :u0 => 0.01_secyear, # Surface friction velocity (m y^-1)
     # WIM
+    :rhoiw => 0.9, # Ice water density ratio
     :Y => 5.5e9, # Effective Young's modulus (Pa)
     :nu => 0.3, # Poisson's ratio
     :g => 9.81, # Gravitational acceleration (m s^-2),
     :Ec => 7.05e-5, # Breaking significant strain
-    :Gamma => 13.0, # Viscous damping parameter (Pa m s^-1)
+    :Gamma => 13.0, # Viscous damping parameter (Pa s m^-1)
     :gamma => 2 + log2(0.9), # Power law exponent for floe size distribution
 ) # Collection{Float64}
 
@@ -708,7 +790,7 @@ const mizmodel_parvars = push!(
 )
 const wimodel_parvars = push!(
     copy(mizmodel_parvars),
-    :Y, :nu, :g, :Ec, :Gamma, :gamma
+    :rhoiw, :Y, :nu, :g, :Ec, :Gamma, :gamma
 )
 
 # Create a parameter dictionary from default values for a given Set

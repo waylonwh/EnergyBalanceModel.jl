@@ -20,7 +20,7 @@ function dispersion_relation(
     k::ComplexF64, omega::Float64, gamma::Float64, h::Float64, par::Collection
 )::ComplexF64
     F = par.Y * h^3 / 12(1 - par.nu^2)
-    lhs = (F*k^4 + par.rhow * (par.g - 0.9h*omega^2) - im*omega*gamma) * k
+    lhs = (F*k^4 + par.rhow * (par.g - par.rhoiw * h * omega^2) - im*omega*gamma) * k
     rhs = par.rhow * omega^2
     return lhs - rhs
 end # function dispersion_relation
@@ -115,10 +115,27 @@ moment_strain(S::Spectrum, n::Int, h::Float64, par::Collection)::Float64 = momen
     S, n; coeff=real.(wavenumber_ice(S.freq, h, par, 0.0)).^4 * h^2/4
 )
 
-ice_attenuation(S::Spectrum, h::Real, par::Collection) = imag.(wavenumber_ice(S.freq, h, par, par.Gamma)) # -> Vector{Real}
+attenuation_coeff(::ViscousAttenuation, S::Spectrum, phi::Real, h::Real, par::Collection) = # -> Vector{Real}
+    2phi * imag.(wavenumber_ice(S.freq, h, par, par.Gamma))
 
-attenuate(S::Spectrum, l::Real, phi::Real, alpha1::Vector)::Spectrum =
-    Spectrum(S.freq, S.period, @. S.density * exp(-2phi*alpha1 * l))
+function attenuation_coeff(attenuation::EmpiricalAttenuation, S::Spectrum, phi::Real, _...) # -> Vector{Real}
+    hash(S.freq) != attenuation._coeffcache[].first && (
+        attenuation._coeffcache[] = hash(S.freq) => (@. attenuation.a / S.period^2 + attenuation.b / S.period^4)
+    )
+    return phi > 0 ? attenuation._coeffcache[].second : zeros(length(S.freq))
+end # function attenuation_coeff
+
+function attenuation_coeff(::DampedMassAttenuation, S::Spectrum, phi::Real, h::Real, par::Collection) # -> Vector{Real}
+    smass = par.rhoiw * h
+    damprate = par.Gamma / (par.rhow * sqrt(par.g))
+    sigma = @. S.freq^2 / par.g
+    km = @. sigma / (1 - phi * smass * sigma - 1im * phi * damprate * sqrt(sigma))
+    return 2imag.(km)
+end # function ice_attenuation
+
+
+attenuate(S::Spectrum, l::Real, phialpha::Vector)::Spectrum =
+    Spectrum(S.freq, S.period, @. S.density * exp(-phialpha * l))
 
 wave_period(S::Spectrum)::Float64 = 2pi * sqrt(moment_elevation(S, 0) / moment_elevation(S, 2))
 
@@ -132,11 +149,13 @@ wave_strain(S::Spectrum, h::Float64, par::Collection)::Float64 = 2sqrt(moment_st
 
 wave_height(S::Spectrum) = 4sqrt(moment_elevation(S, 0)) # -> Real
 
-function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, par::Collection)::Float64
-    alpha1 = ice_attenuation(S, h, par)
+function fracture_distance(
+    attenuation::AttenuationModel, S::Spectrum, h::Float64, phi::Float64, L::Float64, par::Collection
+) # -> Real
+    phialpha = attenuation_coeff(attenuation, S, phi, h, par)
     prob = NlinSol.IntervalNonlinearProblem(
-        (l, p) -> wave_strain(attenuate(p.S, l, p.phi, p.alpha1), p.h, p.par) - p.par.Ec,
-        (0, L), (; S, phi, alpha1, h, par)
+        (l, p) -> wave_strain(attenuate(p.S, l, p.phialpha), p.h, p.par) - p.par.Ec,
+        (0, L), (; S, phi, phialpha, h, par)
     )
     sol = NlinSol.solve(prob)
     NlinSol.SciMLBase.successful_retcode(sol) ||
@@ -147,10 +166,10 @@ function fracture_distance(S::Spectrum, h::Float64, phi::Float64, L::Float64, pa
     return sol.u
 end # function fracture_distance
 
-function cell_mean(func::Function, spectrum::Spectrum, phi::Real, alpha1::Vector, L::Real) # -> Real
+function cell_mean(func::Function, spectrum::Spectrum, phi::Real, phialpha::Vector, L::Real) # -> Real
     prob = Intgr.IntegralProblem(
-        (l, p) -> p.func(attenuate(p.spectrum, l, p.phi, p.alpha1)),
-        (0, L), (; func, spectrum, phi, alpha1)
+        (l, p) -> p.func(attenuate(p.spectrum, l, p.phialpha)),
+        (0, L), (; func, spectrum, phialpha)
     )
     sol = Intgr.solve(prob, Intgr.QuadGKJL())
     Intgr.SciMLBase.successful_retcode(sol) ||
@@ -203,7 +222,7 @@ function Infrastructure.initialise(
 end # function Infrastructure.initialise
 
 function Infrastructure.step!(
-    ::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Collection;
+    wimodel::WIModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Collection;
     solver::AbstractSolver, spectrum::Spectrum
 )::Collection{Vec}
     breakup = falses(st.nx) # track which cells are breaking
@@ -214,17 +233,17 @@ function Infrastructure.step!(
         spect = spectrum
         for xi in edgeinx:st.nx
             L = grid_length(st, xi)
-            alpha1 = ice_attenuation(spect, vars.h[xi], par)
-            vars.Hs[xi] = wave_height(attenuate(spect, L/2, vars.phi[xi], alpha1))
-            atted_spect = attenuate(spect, L, vars.phi[xi], alpha1)
+            phialpha = attenuation_coeff(wimodel.attenuation, spect, vars.phi[xi], vars.h[xi], par)
+            vars.Hs[xi] = wave_height(attenuate(spect, L/2, phialpha))
+            atted_spect = attenuate(spect, L, phialpha)
             atted_strain = wave_strain(atted_spect, vars.h[xi], par)
             if atted_strain > par.Ec # full breakup
-                dbar = mean_size(spect, vars.h[xi], vars.phi[xi], L, alpha1, par, vars.D[xi])
+                dbar = mean_size(spect, vars.h[xi], vars.phi[xi], L, phialpha, par, vars.D[xi])
                 updateD!(dbar, xi, vars)
                 breakup[xi] = true
             elseif wave_strain(spect, vars.h[xi], par) > par.Ec # partial breakup
-                l = fracture_distance(spect, vars.h[xi], vars.phi[xi], L, par)
-                frontd = mean_size(spect, vars.h[xi], vars.phi[xi], l, alpha1, par, vars.D[xi])
+                l = fracture_distance(wimodel.attenuation, spect, vars.h[xi], vars.phi[xi], L, par)
+                frontd = mean_size(spect, vars.h[xi], vars.phi[xi], l, phialpha, par, vars.D[xi])
                 updateD!(frontd, xi, vars, l, L)
                 breakup[xi] = true
             end # if >, else

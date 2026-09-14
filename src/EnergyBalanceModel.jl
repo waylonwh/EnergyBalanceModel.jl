@@ -58,6 +58,7 @@ details on data handling and visualisation.
 module EnergyBalanceModel
 
 export ClassicModel, MIZModel, WIModel
+export DampedMassAttenuation, EmpiricalAttenuation, ViscousAttenuation
 export ActiveSetSolver, GhostLayerSolver, NonlinearSolver
 export Collection, EBMProblem, Forcing, Solutions, SpaceTime
 export Spectrum, bretschneider, monochromatic
