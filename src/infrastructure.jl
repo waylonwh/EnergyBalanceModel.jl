@@ -723,24 +723,62 @@ end # function Base.:-
 
 soldiff(sx::Solutions, sy::Solutions) = sx - sy # -> Solutions{F,false}
 
-Base.show(io::IO, sols::Solutions)::Nothing = print(
-    io,
-    typeof(sols), '(',
-    sols.spacetime.nx, '×', length(sols.ts),
-    " for ", sols.spacetime.dur, " years: ", propertynames(sols.raw),
-    ')'
-)
+function Base.show(io::IO, sols::Solutions)::Nothing
+    print(io, typeof(sols), '(', nameof(typeof(sols.model)))
+    components = filter(
+        field -> getfield(sols.model, field) isa AbstractComponent,
+        fieldnames(typeof(sols.model))
+    )
+    if !isempty(components)
+        print(io, '(', join((nameof(typeof(getfield(sols.model, field))) for field in components), ", "), ')')
+    end # if !isempty
+    print(
+        io, ", ", sols.spacetime.nx, '×', length(sols.ts),
+        " for ", sols.spacetime.dur, " years: ", propertynames(sols.raw), ')'
+    )
+    return nothing
+end # function Base.show
 
 function Base.show(io::IO, ::MIME"text/plain", sols::Solutions)::Nothing
-    println(io, typeof(sols), " solved by ", typeof(sols.solver), " with:")
-    println(io, "  ", length(sols.raw), " solution variables: ", propertynames(sols.raw))
-    xhead = "  on $(sols.spacetime.nx) latitudinal gridboxes: "
-    buffer = iobuffer(io)
-    show(buffer, sols.spacetime.x)
-    vecstr = ctruncate(String(take!(buffer.io)), displaysize(io)[2]-length(xhead)-2, " … ")
-    println(io, xhead, vecstr)
-    println(io, "  and " , length(sols.ts), " timesteps: ", first(sols.ts), ':', sols.spacetime.dt, ':', last(sols.ts))
-    print(io, "  with forcing ", repr(sols.forcing))
+    compactio = IOContext(io, :compact => true, :limit => true)
+    function show_config(name, value, indent=2)
+        label = " "^indent * string(name) * ": "
+        print(io, indent == 2 ? rpad(label, 14) : label)
+        if value isa Union{AbstractModel,AbstractComponent,AbstractSolver}
+            println(io, nameof(typeof(value)))
+            for field in fieldnames(typeof(value))
+                startswith(string(field), "_") && continue
+                show_config(field, getfield(value, field), indent+2)
+            end # for field
+        else # not a metatype
+            show(compactio, value)
+            println(io)
+        end # if isa, else
+        return nothing
+    end # function show_config
+    println(io, typeof(sols), " with:")
+    show_config(:model, sols.model)
+    show_config(:solver, sols.solver)
+    println(io, "  grid:       ", sols.spacetime.nx, " latitudinal cells")
+    print(io, "    x range:  ")
+    show(compactio, extrema(sols.spacetime.x))
+    println(io)
+    print(io, "  time:       ", sols.spacetime.dur, " years; dt = ")
+    show(compactio, sols.spacetime.dt)
+    println(io, " years")
+    println(io, "  raw:        ", length(sols.ts), " snapshots (", sols.lastonly ? "last year only" : "all years", ')')
+    if !isempty(sols.ts)
+        print(io, "    t range:  ")
+        show(compactio, (first(sols.ts), last(sols.ts)))
+        println(io, " years")
+    end # if !isempty
+    println(io, "  annual:     ", sols.spacetime.dur, " years (winter, summer, avg)")
+    println(io, "  variables:  ", length(sols.raw), " (", join(sort!(collect(propertynames(sols.raw))), ", "), ')')
+    println(io, "  parameters: ", length(sols.parameters), " entries")
+    print(io, "  forcing:    ", repr(sols.forcing))
+    if isassigned(sols.spectrum_ref)
+        print(io, "\n  spectrum:   ", sols.spectrum_ref[])
+    end # if isassigned
     return nothing
 end # function Base.show
 
@@ -981,6 +1019,22 @@ Base.show(io::IO, prob::EBMProblem)::Nothing = print(
 function Base.show(io::IO, ::MIME"text/plain", prob::EBMProblem)::Nothing
     println(io, typeof(prob), " with:")
     println(io, "  model:      ", typeof(prob.model))
+    for field in fieldnames(typeof(prob.model))
+        component = getfield(prob.model, field)
+        component isa AbstractComponent || continue
+        print(io, "    ", field, ": ", typeof(component))
+        fields = filter(name -> !startswith(string(name), "_"), fieldnames(typeof(component)))
+        if !isempty(fields)
+            print(io, '(')
+            for (i, name) in enumerate(fields)
+                i > 1 && print(io, ", ")
+                print(io, name, '=')
+                show(IOContext(io, :compact => true, :limit => true), getfield(component, name))
+            end # for (i, name)
+            print(io, ')')
+        end # if !isempty
+        println(io)
+    end # for field
     println(io, "  spacetime:  ", prob.st)
     println(io, "  forcing:    ", repr(prob.forcing))
     println(io, "  parameters: ", length(prob.parameters), " entries")
