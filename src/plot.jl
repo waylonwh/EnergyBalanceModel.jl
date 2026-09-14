@@ -155,7 +155,10 @@ function contourf_tiles(
         else # valid data
             isD = occursin(raw"\mathcal{D}", layout[row,col].title)
             levels, extendlow, extendhigh, ticks = get_levels(Val(isD), Val(diff), layout[row,col].var)
-            ctr = Mk.contourf!(ax, t, x, layout[row,col].var; levels, extendlow, extendhigh)
+            ctr = Mk.contourf!(
+                ax, t, x, layout[row,col].var;
+                levels, extendlow, extendhigh, colormap=diff ? :vik : :viridis
+            )
             Mk.Colorbar(subfig[1,2], ctr; ticks)
             if diff
                 Mk.contour!(ax, t, x, layout[row,col].var; levels=[0], color=:black)
