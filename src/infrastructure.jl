@@ -132,11 +132,15 @@ Singleton type representing the classic idealised climate model by Wagner & Eise
 struct ClassicModel <: AbstractModel end
 
 """
-    ModelDiff{B<:AbstractModel, S<:AbstractModel} <: AbstractModel
+    ModelDiff <: AbstractModel
+    ModelDiff(modelA::AbstractModel, modelB::AbstractModel)
 
-A type representing the difference (A-B) between two models `A` and `B`.
+A type representing the difference (A-B), retaining both model instances and their settings.
 """
-struct ModelDiff{A<:AbstractModel, B<:AbstractModel} <: AbstractModel end
+struct ModelDiff <: AbstractModel
+    modelA::AbstractModel
+    modelB::AbstractModel
+end # struct ModelDiff
 
 """
     AbstractSolver
@@ -349,6 +353,10 @@ end # struct SpaceTime{F}
 SpaceTime{identity}(nx::Int, nt::Int, dur::Int; kwargs...) = SpaceTime{identity}((0.0, 1.0), nx, nt, dur; kwargs...)
 SpaceTime{sin}(nx::Int, nt::Int, dur::Int; kwargs...) = SpaceTime{sin}((0.0, pi/2), nx, nt, dur; kwargs...)
 SpaceTime(args...; kwargs...) = SpaceTime{identity}(args...; kwargs...)
+
+Base.:(==)(sx::SpaceTime, sy::SpaceTime)::Bool =
+    typeof(sx) === typeof(sy) &&
+    all(field -> getfield(sx, field) == getfield(sy, field), fieldnames(typeof(sx)))
 
 Base.show(io::IO, st::SpaceTime)::Nothing = print(
     io, typeof(st), '(', st.nx, ", ", st.nt, ", ", st.dur, ')'
@@ -609,14 +617,14 @@ monochromatic(
 )::Spectrum = Spectrum(freq, @. Hs^2 / 16 * exp(-(freq - 2pi/Tp)^2 / 2eps) / sqrt(2pi * eps))
 
 """
-    Solutions{M,F,V}
+    Solutions{F,V}
 
-An object to store model solutions. Type parameter `M` is the model type (`MIZModel` or
-`ClassicModel`); `F` is the function used to map the uniform grid to the model grid in
-`SpaceTime{F}`; `V` is a boolean indicating whether the climate forcing is variable.
-`V` is `true` for variable forcing.
+An object to store model solutions. Type parameter `F` is the function used to map the
+uniform grid to the model grid in `SpaceTime{F}`; `V` is a boolean indicating whether the
+climate forcing is variable. `V` is `true` for variable forcing.
 
 # Fields
+- `model::AbstractModel`: model instance, including its component settings
 - `spacetime::SpaceTime{F}`: space and time on which solutions are defined
 - `ts::Vec`: time vector for stored solutions
 - `forcing::Forcing{V}`: climate forcing
@@ -635,7 +643,8 @@ a vector of vectors. For example, `raw.E[ti]::Vector{Float64}` stores the soluti
 enthalpy at time step `ts[ti]::Float64`, and `annual.avg.T[y]::Vector{Float64}` stores
 the annual average temperature for year `y::Int`.
 """
-struct Solutions{M<:AbstractModel,F,V}
+struct Solutions{F,V}
+    model::AbstractModel # model used to obtain solution
     spacetime::SpaceTime{F} # space and time which solutions are defined on
     ts::Vec # time vector for stored solution
     forcing::Forcing{V} # climate forcing
@@ -649,10 +658,10 @@ struct Solutions{M<:AbstractModel,F,V}
     } # seasonal peak and annual avg
     spectrum_ref::Ref{Spectrum} # spectrum used for WIModel, if applicable
 
-    function Solutions{M}(
-        st::SpaceTime{F}, forcing::Forcing{V}, par::Collection, init::Collection{Vec},
+    function Solutions(
+        model::AbstractModel, st::SpaceTime{F}, forcing::Forcing{V}, par::Collection, init::Collection{Vec},
         vars::Set{Symbol}, lastonly::Bool=true; solver::AbstractSolver
-    ) where {M<:AbstractModel, F, V} # Solutions
+    ) where {F, V} # Solutions
         if lastonly
             dur_store = 1
             ts::Vec = st.dur-1 + st.dt/2 : st.dt : st.dur - st.dt/2
@@ -666,7 +675,8 @@ struct Solutions{M<:AbstractModel,F,V}
         # construct seasonal solution storage template
         seasonaltemp = Collection{Vector{Vec}}()
         foreach(var -> (seasonaltemp[var] = Vector{Vec}(undef, st.dur)), vars)
-        return new{M,F,V}(
+        return new{F,V}(
+            model,
             st, # spacetime
             ts,
             forcing,
@@ -683,27 +693,25 @@ struct Solutions{M<:AbstractModel,F,V}
             Ref{Spectrum}() # spectrum_ref
         ) # new
     end # function Solutions
-end # struct Solutions{M,F,V}
+end # struct Solutions{F,V}
 
 function Base.:-(
-    sx::Solutions{X,F,false}, sy::Solutions{Y,F,false}
-)::Solutions{ModelDiff{X,Y},F,false} where {X<:AbstractModel, Y<:AbstractModel, F}
-    (sx.spacetime.x == sy.spacetime.x && sx.spacetime.t == sy.spacetime.t) ||
+    sx::Solutions{F,false}, sy::Solutions{F,false}
+)::Solutions{F,false} where F
+    sx.spacetime == sy.spacetime ||
         throw(
             ArgumentError(
                 "Cannot compute difference of solutions defined on different space-time grids."
             )
         ) # throw
-    st = sx.spacetime.dur == sy.spacetime.dur ?
-        sx.spacetime :
-        SpaceTime{F}(sx.spacetime.x, sx.spacetime.t, max(sx.spacetime.dur, sy.spacetime.dur))
     forcing = Forcing(sx.forcing.base - sy.forcing.base)
     par = uniqueunion(sx.parameters, sy.parameters)
     init = uniqueunion(sx.initconds, sy.initconds)
     vars = intersect(propertynames(sx.raw), propertynames(sy.raw))
     lastonly = sx.lastonly || sy.lastonly
     solver = DiffSolver(sx.solver, sy.solver)
-    diffsol = Solutions{ModelDiff{X,Y}}(st, forcing, par, init, vars, lastonly; solver)
+    st = sx.spacetime
+    diffsol = Solutions(ModelDiff(sx.model, sy.model), st, forcing, par, init, vars, lastonly; solver)
     xinx = findall(in(diffsol.ts), sx.ts)
     yinx = findall(in(diffsol.ts), sy.ts)
     foreach(var -> (diffsol.raw[var] = sx.raw[var][xinx] .- sy.raw[var][yinx]), vars)
@@ -713,7 +721,7 @@ function Base.:-(
     return diffsol
 end # function Base.:-
 
-soldiff(sx::Solutions, sy::Solutions) = sx - sy # -> Solutions{ModelDiff,F,false}
+soldiff(sx::Solutions, sy::Solutions) = sx - sy # -> Solutions{F,false}
 
 Base.show(io::IO, sols::Solutions)::Nothing = print(
     io,
@@ -736,7 +744,8 @@ function Base.show(io::IO, ::MIME"text/plain", sols::Solutions)::Nothing
     return nothing
 end # function Base.show
 
-get_spectrum(sol::Solutions{WIModel})::Spectrum = sol.spectrum_ref[] # -> Spectrum
+get_spectrum(sol::Solutions)::Spectrum = get_spectrum(sol.model, sol)
+get_spectrum(::WIModel, sol::Solutions)::Spectrum = sol.spectrum_ref[]
 
 const _secyear = 31536000 # number of seconds in a year
 
@@ -1069,8 +1078,8 @@ julia> annual_mean(forcing, st, 24)
 annual_mean(forcing::Forcing, st::SpaceTime, year::Int)::Float64 = Stats.mean(forcing.(year-1 .+ st.t))
 
 function savesol!(
-    sols::Solutions{M,F,C}, annusol::Solutions{M,F,C}, vars::Collection{Vec}, tinx::Int
-)::Solutions{M,F,C} where {M<:AbstractModel, F, C}
+    sols::Solutions{F,C}, annusol::Solutions{F,C}, vars::Collection{Vec}, tinx::Int
+)::Solutions{F,C} where {F, C}
     varscp = deepcopy(vars) # avoid reference issues
     year = ceil(Int, sols.spacetime.T[tinx])
     ti = mod1(tinx, sols.spacetime.nt) # index of time in the year
@@ -1137,7 +1146,7 @@ julia> ice_area(phi, x)
 1.7001177979051808e8
 ```
 """
-function ice_area(phi::Vector, x::Vector) # -> Number
+function ice_area(phi::AbstractVector, x::Vector) # -> Number
     int = Intgr.solve(Intgr.SampledIntegralProblem(phi, x), Intgr.SimpsonsRule())
     if !Intgr.SciMLBase.successful_retcode(int)
         @warn "Integral did not converge when computing ice area. Result may be inaccurate."
@@ -1161,9 +1170,10 @@ julia> ice_area(sols, :summer, 30)
 0.43981792357403693
 ```
 """
-ice_area(sols::Solutions{ClassicModel}, season::Symbol, year::Integer) = # -> Real
-    ice_area((getproperty(sols.annual, season).E[year].<0), sols.spacetime.x)
-ice_area(sols::Solutions{<:Union{MIZModel,WIModel}}, season::Symbol, year::Integer) = # -> Real
+ice_area(sols::Solutions, season::Symbol, year::Integer) = ice_area(sols.model, sols, season, year)
+ice_area(::ClassicModel, sols::Solutions, season::Symbol, year::Integer) = # -> Real
+    ice_area(getproperty(sols.annual, season).E[year].<0, sols.spacetime.x)
+ice_area(::Union{MIZModel,WIModel}, sols::Solutions, season::Symbol, year::Integer) = # -> Real
     ice_area(getproperty(sols.annual, season).phi[year], sols.spacetime.x)
 
 # stub for functions for each model
@@ -1171,18 +1181,18 @@ function step! end
 function initialise end
 
 function create_storages(
-    ::M, solvars::Set{Symbol}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
+    model::AbstractModel, solvars::Set{Symbol}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     solver::AbstractSolver, lastonly::Bool
-) where M<:AbstractModel # -> Tuple{Collection{Vec},Solutions{M,F,C},Solutions{M,F,C}}
+) # -> Tuple{Collection{Vec},Solutions{F,C},Solutions{F,C}}
     vars = deepcopy(init)
-    sols = Solutions{M}(st, forcing, par, init, solvars, lastonly; solver)
-    annusol = Solutions{M}(st, forcing, par, init, solvars, true; solver) # for calculating annual means
+    sols = Solutions(model, st, forcing, par, init, solvars, lastonly; solver)
+    annusol = Solutions(model, st, forcing, par, init, solvars, true; solver) # for calculating annual means
     return (vars, sols, annusol)
 end # function create_storages
 
 """
-    integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; solver::AbstractSolver=ActiveSetSolver(), lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{ClassicModel,F,C}
-    integrate(model::WIModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; solver::AbstractSolver=ActiveSetSolver(), lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum) -> Solutions{M,F,C}
+    integrate(model::Union{MIZModel,ClassicModel}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; solver::AbstractSolver=ActiveSetSolver(), lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{F,C}
+    integrate(model::WIModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec}; solver::AbstractSolver=ActiveSetSolver(), lastonly::Bool=true, updatefreq::Float64=1.0, spectrum::Spectrum) -> Solutions{F,C}
 
 Integrate the specified model over the given `SpaceTime` with climate `Forcing`, model
 parameters `par`, and initial conditions `init`. Results and inputs are stored in a
@@ -1202,7 +1212,7 @@ Refer to the documentation of the module `EnergyBalanceModel` for an example.
 function integrate(
     model::M, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     lastonly::Bool=true, updatefreq::Real=1.0, solver::AbstractSolver=ActiveSetSolver(), kwargs...
-) where M<:Union{ClassicModel,MIZModel,WIModel} # -> Solutions{M,F,C}
+) where M<:Union{ClassicModel,MIZModel,WIModel} # -> Solutions{F,C}
     # initialise for WIModel
     spectrum = get(kwargs, :spectrum, nothing)
     if M === WIModel
@@ -1245,7 +1255,7 @@ function integrate(
 end # function integrate
 
 """
-    solve(prob::EBMProblem, solver::AbstractSolver=ActiveSetSolver(); lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{M,F,C}
+    solve(prob::EBMProblem, solver::AbstractSolver=ActiveSetSolver(); lastonly::Bool=true, updatefreq::Float64=1.0) -> Solutions{F,C}
 
 Integrate the `EBMProblem` `prob` and return the results in a `Solutions` object. This is
 the high-level entry point to `integrate` from `EBMProblem`. The `solver` selects the scheme
@@ -1270,7 +1280,8 @@ Integrating WIModel
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  0:39/-0:00 2575.71/sec                     Done ✓
  t = 50.0
-Solutions{WIModel, sin, false} with:
+Solutions{sin, false} with:
+  model: WIModel(ViscousAttenuation())
   12 solution variables: Set([:Ti, :n, :D, :h, :lambda, :phi, :Ew, :E, :Tw, :T, :Ei, :Ewave])
   on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
   and 2000 timesteps: 49.00025:0.0005:49.99975

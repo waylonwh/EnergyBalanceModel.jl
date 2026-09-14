@@ -76,8 +76,8 @@ for model in filter(!=(ModelDiff), IU.subtypes(AbstractModel))
     namelower = lowercase(split(string(model), '.')[end])
     @eval default_layout(::$model)::Layout{Symbol} = deepcopy($(Symbol(namelower, "_layout")))
 end # for model
-function default_layout(::ModelDiff{A,B})::Layout{Symbol} where {A<:AbstractModel, B<:AbstractModel}
-    layout = (A === ClassicModel || B === ClassicModel) ?
+function default_layout(model::ModelDiff)::Layout{Symbol}
+    layout = (model.modelA isa ClassicModel || model.modelB isa ClassicModel) ?
         deepcopy(classicmodel_layout) : deepcopy(mizmodel_layout)
     foreach(
         i -> layout.titles[i] = Mk.latexstring(raw"$\Delta ", layout.titles[i][2:end]),
@@ -225,15 +225,15 @@ function will find available backend if not specified.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
 """
 function plot_raw(
-    sols::Solutions{M},
+    sols::Solutions,
     into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure();
-    layout::Layout{Symbol}=default_layout(M()),
+    layout::Layout{Symbol}=default_layout(sols.model),
     inspect::Bool=false,
     xsizelim::Int=1000,
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
     trange::NTuple{2,Real}=extrema(sols.ts)
-) where M<:AbstractModel # -> Union{Mk.Figure,Mk.GridPosition}
+) # -> Union{Mk.Figure,Mk.GridPosition}
     xinx, tinx = limit_size(sols.spacetime.x, sols.ts, xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for linx in eachindex(layout)
@@ -241,7 +241,7 @@ function plot_raw(
     end # for inx
     return contourf_tiles(
         sols.ts[tinx], sols.spacetime.x[xinx], datatitle, into;
-        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff
+        xlim=xrange, tlim=trange, inspect, diff=sols.model isa ModelDiff
     )
 end # function plot_raw
 
@@ -265,15 +265,15 @@ function will find available backend if not specified.
 - `trange::NTuple{2,Real}`: Range of time steps to plot.
 """
 function plot_avg(
-    sols::Solutions{M},
+    sols::Solutions,
     into::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure();
-    layout::Layout{Symbol}=default_layout(M()),
+    layout::Layout{Symbol}=default_layout(sols.model),
     inspect::Bool=false,
     xsizelim::Int=1000,
     tsizelim::Int=1000,
     xrange::NTuple{2,Real}=extrema(sols.spacetime.x),
     trange::NTuple{2,Real}=(1, sols.spacetime.dur),
-) where M<:AbstractModel # -> Union{Mk.Figure,Mk.GridPosition}
+) # -> Union{Mk.Figure,Mk.GridPosition}
     xinx, tinx = limit_size(sols.spacetime.x, collect(1:sols.spacetime.dur), xsizelim, tsizelim, xrange, trange)
     datatitle = Layout(Matrix{Matrix{Float64}}(undef, size(layout)), layout.titles)
     @simd for linx in eachindex(layout)
@@ -281,7 +281,7 @@ function plot_avg(
     end # for inx
     return contourf_tiles(
         collect(tinx), sols.spacetime.x[xinx], datatitle, into;
-        xlim=xrange, tlim=trange, inspect, diff=M<:ModelDiff
+        xlim=xrange, tlim=trange, inspect, diff=sols.model isa ModelDiff
     )
 end # function plot_avg
 
@@ -310,7 +310,7 @@ annual average are thick solid.
     plot.
 """
 function plot_seasonal(
-    sols::Solutions{<:AbstractModel,F,true},
+    sols::Solutions{F,true},
     fig::Union{Mk.Figure,Mk.GridPosition}=Mk.Figure();
     xfunc::Function=((sols, year) -> hemispheric_mean(sols.annual.avg.T[year], sols.spacetime.x)),
     yfunc::Function=ice_area,

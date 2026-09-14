@@ -213,7 +213,7 @@ updateD!(newD::Float64, xi::Int, vars::Collection{Vec}, l::Float64=1.0, L::Float
 function Infrastructure.initialise(
     model::WIModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     solver::AbstractSolver, lastonly::Bool=true, spectrum::Spectrum
-) # -> Tuple{Collection{Vec}, Solutions{WIModel,F,V}, Solutions{WIModel,F,V}}
+) # -> Tuple{Collection{Vec}, Solutions{F,V}, Solutions{F,V}}
     vars, sols, annusol = MIZEBM._initialise(model, st, forcing, par, init; solver, lastonly)
     sols.spectrum_ref[] = deepcopy(spectrum) # store spectrum in sols for later reference
     annusol.spectrum_ref[] = deepcopy(spectrum)

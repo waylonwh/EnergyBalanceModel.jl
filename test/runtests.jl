@@ -31,9 +31,9 @@ lastyear_hemi_mean(sols::Solutions, var::Symbol)::Float64 =
         WIModel(), st, forcing, wimpar, mizinit;
         spectrum=bretschneider(3.0, 9.5), updatefreq=Inf
     )
-    @test mizsols isa Solutions{MIZModel,sin,false}
-    @test clasols isa Solutions{ClassicModel,sin,false}
-    @test wimsols isa Solutions{WIModel,sin,false}
+    @test mizsols.model isa MIZModel
+    @test clasols.model isa ClassicModel
+    @test wimsols.model.attenuation isa ViscousAttenuation
 end # @testset begin
 
 @testset "Test for annual hemispheric means" begin
@@ -44,7 +44,7 @@ end # @testset begin
 @testset "WIM" begin
     spectrum = bretschneider(3.0, 9.5)
     wimsols = integrate(WIModel(), st, forcing, wimpar, mizinit; spectrum, updatefreq=Inf)
-    @test wimsols isa Solutions{WIModel,sin,false}
+    @test wimsols isa Solutions{sin,false}
     @test EnergyBalanceModel.WIMEBM._wavenumber_ice_cache_ref[][2].key == hash(
         (Float64, spectrum.freq, wimpar.Gamma, 1e-10, wimpar)
     )
