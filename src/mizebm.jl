@@ -279,7 +279,7 @@ end # function step_temperature!
 function _initialise(
     model::Union{MIZModel,WIModel}, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     solver::AbstractSolver, lastonly::Bool
-) # -> Tuple{Collection{Vec}, Solutions{M,F,V}, Solutions{M,F,V}}
+) # -> Tuple{Collection{Vec}, Solutions{F,V}, Solutions{F,V}}
     # create storages
     solvars = Set{Symbol}((:Ei, :Ew, :D, :h, :E, :Ti, :Tw, :T, :phi, :n))
     model isa WIModel && push!(solvars, :Hs) # add wave height for WIModel
@@ -301,7 +301,7 @@ Infrastructure.initialise(
     model::MIZModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     solver::AbstractSolver, lastonly::Bool, _...
 ) = _initialise(model, st, forcing, par, init; solver, lastonly)
-    # -> Tuple{Collection{Vec}, Solutions{MIZModel,F,V}, Solutions{MIZModel,F,V}}
+    # -> Tuple{Collection{Vec}, Solutions{F,V}, Solutions{F,V}}
 
 function Infrastructure.step!(
     ::MIZModel, t::Float64, f::Float64, vars::Collection{Vec}, st::SpaceTime, par::Collection;

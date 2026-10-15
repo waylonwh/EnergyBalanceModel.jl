@@ -37,7 +37,8 @@ Integrating WIModel
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  0:39/-0:00 2575.71/sec                     Done ✓
  t = 50.0
-Solutions{WIModel, sin, false} with:
+Solutions{sin, false} with:
+  model: WIModel(ViscousAttenuation())
   12 solution variables: Set([:Ti, :n, :D, :h, :lambda, :phi, :Ew, :E, :Tw, :T, :Ei, :Ewave])
   on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
   and 2000 timesteps: 49.00025:0.0005:49.99975
@@ -58,6 +59,7 @@ details on data handling and visualisation.
 module EnergyBalanceModel
 
 export ClassicModel, MIZModel, WIModel
+export DampedMassAttenuation, EmpiricalAttenuation, ViscousAttenuation
 export ActiveSetSolver, GhostLayerSolver, NonlinearSolver
 export Collection, EBMProblem, Forcing, Solutions, SpaceTime
 export Spectrum, bretschneider, monochromatic
@@ -76,7 +78,7 @@ include("plot.jl")
 using .ClassicEBM, .Infrastructure, .MIZEBM, .Plot, .Utilities, .WIMEBM
 
 """
-    run_example(model<:AbstractModel=MIZModel(); plotbackend::Symbol=:GLMakie) -> Solutions{M,sin,false}
+    run_example(model<:AbstractModel=MIZModel(); plotbackend::Symbol=:GLMakie) -> Solutions{sin,false}
 
 Run a standard example simulation for the specified `model` (either an instance of
 `MIZModel`, `WIModel`, or `ClassicModel`). The results of the last year (year 50) are
@@ -96,7 +98,8 @@ Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  0:15/-0:00 6456.44/sec                     Done ✓
  t = 50.0
-Solutions{MIZModel, sin, false} with:
+Solutions{sin, false} with:
+  model: MIZModel()
   10 solution variables: Set([:T, :Ei, :Ti, :D, :n, :h, :phi, :Ew, :E, :Tw])
   on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
   and 2000 timesteps: 49.00025:0.0005:49.99975
@@ -107,14 +110,15 @@ Integrating
  100000/100000 [━━━━━━━━━━━━━━━━━━━━━━━━━━━]  100%
  0:18/-0:00 5702.05/sec                     Done ✓
  t = 50.0
-Solutions{ClassicModel, sin, false} with:
+Solutions{sin, false} with:
+  model: ClassicModel()
   3 solution variables: Set([:T, :h, :E])
   on 180 latitudinal gridboxes: [0.00436331, 0.0130896 … 2, 0.999914, 0.99999]
   and 2000 timesteps: 49.00025:0.0005:49.99975
   with forcing Forcing{false}(0.0) (constant forcing)
 ```
 """
-function run_example(model::M=MIZModel())::Solutions{M,sin,false} where M<:AbstractModel
+function run_example(model::M=MIZModel())::Solutions{sin,false} where M<:AbstractModel
     problem = EBMProblem(model)
     sols = solve(problem)
     try # plot results

@@ -112,7 +112,7 @@ end # function solveT
 function Infrastructure.initialise(
     model::ClassicModel, st::SpaceTime, forcing::Forcing, par::Collection, init::Collection{Vec};
     solver::AbstractSolver, lastonly::Bool, _...
-) # -> Tuple{Collection{Vec},Solutions{ClassicModel},Solutions{ClassicModel}}
+) # -> Tuple{Collection{Vec},Solutions,Solutions}
     if solver isa GhostLayerSolver
         par.cg = solver.cg
         par.tau = solver.tau
