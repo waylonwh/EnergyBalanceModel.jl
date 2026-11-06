@@ -6,12 +6,15 @@ import LinearAlgebra as LA
 import SparseArrays as SA
 import NonlinearSolve as NlinSol
 
+abstract type Surface end
+struct Ice <: Surface end
+struct Water <: Surface end
+
 # solar radiation absorbed on ice and water
-solar(x::Vec, t::Float64, ::Val{:ice}, par::Collection)::Vec =
+solar(x::Vec, t::Float64, ::Ice, par::Collection)::Vec =
     @. par.ai * (par.S0 - par.S1 * x * cos(2pi * t) - par.S2 * x^2)
-solar(x::Vec, t::Float64, ::Val{:water}, par::Collection)::Vec =
+solar(x::Vec, t::Float64, ::Water, par::Collection)::Vec =
     @. (par.a0 - par.a2 * x^2) * (par.S0 - par.S1 * x * cos(2pi * t) - par.S2 * x^2)
-solar(x::Vec, t::Float64, surface::Symbol, par::Collection)::Vec = solar(x, t, Val(surface), par)
 
 # phi-weighted average
 weighted_avg(vi::Vector, vw::Vector, phi::Vector) = @. vi*phi + (1-phi)vw # -> Vector
@@ -41,7 +44,7 @@ function stepTg!(
                     diagphi * (
                         par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h)))
                         - (par.B + cg/tau) * (LA.I-diagphi)SA.spdiagm(Tw)
-                        + SA.spdiagm(solar(st.x, t, :ice, par)) - par.A*LA.I + f*LA.I
+                        + SA.spdiagm(solar(st.x, t, Ice(), par)) - par.A*LA.I + f*LA.I
                     ) * invM
                 )frez
                 + par.Tm * diagphi*watr
@@ -54,7 +57,7 @@ solveT0(
     solver::GhostLayerSolver, x::Vector, t::Float64, h::Vector, Tg::Vector, Tw::Vector,
     phi::Vector, f::Real, par::Collection
 ) = @. ( # -> Vector
-    $(solar(x, t, :ice, par)) - par.A + f - (1-phi)Tw * (par.B + solver.cg/solver.tau)
+    $(solar(x, t, Ice(), par)) - par.A + f - (1-phi)Tw * (par.B + solver.cg/solver.tau)
     + par.Tm * (par.B + par.k/h) + solver.cg/solver.tau * Tg
 ) / (phi * (par.B + solver.cg/solver.tau) + par.k/h)
 
@@ -65,7 +68,7 @@ function T0eq(
 ) # -> Vector
     T = weighted_avg(ice_temp(T0, par), Tw, phi)
     vec = @. par.k * (par.Tm - T0) / h # SCM
-    vec .+= solar(x, t, Val(:ice), par) # solar on ice
+    vec .+= solar(x, t, Ice(), par) # solar on ice
     @. vec -= par.A + par.B * (T - par.Tm) # OLR
     vec .+= par.D * diffop * T # diffusion
     vec .+= f # forcing
@@ -97,8 +100,8 @@ function solveT0(
     f::Real, par::Collection; max_iter::Integer=10st.nx
 ) # -> Tuple{Vector,Vector}
     # constants
-    qi = solar(st.x, t, :ice, par) .- par.A .+ f # ice surface invariant flux
-    qw = solar(st.x, t, :water, par) .- par.A .+ f # water surface invariant flux
+    qi = solar(st.x, t, Ice(), par) .- par.A .+ f # ice surface invariant flux
+    qw = solar(st.x, t, Water(), par) .- par.A .+ f # water surface invariant flux
     diffop = get_diffop(st) # diffusion operator
     Ri = @. vars.phi * vars.h / par.k
     Rw = @. st.dt * (1-vars.phi)^2 / par.cw
@@ -170,7 +173,7 @@ end # function area_lead
 
 # fluxes
 function vert_flux(
-    solver::GhostLayerSolver, t::Float64, surface::Symbol, Tbar::Vector, f::Real,
+    solver::GhostLayerSolver, t::Float64, surface::Surface, Tbar::Vector, f::Real,
     st::SpaceTime, par::Collection, Tg::Vector
 ) # -> Vector
     L = @. par.A + par.B * (Tbar - par.Tm) # OLR
@@ -178,7 +181,7 @@ function vert_flux(
 end # function vert_flux
 
 function vert_flux(
-    ::Union{ActiveSetSolver,NonlinearSolver}, t::Float64, surface::Symbol, Tbar::Vector,
+    ::Union{ActiveSetSolver,NonlinearSolver}, t::Float64, surface::Surface, Tbar::Vector,
     f::Real, st::SpaceTime, par::Collection, _
 ) # -> Vector
     L = @. par.A + par.B * (Tbar - par.Tm) # OLR
@@ -311,8 +314,8 @@ function Infrastructure.step!(
     vars.n = num(vars.D, vars.phi, par) # refresh in case D was changed by wave breakup
     Ti = replace(vars.Ti, NaN=>0.0) # eliminate NaNs for calculations
     # calculate fluxes
-    Fvi = vert_flux(solver, t, :ice, vars.T, f, st, par, vars.Tg)
-    Fvw = vert_flux(solver, t, :water, vars.T, f, st, par, vars.Tg)
+    Fvi = vert_flux(solver, t, Ice(), vars.T, f, st, par, vars.Tg)
+    Fvw = vert_flux(solver, t, Water(), vars.T, f, st, par, vars.Tg)
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, vars.Flat, vars.Fbot), st.dt)
     rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, vars.Flat, vars.Fbot), st.dt)
