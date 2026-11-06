@@ -19,6 +19,16 @@ solar(x::Vec, t::Float64, ::Water, par::Collection)::Vec =
 # phi-weighted average
 weighted_avg(vi::Vector, vw::Vector, phi::Vector) = @. vi*phi + (1-phi)vw # -> Vector
 
+# OLR
+toaolr(Ti::Vector, Tw::Vector, phi::Vector, par::Collection) = # -> Vector
+    -par.A .- par.B * (weighted_avg(Ti, Tw, phi) .- par.Tm)
+olrDelta(Ti::Vector, Tw::Vector, par::Collection) = @. par.cDelta * (Tw - Ti) # -> Vector
+
+olr(Ti::Vector, Tw::Vector, phi::Vector, ::Ice, par::Collection) =
+    toaolr(Ti, Tw, phi, par) .+ (1 .- phi) .* olrDelta(Ti, Tw, par)
+olr(Ti::Vector, Tw::Vector, phi::Vector, ::Water, par::Collection) =
+    toaolr(Ti, Tw, phi, par) .- phi .* olrDelta(Ti, Tw, par)
+
 # temperatures
 water_temp(Ew::Vec, par::Collection)::Vec = @. par.Tm + Ew / par.cw
 ice_temp(T0::Vector, par::Collection) = min.(T0, par.Tm) # -> Vector
@@ -53,13 +63,17 @@ function stepTg!(
     return Tg
 end # function stepTg!
 
-solveT0(
+function solveT0(
     solver::GhostLayerSolver, x::Vector, t::Float64, h::Vector, Tg::Vector, Tw::Vector,
     phi::Vector, f::Real, par::Collection
-) = @. ( # -> Vector
-    $(solar(x, t, Ice(), par)) - par.A + f - (1-phi)Tw * (par.B + solver.cg/solver.tau)
-    + par.Tm * (par.B + par.k/h) + solver.cg/solver.tau * Tg
-) / (phi * (par.B + solver.cg/solver.tau) + par.k/h)
+) # -> Vector
+    iszero(par.cDelta) ||
+        throw(ErrorException("Non-zero OLR contrast is not implemented for the GhostLayerSolver."))
+    return @. (
+        $(solar(x, t, Ice(), par)) - par.A + f - (1-phi)Tw * (par.B + solver.cg/solver.tau)
+        + par.Tm * (par.B + par.k/h) + solver.cg/solver.tau * Tg
+    ) / (phi * (par.B + solver.cg/solver.tau) + par.k/h)
+end # function solveT0
 
 # nonlinear scheme
 function T0eq(
@@ -69,7 +83,7 @@ function T0eq(
     T = weighted_avg(ice_temp(T0, par), Tw, phi)
     vec = @. par.k * (par.Tm - T0) / h # SCM
     vec .+= solar(x, t, Ice(), par) # solar on ice
-    @. vec -= par.A + par.B * (T - par.Tm) # OLR
+    vec .+= olr(ice_temp(T0, par), Tw, phi, Ice(), par)
     vec .+= par.D * diffop * T # diffusion
     vec .+= f # forcing
     return vec
@@ -97,34 +111,35 @@ end # function solveT0
 # active set scheme
 function solveT0(
     ::ActiveSetSolver, t::Real, vars::Collection, Flat::Vector, Fbot::Vector, st::SpaceTime,
-    f::Real, par::Collection; max_iter::Integer=10st.nx
+    f::Real, par::Collection
 ) # -> Tuple{Vector,Vector}
     # constants
     qi = solar(st.x, t, Ice(), par) .- par.A .+ f # ice surface invariant flux
     qw = solar(st.x, t, Water(), par) .- par.A .+ f # water surface invariant flux
+    qlb = @. Flat + vars.phi*Fbot
+    cdeno = @. par.cw + st.dt * par.cDelta * (1-vars.phi)
+    Ri = @. vars.phi * vars.h / (par.k + par.cDelta * vars.h)
+    Rw = @. st.dt * (1-vars.phi)^2 / cdeno
+    C = @. (1-vars.phi) * (vars.Ew - st.dt * qlb) / cdeno
     diffop = get_diffop(st) # diffusion operator
-    Ri = @. vars.phi * vars.h / par.k
-    Rw = @. st.dt * (1-vars.phi)^2 / par.cw
-    latbot = @. Flat + vars.phi*Fbot
     ice = @. !iszero(vars.phi) # ice set
-    T0func(T::Vector) = @. par.Tm + vars.h/par.k * (qi - par.B * (T-par.Tm) + par.D * $(diffop*T)) # -> Vector
+    T0func(T::Vector) = @.(
+        par.Tm + vars.h / (par.k + par.cDelta*vars.h) * (qi - (par.B-par.cDelta) * (T-par.Tm) + par.D * $(diffop*T))
+    ) # -> Vector
     # open water and melting ice
-    denow = @. 1 + par.B * Rw # open water coefficient denominator
-    rwnum = @. (Rw * (qw+par.Fb) + (1-vars.phi)/par.cw * (vars.Ew - st.dt*latbot))
+    denow = @. 1 + (par.B-par.cDelta) * Rw # open water coefficient denominator
+    rwnum = @. Rw * (qw+par.Fb) + C # shared numerator for r
     sw = @. Rw / denow # open water diffusion coefficient
-    rw = rwnum ./ denow
-        # open water right-hand side
+    rw = rwnum ./ denow # open water right-hand side
     # freezing ice
-    denof = @. 1 + par.B * (Ri+Rw) # freezing ice coefficient denominator
+    denof = @. 1 + (par.B-par.cDelta) * (Ri+Rw) # freezing ice coefficient denominator
     sf = @. (Ri+Rw) / denof # freezing ice diffusion coefficient
-    rf = @. (Ri*qi + rwnum) / denof
-        # freezing ice right-hand side
+    rf = @. (Ri*qi + rwnum) / denof # freezing ice right-hand side
     # iterate to steady melting set
     T0 = copy(get(vars, :T0, @. par.Tm + (vars.Ei + vars.Ew) / par.cw)) # for initial guess of the melting set
     nextmelt = @. T0>=par.Tm && ice # initial guess of the active set
-    iter = 0 # number of iterations
     local T
-    while true
+    for _ in 1:(st.nx+2)
         melting = copy(nextmelt)
         # construct sets
         s = @. sf * !melting + sw * melting # diffusion coefficient
@@ -134,17 +149,18 @@ function solveT0(
         T0 .= T0func(T)
         # check
         @. nextmelt = T0>=par.Tm && ice # update melting set
-        iter += 1
         nextmelt == melting && break # while true; if melting set is steady
-        if iter >= max_iter
-            @warn(
-                "Active set solver did not converge when solving for surface temperature. Result may be inaccurate.",
-                iter, (1:st.nx)[nextmelt .!== melting]
+    end # for _
+    Tw = @.(
+        par.Tm
+        + (
+            vars.Ew - st.dt * qlb +
+            st.dt * (1-vars.phi) * (
+                qw + par.Fb - (par.B-par.cDelta) * (T-par.Tm) + par.D * $(diffop*T)
             )
-            break # while true
-        end # if > max_iter
-    end # while true
-    return (T0, T)
+        ) / cdeno
+    ) # Tw
+    return (T0, T, Tw)
 end # function solveT0
 
 # lateral melt rate
@@ -172,21 +188,19 @@ function area_lead(D::Vec, phi::Vec, n::Vec, par::Collection)::Vec
 end # function area_lead
 
 # fluxes
-function vert_flux(
-    solver::GhostLayerSolver, t::Float64, surface::Surface, Tbar::Vector, f::Real,
-    st::SpaceTime, par::Collection, Tg::Vector
-) # -> Vector
-    L = @. par.A + par.B * (Tbar - par.Tm) # OLR
-    return solar(st.x, t, surface, par) .- L .+ solver.cg/solver.tau * (Tg-Tbar) .+ par.Fb .+ f
-end # function vert_flux
+vert_flux(
+    solver::GhostLayerSolver, t::Float64, surface::Surface, Ti::Vector, Tw::Vector,
+    phi::Vector, f::Real, st::SpaceTime, par::Collection, Tg::Vector
+) = # -> Vector
+    solar(st.x, t, surface, par) .+ olr(Ti, Tw, phi, surface, par) .+
+    solver.cg/solver.tau * (Tg-weighted_avg(Ti, Tw, phi)) .+ par.Fb .+ f
 
-function vert_flux(
-    ::Union{ActiveSetSolver,NonlinearSolver}, t::Float64, surface::Surface, Tbar::Vector,
-    f::Real, st::SpaceTime, par::Collection, _
-) # -> Vector
-    L = @. par.A + par.B * (Tbar - par.Tm) # OLR
-    return solar(st.x, t, surface, par) .- L .+ par.D * get_diffop(st) * Tbar .+ par.Fb .+ f
-end # function vert_flux
+vert_flux(
+    ::Union{ActiveSetSolver,NonlinearSolver}, t::Float64, surface::Surface, Ti::Vector,
+    Tw::Vector, phi::Vector, f::Real, st::SpaceTime, par::Collection, _
+) = # -> Vector
+    solar(st.x, t, surface, par) .+ olr(Ti, Tw, phi, surface, par) .+
+    par.D * get_diffop(st) * weighted_avg(Ti, Tw, phi) .+ par.Fb .+ f
 
 function lat_flux(h::Vec, D::Vec, Tw::Vec, phi::Vec, par::Collection)::Vec
     Flat = @. phi * h * par.Lf * $(wlat(Tw, par)) * pi / (par.alpha*D)
@@ -273,7 +287,7 @@ function step_temperature!(
     solver::ActiveSetSolver, vars::Collection{<:Vector}, t::Real, st::SpaceTime, f::Real,
     par::Collection, Flat::Vector, Fbot::Vector; _...
 )
-    vars.T0, vars.T = solveT0(solver, t, vars, Flat, Fbot, st, f, par; solver.max_iter) # !
+    vars.T0, vars.T, vars.nextTw = solveT0(solver, t, vars, Flat, Fbot, st, f, par) # !
     vars.Ti = ice_temp(vars.T0, par) # !
     return vars.T
 end # function step_temperature!
@@ -312,10 +326,11 @@ function Infrastructure.step!(
 )::Collection{Vec}
     # prepare for the step
     vars.n = num(vars.D, vars.phi, par) # refresh in case D was changed by wave breakup
-    Ti = replace(vars.Ti, NaN=>0.0) # eliminate NaNs for calculations
+    sanTi = replace(vars.Ti, NaN=>0.0) # eliminate NaNs for calculations
+    Tw = solver isa ActiveSetSolver ? vars.nextTw : vars.Tw # use advanced Tw for ActiveSetSolver
     # calculate fluxes
-    Fvi = vert_flux(solver, t, Ice(), vars.T, f, st, par, vars.Tg)
-    Fvw = vert_flux(solver, t, Water(), vars.T, f, st, par, vars.Tg)
+    Fvi = vert_flux(solver, t, Ice(), sanTi, Tw, vars.phi, f, st, par, vars.Tg)
+    Fvw = vert_flux(solver, t, Water(), sanTi, Tw, vars.phi, f, st, par, vars.Tg)
     # update enthalpy
     rEi = forward_euler(vars.Ei, Ei_t(vars.phi, Fvi, vars.Flat, vars.Fbot), st.dt)
     rEw = forward_euler(vars.Ew, Ew_t(vars.phi, Fvw, vars.Flat, vars.Fbot), st.dt)
@@ -335,7 +350,7 @@ function Infrastructure.step!(
     ) # !
     vars.D = forward_euler(
         average(vars.D, par.Dmin, vars.phi, phip), # new pancakes
-        D_t(lasth, vars.D, Ti, vars.Tw, vars.phi, Ql, par; breakup),
+        D_t(lasth, vars.D, sanTi, vars.Tw, vars.phi, Ql, par; breakup),
         st.dt
     ) # !
     clamp!(vars.h, 0, Inf) # avoid overshooting to negative thickness

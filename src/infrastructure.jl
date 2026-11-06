@@ -171,22 +171,14 @@ end # struct GhostLayerSolver
 
 """
     ActiveSetSolver <: AbstractSolver
-    ActiveSetSolver(max_iter::Integer=1000)
+    ActiveSetSolver()
 
 Select the active set scheme, which classifies the gridboxes as freezing or melting at each
 timestep and iteratively solves the linear system implied by that classification for the
 surface temperature. This is the default scheme used by [`solve`](@ref) and
 [`integrate`](@ref).
-
-# Fields
-- `max_iter::Int`: maximum number of iterations allowed for the active set to converge. If
-    the classification has not settled within `max_iter` iterations, a warning is issued and
-    the last iterate is used.
 """
-struct ActiveSetSolver <: AbstractSolver
-    max_iter::Int # maximum number of iterations to converge active set
-    ActiveSetSolver(max_iter::Integer=1000) = new(max_iter)
-end # struct ActiveSetSolver
+struct ActiveSetSolver <: AbstractSolver end
 
 """
     NonlinearSolver <: AbstractSolver
@@ -817,6 +809,7 @@ const default_parval = Collection{Float64}(
     :cp => 3980.0 / _secyear, # Specific heat for seawater near freezing (W y kg^-1 K^-1)
     :ch => 6e-3, # Heat transfer coefficient
     :u0 => 0.01_secyear, # Surface friction velocity (m y^-1)
+    :cDelta => 2.1, # OLR contrast linear coefficient (W m^-2 K^-1)
     # WIM
     :rhoiw => 0.9, # Ice water density ratio
     :Y => 5.5e9, # Effective Young's modulus (Pa)
@@ -833,7 +826,7 @@ const classicmodel_parvars = Set{Symbol}(
 )
 const mizmodel_parvars = push!(
     copy(classicmodel_parvars),
-    :Tm, :m1, :m2, :alpha, :rl, :Dmin, :Dmax, :hmin, :kappa, :rhow, :cp, :ch, :u0
+    :Tm, :m1, :m2, :alpha, :rl, :Dmin, :Dmax, :hmin, :kappa, :rhow, :cp, :ch, :u0, :cDelta
 )
 const wimodel_parvars = push!(
     copy(mizmodel_parvars),
@@ -1317,7 +1310,7 @@ used to advance the surface temperature at each timestep, defaulting to
 [`ActiveSetSolver`](@ref); see [`GhostLayerSolver`](@ref) and [`NonlinearSolver`](@ref) for
 the alternatives. Each solver also carries the numerical settings of its scheme in its
 fields, so pass a configured instance to override them, e.g.
-`solve(prob, ActiveSetSolver(500))`.
+`solve(prob, ActiveSetSolver())`.
 
 When `lastonly=true`, only the last year of the solution is stored for each timestep,
 otherwise the full solution is stored. A progress bar is displayed and updated with
