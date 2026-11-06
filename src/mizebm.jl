@@ -326,7 +326,7 @@ function Infrastructure.step!(
 )::Collection{Vec}
     # prepare for the step
     vars.n = num(vars.D, vars.phi, par) # refresh in case D was changed by wave breakup
-    sanTi = replace(vars.Ti, NaN=>0.0) # eliminate NaNs for calculations
+    sanTi = replace(vars.Ti, NaN=>par.Tm) # eliminate NaNs for calculations
     Tw = solver isa ActiveSetSolver ? vars.nextTw : vars.Tw # use advanced Tw for ActiveSetSolver
     # calculate fluxes
     Fvi = vert_flux(solver, t, Ice(), sanTi, Tw, vars.phi, f, st, par, vars.Tg)
