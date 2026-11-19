@@ -41,7 +41,7 @@ function stepTg!(
     frez = @. (T0<par.Tm) & (h>0)
     watr = .~frez
     diagphi = SA.spdiagm(phi)
-    invM = SA.spdiagm(inv.(phi * (par.B + cg/tau) .+ par.k./h))
+    invM = SA.spdiagm(inv.(phi * (par.B + cg/tau) .+ (1 .- phi) * par.cDelta .+ par.k./h))
     Tg .= (
             (1+st.dt/tau)LA.I
             - st.dt*par.D/cg * get_diffop(st)
@@ -53,7 +53,7 @@ function stepTg!(
                 + (
                     diagphi * (
                         par.Tm * (par.B*LA.I + par.k*LA.I * SA.spdiagm(inv.(h)))
-                        - (par.B + cg/tau) * (LA.I-diagphi)SA.spdiagm(Tw)
+                        - (par.B + cg/tau - par.cDelta) * (LA.I-diagphi)SA.spdiagm(Tw)
                         + SA.spdiagm(solar(st.x, t, Ice(), par)) - par.A*LA.I + f*LA.I
                     ) * invM
                 )frez
@@ -67,12 +67,10 @@ function solveT0(
     solver::GhostLayerSolver, x::Vector, t::Float64, h::Vector, Tg::Vector, Tw::Vector,
     phi::Vector, f::Real, par::Collection
 ) # -> Vector
-    iszero(par.cDelta) ||
-        throw(ErrorException("Non-zero OLR contrast is not implemented for the GhostLayerSolver."))
     return @. (
-        $(solar(x, t, Ice(), par)) - par.A + f - (1-phi)Tw * (par.B + solver.cg/solver.tau)
+        $(solar(x, t, Ice(), par)) - par.A + f - (1-phi)Tw * (par.B + solver.cg/solver.tau - par.cDelta)
         + par.Tm * (par.B + par.k/h) + solver.cg/solver.tau * Tg
-    ) / (phi * (par.B + solver.cg/solver.tau) + par.k/h)
+    ) / (phi * (par.B + solver.cg/solver.tau) + (1-phi)*par.cDelta + par.k/h)
 end # function solveT0
 
 # nonlinear scheme
