@@ -809,7 +809,7 @@ const default_parval = Collection{Float64}(
     :cp => 3980.0 / _secyear, # Specific heat for seawater near freezing (W y kg^-1 K^-1)
     :ch => 6e-3, # Heat transfer coefficient
     :u0 => 0.01_secyear, # Surface friction velocity (m y^-1)
-    :cDelta => 2.1, # OLR contrast linear coefficient (W m^-2 K^-1)
+    :cDelta => 22.78, # OLR contrast linear coefficient from MERRA-2 2025 (W m^-2 K^-1)
     # WIM
     :rhoiw => 0.9, # Ice water density ratio
     :Y => 5.5e9, # Effective Young's modulus (Pa)
