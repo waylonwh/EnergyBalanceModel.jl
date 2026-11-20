@@ -62,8 +62,7 @@ function solveT0(
 end # function solveT0
 
 function solveT(
-    vars::Collection{<:Vector}, aS::Vector, st::SpaceTime, par::Collection, f::Real;
-    max_iter::Integer=10st.nx
+    vars::Collection{<:Vector}, aS::Vector, st::SpaceTime, par::Collection, f::Real
 ) # -> Vector
     # constants
     q = @. aS - par.A + f # surface invariant flux
@@ -81,8 +80,7 @@ function solveT(
     # interate to steady melting set
     T = copy(get(vars, :T, @. vars.E / par.cw)) # for initial guess of the melting set
     nextmelt = @. T>=0 && !water # initial guess
-    iter = 0 # number of iterations
-    while true
+    for _ in 1:(st.nx+2)
         melting = copy(nextmelt)
         # construct sets
         sit = copy(s)
@@ -96,16 +94,8 @@ function solveT(
         T .= (LA.I - par.D * SA.spdiagm(sit) * diffop) \ (0 .+ rit)
         # check
         @. nextmelt =  !water && q - par.B*T + par.D * $(diffop*T) >= 0
-        iter += 1
         nextmelt == melting && break # while true; break if melting set is steady
-        if iter >= max_iter
-            @warn(
-                "Maximum number of iterations reached when solving for melting set. Result may be inaccurate.",
-                iter, (1:st.nx)[nextmelt .!== melting]
-            )
-            break # while true
-        end # if >
-    end # while true
+    end # for _
     return T
 end # function solveT
 
@@ -168,7 +158,7 @@ function step_temperature!(
     solver::ActiveSetSolver, vars::Collection{<:Vector}, aS::Vector, st::SpaceTime, f::Real,
     par::Collection, _...
 ) # -> Tuple{Vector,Vector}
-    vars.T = solveT(vars, aS, st, par, f; solver.max_iter) # !
+    vars.T = solveT(vars, aS, st, par, f) # !
     C = @. aS + par.D * $(get_diffop(st)*vars.T) - par.A + f
     @. vars.E += st.dt * (C - par.B*vars.T + par.Fb) # !
     return (vars.T, vars.E)
